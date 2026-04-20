@@ -48,6 +48,16 @@ The original 74-file TypeScript codebase is archived verbatim under [`reference/
   - PR gets squash-merged, issues auto-close via `Closes #N`
   - Worktrees and local branches cleaned up
 - **Auto-merge docs/config/infra PRs.** Hold for review: anything touching game logic once it exists, netcode, or user-visible behavior.
+- **Plans must explicitly invoke relevant skills.** Not optional. Specifically:
+  - UI-touching epics (#8 lobby, weapon selector, HUD, anything rendering to DOM): include `/frontend-design` as a plan step so we don't ship generic-AI-looking UI
+  - Pre-deploy (#13) and anything touching auth/WebSocket security: include `/security-review` before merge
+  - Risky PRs (netcode, response shape changes): include `/review` for a second pass
+
+## Plan-time resources
+
+Before writing a plan, pull current docs via Context7 MCP (installed user-scope) for any library the epic depends on. Don't rely on training-cutoff knowledge for specific API surfaces (method names, config shapes, breaking changes). Example query pattern: `resolve-library-id planck.js` then `get-library-docs` with a focused topic like "collision filtering" or "distance joint".
+
+When Context7 doesn't have a library or the topic is non-library (game netcode theory, asset licensing, hosting), use WebFetch against the authoritative URL. See "References by epic" below.
 
 ## Pick-up ritual
 
@@ -66,3 +76,67 @@ When resuming work after `/clear` or a new session:
 - **planck.js over Rapier**: snappier cold load (no WASM init); casual multiplayer game has few bodies so WASM perf advantage doesn't pay off
 - **Authoritative server over lockstep**: reference's lockstep was brittle; turn-based gameplay means only active player's inputs matter, keeping netcode simple
 - **Room codes in-memory (not DB-backed)**: 4 letters = 456k combos, collisions rare, games ephemeral, no account system needed
+
+## References by epic
+
+Consult these at plan time. Context7 for library docs; WebFetch for articles. Don't guess from training-cutoff knowledge; these surfaces change.
+
+### Epic 3 — Destructible terrain
+- planck.js (via Context7): body construction, collision filtering, polygon fixtures, body destruction
+- [Canvas pixel-mask destructible terrain pattern](https://seblagarde.wordpress.com/2012/01/08/pixel-perfect-2d/) (article; same technique used in reference `Terrain.ts`)
+- Reference: `reference/src/environment/Terrain.ts`, `reference/src/system/Physics.ts`
+
+### Epic 4 — Worm physics + movement
+- planck.js (via Context7): distance joint (ninja rope), contact sensors (foot detection), applyForce vs applyImpulse
+- Reference: `reference/src/Worm.ts`, `reference/src/weapons/NinjaRope.ts`, `reference/src/weapons/JetPack.ts`
+
+### Epic 5 — Turn state + win condition
+- No external docs needed; pure logic port
+- Reference: `reference/src/GameStateManager.ts`, `reference/src/gui/CountDownTimer.ts`
+
+### Epic 6 — Weapon system
+- planck.js (via Context7): raycast (hitscan weapons: shotgun, minigun), body types (sensors for mines)
+- Reference: `reference/src/weapons/*.ts`, `reference/src/weapons/WeaponManager.ts`
+- Wind/trajectory math: basic kinematics, no library needed
+
+### Epic 7 — Maps
+- No external library needed for static maps
+- For map JSON format, reference Tiled map editor conventions as inspiration: [Tiled JSON format](https://doc.mapeditor.org/en/stable/reference/json-map-format/)
+
+### Epic 8 — Lobby UI
+- **Invoke `/frontend-design` skill as a plan step.** Do not write UI directly.
+- Context7: Socket.IO client library for the join/create flow integration point
+- Inspiration references: Hedgewars lobby UX, Jackbox join-by-code pattern
+
+### Epic 9 — Authoritative server netcode
+- [Gaffer On Games — Networked Physics](https://gafferongames.com/categories/networked-physics/) — **read before planning**; canonical reference
+- [Gaffer On Games — Introduction to Networked Physics](https://gafferongames.com/post/introduction_to_networked_physics/)
+- [Valve Source Multiplayer Networking](https://developer.valvesoftware.com/wiki/Source_Multiplayer_Networking)
+- Socket.IO (via Context7): rooms, namespaces, adapter, broadcast patterns, ack timeouts
+- Server game loop: `setInterval` or `setImmediate` + accumulator pattern (Gaffer's "Fix Your Timestep")
+
+### Epic 10 — Reconnection
+- Socket.IO (via Context7): connection state recovery, session persistence
+- [Socket.IO Connection State Recovery docs](https://socket.io/docs/v4/connection-state-recovery)
+
+### Epic 11 — Sprites
+- [OpenGameArt.org — filter CC0/CC-BY](https://opengameart.org/art-search-advanced?keys=worm&field_art_type_tid%5B%5D=9&sort_by=count&sort_order=DESC)
+- License compatibility: CC0 always OK; CC-BY requires attribution in NOTICE
+
+### Epic 12 — Audio
+- [Freesound.org — filter CC0/CC-BY](https://freesound.org/search/?f=license%3A%22Creative+Commons+0%22)
+
+### Epic 13 — Deploy
+- **Invoke `/security-review` skill before merge.**
+- [Socket.IO Server Deployment guide](https://socket.io/docs/v4/server-deployment/)
+- [Nginx WebSocket reverse proxy](https://nginx.org/en/docs/http/websocket.html)
+- [OWASP — WebSocket security (CSWSH)](https://owasp.org/www-community/attacks/Cross_Site_WebSocket_Hijacking)
+- Same EC2 as brain (100.105.131.123); nginx already terminates TLS for brain
+
+### Epic 14 — CI/CD
+- [GitHub Actions security hardening (StepSecurity)](https://github.com/step-security/secure-repo)
+- Context7: actions/checkout, actions/setup-node latest docs
+
+### Epic 15 — Tests
+- Context7: vitest latest docs
+- For E2E later: Playwright (Context7)
