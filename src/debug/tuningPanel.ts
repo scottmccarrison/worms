@@ -1,9 +1,18 @@
-import * as dat from "dat.gui";
 import { tuning } from "../tuning";
 
-export function mountTuningPanel(onChange?: () => void): dat.GUI | null {
-  if (!import.meta.env.DEV) return null;
+/**
+ * Mount a dat.gui overlay for live-tweaking `tuning` in dev builds.
+ * Returns void; fire-and-forget.
+ *
+ * Implementation note: dat.gui is imported dynamically INSIDE the DEV check
+ * so Vite tree-shakes it entirely out of production bundles. A top-level
+ * static `import "dat.gui"` would drag the ~80KB lib into prod even with a
+ * runtime no-op.
+ */
+export async function mountTuningPanel(onChange?: () => void): Promise<void> {
+  if (!import.meta.env.DEV) return;
 
+  const dat = await import("dat.gui");
   const gui = new dat.GUI({ width: 300, autoPlace: true });
   gui.close();
 
@@ -25,6 +34,4 @@ export function mountTuningPanel(onChange?: () => void): dat.GUI | null {
       }
     }
   });
-
-  return gui;
 }

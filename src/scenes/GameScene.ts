@@ -42,7 +42,7 @@ export class GameScene extends Phaser.Scene {
       this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
     });
 
-    mountTuningPanel(() => {
+    void mountTuningPanel(() => {
       this.physicsSystem.world.setGravity({ x: 0, y: tuning.world.gravityY });
     });
   }
