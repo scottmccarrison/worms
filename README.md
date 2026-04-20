@@ -1,20 +1,52 @@
-Worms Armageddon HTML5 Clone
-==============================
+# Worms
 
-For my final year project as part of my B.S degree in Computer Games Development at IT Carlow I recreated <a href="http://www.team17.com/">Team17’s</a> amazing turn-based artillery strategy game Worms Armageddon in Javascript/HTML5. 
+Browser-based multiplayer Worms-style artillery game.
 
+## Status
 
-Live Demo
-=====
-<a href="http://ciaranmccann.me/wormsjs/"> Available here</a>
+Modernized scaffolding. The legacy 2013 codebase is archived under
+[`reference/`](reference/README.md) and is being ported module-by-module
+into `src/`.
 
+## Quick start
 
-Quick overview
+Requires Node 20+.
 
-* Written in Typescript (Compiles to Javascript)
-* Uses a variety of HTML5 API’s (Canvas, WebSockets, Audio, Offline storage)
-* Developed complete from scratch
-* Third-party libies used Jquery, Twitter-bootstrap, Socket.io
-* Server-side tech Node.js/Socket.io running on a linode instance in the New york
+    npm install
+    npm run dev
 
-            
+Then open http://localhost:5173.
+
+## Scripts
+
+| Command             | What it does                            |
+| ------------------- | --------------------------------------- |
+| `npm run dev`       | Vite dev server with hot reload.        |
+| `npm run build`     | Typecheck + production build to `dist/`. |
+| `npm run preview`   | Serve the production build locally.     |
+| `npm run typecheck` | `tsc --noEmit`.                         |
+| `npm run lint`      | Biome check (lint + format).            |
+| `npm run format`    | Biome format (writes changes).          |
+
+## Stack
+
+- TypeScript 5 (strict, bundler resolution)
+- Vite 6 (dev server + bundler)
+- Biome 1.9 (lint + format)
+- *(Future)* Socket.IO, planck.js, canvas rendering
+
+## Structure
+
+    /src          new codebase (entry: src/main.ts)
+    /public       static assets served at root
+    /reference    archived original codebase (not built)
+    /data         game assets (shared with reference during porting)
+
+## Attribution
+
+Fork of [CiaranMcCann/Worms-Armageddon-HTML5-Clone](https://github.com/CiaranMcCann/Worms-Armageddon-HTML5-Clone)
+by Ciaran McCann (2012-2013, Apache 2.0). See [`NOTICE`](NOTICE) and
+[`LICENSE.txt`](LICENSE.txt).
+
+Original game design and assets: (C) [Team17](http://www.team17.com).
+This clone is a non-commercial educational project; no affiliation with Team17.

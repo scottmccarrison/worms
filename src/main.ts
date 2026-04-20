@@ -1,49 +1,19 @@
-/**
- *  
- * Worms Armageddon HTML5 Clone 
- *
- * Main entry piont
- *
- *  License: Apache 2.0
- *  author:  Ciarán McCann
- *  url: http://www.ciaranmccann.me/
- */
-///<reference path="Game.ts"/>
-///<reference path="system/Graphics.ts"/>
-///<reference path="gui/StartMenu.ts" />
-var GameInstance: Game;
-$(document).ready(function () => {
+const canvas = document.getElementById("game");
+if (!(canvas instanceof HTMLCanvasElement)) {
+  throw new Error("#game canvas missing");
+}
 
-    Settings.getSettingsFromUrl();
+const ctx = canvas.getContext("2d");
+if (!ctx) {
+  throw new Error("2D canvas context unavailable");
+}
 
-    if (!Settings.RUN_UNIT_TEST_ONLY)
-    {
-        var startMenu = new StartMenu();
+ctx.fillStyle = "#e0e0e0";
+ctx.font = "24px system-ui, sans-serif";
+ctx.textAlign = "center";
+ctx.textBaseline = "middle";
+ctx.fillText("scaffolding ready", canvas.width / 2, canvas.height / 2);
 
-        GameInstance = new Game();
-        AssetManager.loadAssets();
-        
-        startMenu.onGameReady(function ()
-        {
-            startMenu.hide();
-            if (GameInstance.state.isStarted == false)
-            {
-                GameInstance.start();
-            }
-
-            function gameloop()
-            {
-               if(Settings.DEVELOPMENT_MODE)
-                Graphics.stats.update();
-
-                GameInstance.step();
-                GameInstance.update();
-                GameInstance.draw();
-                window.requestAnimationFrame(gameloop);
-            }
-            gameloop();
-
-        });
-    }
-
-});
+ctx.font = "14px system-ui, sans-serif";
+ctx.fillStyle = "#888";
+ctx.fillText(`vite dev - ${new Date().toISOString()}`, canvas.width / 2, canvas.height / 2 + 32);
