@@ -1,6 +1,6 @@
+import { createServer } from "node:http";
 import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { createServer } from "node:http";
 import { GameRoom } from "./rooms/GameRoom.js";
 
 const port = Number(process.env.PORT ?? 2567);

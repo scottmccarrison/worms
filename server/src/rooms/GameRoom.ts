@@ -1,4 +1,4 @@
-import { Room, type Client } from "@colyseus/core";
+import { type Client, Room } from "@colyseus/core";
 
 /**
  * One GameRoom instance per active game.
