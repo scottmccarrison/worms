@@ -6,6 +6,21 @@ Project-specific instructions for Claude sessions working in this repo. Override
 
 Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.me/worms`, one hosts a room with a 4-letter code, others join. MVP: 9 weapons (8 classic + Bazooka) + multiplayer with room codes + reconnection. Post-MVP: ~30 weapons, game modes, procedural maps, team cosmetics.
 
+## Target platforms (first-class)
+
+**Mobile-web (landscape) is the primary target.** Desktop is secondary. The product shape ("Cody texts me a link, we tap to play") is inherently mobile-first.
+
+- **Orientation**: landscape-locked in-game. Portrait shows a "rotate your device" splash.
+- **Canvas**: Phaser `Scale.FIT` at 1280x720 logical, scales to any viewport. Already working; verified via letterboxing in narrow browsers.
+- **Input**: **touch is the primary control surface**; keyboard is additive/desktop-only.
+  - Gameplay: on-screen virtual controls (d-pad + action buttons) OR gesture-based (drag-to-aim-and-release). Every gameplay epic must design touch FIRST, then layer keyboard on top.
+  - Lobby / menus: big tap targets (>=44px), no hover-dependent UI, OS Web Share API for invite links.
+- **Performance budget**: <2s cold load on 4G, 60fps on mid-tier phones (iPhone 12 / Pixel 6 era). Current ~400KB gzipped bundle is on budget.
+- **PWA**: Epic 13 ships a Web App Manifest so the site can be installed to home screen; iOS standalone mode handled.
+- **Viewport**: already correct (`width=device-width, initial-scale=1`); future PRs should not regress this.
+
+**When writing a plan for any UI- or input-touching epic, the plan MUST include a touch-first section.** Plans that ship "keyboard only" for a gameplay mechanic are incomplete and block merge.
+
 ## Status
 
 **Phase**: Foundation + alignment complete. PR #26 (build scaffolding) + PR #27 (orchestration docs) + PR #28 (plan-time resources) + the pivot PR (Phaser stack + server scaffold) all merged.
@@ -70,6 +85,7 @@ The original 74-file TypeScript codebase is archived verbatim under [`reference/
   - UI-touching epics (#8 lobby, weapon selector, HUD, anything rendering to DOM): include `/frontend-design` as a plan step so we don't ship generic-AI-looking UI
   - Pre-deploy (#13) and anything touching auth/WebSocket security: include `/security-review` before merge
   - Risky PRs (netcode, response shape changes): include `/review` for a second pass
+- **Touch-first for gameplay + UI epics.** See "Target platforms" above. Any plan that ships a mechanic with keyboard-only controls is incomplete. Test on mobile viewport before PR (Chrome DevTools device emulation at minimum).
 
 ## Plan-time resources
 
@@ -124,6 +140,7 @@ Consult these at plan time. Context7 for library docs; WebFetch for articles. Do
 - planck.js (via Context7): raycast (hitscan weapons: shotgun, minigun), body types (sensors for mines)
 - Reference: `reference/src/weapons/*.ts`, `reference/src/weapons/WeaponManager.ts`
 - Wind/trajectory math: basic kinematics, no library needed
+- **Touch input design required**: weapon select = tap big icons in a drawer; aim + power = drag from worm (direction = angle, distance from worm = power); release = fire. Keyboard stays as secondary. See mobile input enhancement issue.
 
 ### Epic 7 — Maps
 - No external library needed for static maps
@@ -138,6 +155,7 @@ Per [ADR-001](docs/decisions/001-framework-pivot.md), Epic 8 (lobby/rooms), Epic
 - [Colyseus examples](https://github.com/colyseus/examples) - turn-based game example patterns
 - [Gaffer On Games — Networked Physics](https://gafferongames.com/categories/networked-physics/) - still useful for understanding trade-offs even though Colyseus handles most of it
 - **Invoke `/frontend-design` skill** for the lobby UI portion — do not write UI directly
+- **Mobile-first lobby UI**: big tap targets, portrait-friendly splash, [Web Share API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Share_API) (`navigator.share({ url, title })`) for invite link on mobile, clipboard fallback on desktop. Room code input: large numeric/letter input with auto-focus and uppercase enforcement.
 
 ### Epic 11 — Sprites
 - [OpenGameArt.org — filter CC0/CC-BY](https://opengameart.org/art-search-advanced?keys=worm&field_art_type_tid%5B%5D=9&sort_by=count&sort_order=DESC)
@@ -153,6 +171,7 @@ Per [ADR-001](docs/decisions/001-framework-pivot.md), Epic 8 (lobby/rooms), Epic
 - [Nginx WebSocket reverse proxy](https://nginx.org/en/docs/http/websocket.html)
 - [OWASP — WebSocket security (CSWSH)](https://owasp.org/www-community/attacks/Cross_Site_WebSocket_Hijacking)
 - If co-locating: same EC2 as brain (100.105.131.123); nginx already terminates TLS
+- **PWA manifest + iOS standalone**: ship `public/manifest.webmanifest` + `apple-touch-icon`, set `display: "standalone"`, so users can "Add to Home Screen" and launch full-screen. Handle iOS `navigator.standalone` edge cases.
 
 ### Epic 14 — CI/CD
 - [GitHub Actions security hardening (StepSecurity)](https://github.com/step-security/secure-repo)
