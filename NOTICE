@@ -1,0 +1,17 @@
+Worms (modern fork)
+Copyright 2026 Scott McCarrison
+
+This product includes software originally developed by
+Ciaran McCann - "Worms-Armageddon-HTML5-Clone" (Apache License 2.0,
+2012-2013). See https://github.com/CiaranMcCann/Worms-Armageddon-HTML5-Clone
+
+This fork continues under the Apache License 2.0.
+
+Third-party code archived under reference/external/ (not active in the
+current build) includes:
+  - jQuery 1.8.2         (MIT License)
+  - Box2D-Web 2.1.a.3    (zlib License)
+  - Stats.js             (MIT License)
+  - Bootstrap            (MIT License)
+
+See LICENSE.txt for the Apache 2.0 license text.
