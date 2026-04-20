@@ -10,7 +10,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 |----|------------------------------------------|----------|----------|----------------------------------------------------|
 | 1  | Modernize build system                   | Done     | #26      | [epic-1-2-foundation](plans/epic-1-2-foundation.md) |
 | 2  | Cleanup dead code                        | Done     | #26      | [epic-1-2-foundation](plans/epic-1-2-foundation.md) |
-| 3  | Terrain: port algorithm + Phaser wrapper | Todo     | -        | -                                                  |
+| 3  | Terrain: port algorithm + Phaser wrapper | Done     | -        | [epic-3-terrain](plans/epic-3-terrain.md)          |
 | 4  | Worm entity (Phaser sprite + planck body) | Todo    | -        | -                                                  |
 | 5  | Turn state + win condition (xstate)      | Todo     | -        | -                                                  |
 | 6  | Weapon system (data-driven, 8 + Bazooka) | Todo     | -        | -                                                  |
@@ -55,3 +55,4 @@ Parallelization: assets (#11, #12) and infra (#13, #14) don't block game logic a
 One-line-per-session record. Detailed history: `git log`, PR descriptions, brain-mem.
 
 - **2026-04-20**: Forked repo, triaged and filed 15 epic + 10 enhancement issues, wrote foundation plan, shipped PR #26 (archive legacy under reference/, add Vite+TS5+Biome scaffolding + minimal CI). Established project docs convention via PR #27 (CLAUDE.md, ROADMAP.md, docs/plans/), added plan-time resources via PR #28 (Context7 MCP, references-by-epic, mandated skill invocation). Later same day: **framework pivot** (ADR-001) from hand-rolled Canvas + Socket.IO to Phaser 3 + Colyseus + planck + Aseprite. Added `server/` workspace scaffold, drop-in workflow guides in `docs/guides/`.
+- **2026-04-20**: Epic 3 shipped (terrain port). planck.js integration + destructible mask + Phaser Scene demo + dat.gui tuning + Vitest. Bundled Vitest setup + CI test step (partial #14/#15 progress). Deleted reference/src/environment/Terrain.ts.
