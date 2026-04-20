@@ -11,7 +11,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 | 1  | Modernize build system                   | Done     | #26      | [epic-1-2-foundation](plans/epic-1-2-foundation.md) |
 | 2  | Cleanup dead code                        | Done     | #26      | [epic-1-2-foundation](plans/epic-1-2-foundation.md) |
 | 3  | Terrain: port algorithm + Phaser wrapper | Done     | -        | [epic-3-terrain](plans/epic-3-terrain.md)          |
-| 4  | Worm entity (Phaser sprite + planck body) | Todo    | -        | -                                                  |
+| 4  | Worm entity (Phaser sprite + planck body) | Partial (4a only, 4b pending) | - | [epic-4a-worm](plans/epic-4a-worm.md)              |
 | 5  | Turn state + win condition (xstate)      | Todo     | -        | -                                                  |
 | 6  | Weapon system (data-driven, 8 + Bazooka) | Todo     | -        | -                                                  |
 | 7  | Map loading + starter maps               | Todo     | -        | -                                                  |
@@ -56,3 +56,4 @@ One-line-per-session record. Detailed history: `git log`, PR descriptions, brain
 
 - **2026-04-20**: Forked repo, triaged and filed 15 epic + 10 enhancement issues, wrote foundation plan, shipped PR #26 (archive legacy under reference/, add Vite+TS5+Biome scaffolding + minimal CI). Established project docs convention via PR #27 (CLAUDE.md, ROADMAP.md, docs/plans/), added plan-time resources via PR #28 (Context7 MCP, references-by-epic, mandated skill invocation). Later same day: **framework pivot** (ADR-001) from hand-rolled Canvas + Socket.IO to Phaser 3 + Colyseus + planck + Aseprite. Added `server/` workspace scaffold, drop-in workflow guides in `docs/guides/`.
 - **2026-04-20**: Epic 3 shipped (terrain port). planck.js integration + destructible mask + Phaser Scene demo + dat.gui tuning + Vitest. Bundled Vitest setup + CI test step (partial #14/#15 progress). Deleted reference/src/environment/Terrain.ts.
+- **2026-04-20**: Epic 4a shipped (core worm movement). Worm entity (planck dynamic body + foot sensor + Phaser Graphics placeholder), walk/jump/backflip/aim, fall damage via post-solve contact listeners, Team class, InputController (arrow keys + Tab cycling), spawn point scanner, health HUD. 11 commits, ~700 LOC. Deleted 6 reference files. 4b (ninja rope + jetpack) deferred.
