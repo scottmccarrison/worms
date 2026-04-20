@@ -1,11 +1,21 @@
-import type { World } from "planck";
+import type { Vec2Value, World } from "planck";
 import { toPixels } from "../physics/scale";
+
+/** Runtime-accessible view of PolygonShape vertex arrays. */
+interface PolygonLike {
+  m_vertices: Vec2Value[];
+  m_count: number;
+}
 
 /**
  * Iterate every planck body/fixture and stroke polygon outlines via Phaser Graphics.
  * Called from Scene.update each frame; clears and redraws each time.
  *
- * Uses planck 1.5's public PolygonShape API (getVertexCount + getVertex).
+ * planck 1.5 note: PolygonShape does NOT expose a public getVertex/getVertexCount API
+ * (those exist on ChainShape and DistanceProxy respectively, but not PolygonShape).
+ * The @hidden m_vertices/m_count fields are the only way to access polygon geometry.
+ * This is fragile across planck internal changes but works today; revisit if we ever
+ * upgrade planck major versions.
  */
 export function drawDebug(
   graphics: Phaser.GameObjects.Graphics,
@@ -22,18 +32,14 @@ export function drawDebug(
     while (fixture !== null) {
       const shape = fixture.getShape();
       if (shape.getType() === "polygon") {
-        // PolygonShape exposes getVertexCount + getVertex(i) in planck 1.5
-        const poly = shape as unknown as {
-          getVertexCount(): number;
-          getVertex(index: number): { x: number; y: number };
-        };
-        const count = poly.getVertexCount();
+        const poly = shape as unknown as PolygonLike;
+        const count = poly.m_count;
         if (count > 0) {
-          const first = body.getWorldPoint(poly.getVertex(0));
+          const first = body.getWorldPoint(poly.m_vertices[0] ?? { x: 0, y: 0 });
           graphics.beginPath();
           graphics.moveTo(toPixels(first.x), toPixels(first.y));
           for (let i = 1; i < count; i++) {
-            const pt = body.getWorldPoint(poly.getVertex(i));
+            const pt = body.getWorldPoint(poly.m_vertices[i] ?? { x: 0, y: 0 });
             graphics.lineTo(toPixels(pt.x), toPixels(pt.y));
           }
           graphics.closePath();
