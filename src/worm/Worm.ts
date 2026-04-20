@@ -1,5 +1,5 @@
 import type Phaser from "phaser";
-import { Circle } from "planck";
+import { Box, Circle } from "planck";
 import type { Body, Fixture } from "planck";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters, toPixels } from "../physics/scale";
@@ -70,22 +70,21 @@ export class Worm {
       restitution: 0.1,
     });
 
-    // Foot sensor - small box below circle center
+    // Foot sensor - small box offset below circle center
     const sensorHalfW = toMeters(tuning.worm.radiusPx * 0.6);
     const sensorHalfH = toMeters(tuning.worm.radiusPx * 0.3);
     this.footSensor = this.body.createFixture({
-      shape: new Circle(radius * 1.05), // slightly larger, offset below
+      shape: new Box(sensorHalfW, sensorHalfH, { x: 0, y: radius }, 0),
       isSensor: true,
       density: 0,
       friction: 0,
-      filterMaskBits: 0x0001,
     });
     // Set user data on body for contact listener identification
     const userData: WormUserData = { kind: "worm", worm: this };
     this.body.setUserData(userData);
     this.footSensor.setUserData({ kind: "worm-foot", worm: this });
 
-    // Phaser graphics placeholder (colored rectangle ~40x30)
+    // Phaser graphics placeholder
     this.graphics = this.scene.add.graphics();
     this.graphics.setDepth(5);
 
@@ -114,10 +113,6 @@ export class Worm {
       .setDepth(6);
 
     this.drawWorm(init.spawnXPx, init.spawnYPx);
-
-    // Suppress unused variable lint warning - footSensor is used via contact listeners
-    void sensorHalfW;
-    void sensorHalfH;
   }
 
   // ------ Movement ------
