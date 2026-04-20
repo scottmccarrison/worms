@@ -1,0 +1,26 @@
+{
+  "name": "worms-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Colyseus multiplayer server for the worms web game",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@colyseus/core": "^0.15.0",
+    "@colyseus/ws-transport": "^0.15.0",
+    "colyseus": "^0.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.6.0"
+  }
+}
