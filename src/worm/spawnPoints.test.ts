@@ -64,11 +64,12 @@ describe("findSpawnPoints", () => {
     expect(findSpawnPoints(data, 100, 50, 4)).toEqual([]);
   });
 
-  it("returns [] when count > available terrain columns", () => {
-    // Only 2 edge columns have terrain, asking for 4 points
+  it("returns partial results when fewer than count columns have terrain", () => {
+    // Only 2 edge columns have terrain, asking for 4 points - expect 2 back (partial)
     const data = hollowCenterMask(100, 50);
     const pts = findSpawnPoints(data, 100, 50, 4);
-    expect(pts).toEqual([]);
+    expect(pts.length).toBeGreaterThan(0);
+    expect(pts.length).toBeLessThan(4);
   });
 
   it("returns 1 point when asking for 1 and single column has terrain", () => {

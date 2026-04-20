@@ -6,7 +6,7 @@ export interface SurfacePoint {
 /**
  * Find N spawn points evenly distributed across the terrain's surface.
  * Scans each selected column top-down for the first opaque pixel.
- * Returns [] if fewer than N columns have terrain.
+ * Returns however many points were found (may be fewer than count if some slots had no terrain).
  */
 export function findSpawnPoints(
   data: Uint8ClampedArray,
@@ -43,7 +43,7 @@ export function findSpawnPoints(
     }
   }
 
-  return results.length === count ? results : [];
+  return results; // May return fewer than `count` if some slots had no terrain
 }
 
 function scanColumnTopDown(

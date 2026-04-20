@@ -42,6 +42,13 @@ export class GameScene extends Phaser.Scene {
     this.physicsSystem.world.on("end-contact", this.onEndContact);
     this.physicsSystem.world.on("post-solve", this.onPostSolve);
 
+    // Clean up contact listeners on scene shutdown to prevent HMR stacking
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.physicsSystem.world.off("begin-contact", this.onBeginContact);
+      this.physicsSystem.world.off("end-contact", this.onEndContact);
+      this.physicsSystem.world.off("post-solve", this.onPostSolve);
+    });
+
     // Spawn worms on terrain surface
     const maskImgData = this.terrain.getMaskImageData();
     const totalWorms = tuning.team.wormsPerTeam * 2;
@@ -57,37 +64,23 @@ export class GameScene extends Phaser.Scene {
 
     const teams = [red, blue];
 
-    if (spawnPts.length === totalWorms) {
-      spawnPts.forEach((pt, i) => {
-        const team = teams[i % 2];
-        const w = new Worm({
-          scene: this,
-          physics: this.physicsSystem,
-          team,
-          spawnXPx: pt.xPx,
-          spawnYPx: pt.yPx - tuning.worm.radiusPx * 2, // spawn above surface
-          wormName: `${team.id}-${team.worms.length + 1}`,
-        });
-        team.addWorm(w);
-        this.allWorms.push(w);
+    // Spawn worms from terrain surface scan; fall back to width-spread for any missing slots
+    const fallbackYPx = this.scale.height * 0.3;
+    for (let i = 0; i < totalWorms; i++) {
+      const team = teams[i % 2];
+      const pt = spawnPts[i];
+      const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
+      const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
+      const w = new Worm({
+        scene: this,
+        physics: this.physicsSystem,
+        team,
+        spawnXPx,
+        spawnYPx,
+        wormName: `${team.id}-${team.worms.length + 1}`,
       });
-    } else {
-      // Fallback: spread across width manually if spawn scan failed
-      const fallbackYPx = this.scale.height * 0.3;
-      for (let i = 0; i < totalWorms; i++) {
-        const team = teams[i % 2];
-        const xPx = (this.scale.width / (totalWorms + 1)) * (i + 1);
-        const w = new Worm({
-          scene: this,
-          physics: this.physicsSystem,
-          team,
-          spawnXPx: xPx,
-          spawnYPx: fallbackYPx,
-          wormName: `${team.id}-${team.worms.length + 1}`,
-        });
-        team.addWorm(w);
-        this.allWorms.push(w);
-      }
+      team.addWorm(w);
+      this.allWorms.push(w);
     }
 
     this.inputController = new InputController({ scene: this, worms: this.allWorms });

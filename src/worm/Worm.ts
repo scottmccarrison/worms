@@ -118,6 +118,7 @@ export class Worm {
   // ------ Movement ------
 
   walk(direction: -1 | 0 | 1): void {
+    if (!this.isAlive) return;
     const vel = this.body.getLinearVelocity();
     const targetVx = direction * tuning.worm.walkSpeedMps;
     this.body.setLinearVelocity({ x: targetVx, y: vel.y });
@@ -125,6 +126,7 @@ export class Worm {
   }
 
   jump(): void {
+    if (!this.isAlive) return;
     if (!this.canJump()) return;
     const d = tuning.worm.density;
     this.body.applyLinearImpulse(
@@ -134,6 +136,7 @@ export class Worm {
   }
 
   backflip(): void {
+    if (!this.isAlive) return;
     if (!this.canJump()) return;
     const d = tuning.worm.density;
     this.body.applyLinearImpulse(
@@ -143,6 +146,7 @@ export class Worm {
   }
 
   aim(direction: -1 | 0 | 1): void {
+    if (!this.isAlive) return;
     this.aimDir = direction;
   }
 
@@ -153,13 +157,19 @@ export class Worm {
   // ------ Health ------
 
   takeDamage(amount: number): void {
+    if (!this.isAlive) return;
     this.pendingDamage += amount;
   }
 
   applyPendingDamage(): void {
+    if (!this.isAlive) return;
     if (this.pendingDamage <= 0) return;
     this.health = Math.max(0, this.health - this.pendingDamage);
     this.pendingDamage = 0;
+
+    // Cancel any prior damage tween before starting a new one
+    this.scene.tweens.killTweensOf(this.graphics);
+    this.graphics.setAlpha(1);
 
     // Flash red
     this.scene.tweens.add({
@@ -209,6 +219,8 @@ export class Worm {
 
   destroy(): void {
     if (this.body.isActive()) {
+      // Clear userData before destroying to break circular ref for GC
+      this.body.setUserData(null);
       // Mark inactive before removing to avoid double-destroy
       this.body.getWorld().destroyBody(this.body);
     }
