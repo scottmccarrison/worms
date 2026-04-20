@@ -7,6 +7,12 @@ interface PolygonLike {
   m_count: number;
 }
 
+/** Runtime-accessible view of CircleShape public API. */
+interface CircleLike {
+  getCenter(): Vec2Value;
+  getRadius(): number;
+}
+
 /**
  * Iterate every planck body/fixture and stroke polygon outlines via Phaser Graphics.
  * Called from Scene.update each frame; clears and redraws each time.
@@ -45,6 +51,14 @@ export function drawDebug(
           graphics.closePath();
           graphics.strokePath();
         }
+      } else if (shape.getType() === "circle") {
+        const circle = shape as unknown as CircleLike;
+        const worldCenter = body.getWorldPoint(circle.getCenter());
+        graphics.strokeCircle(
+          toPixels(worldCenter.x),
+          toPixels(worldCenter.y),
+          toPixels(circle.getRadius()),
+        );
       }
       fixture = fixture.getNext();
     }

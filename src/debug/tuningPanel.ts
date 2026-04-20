@@ -25,6 +25,13 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   const weapons = gui.addFolder("Weapons");
   weapons.add(tuning.weapons, "testCutRadiusPx", 10, 150, 1).name("Cut radius (px)");
 
+  const worm = gui.addFolder("Worm");
+  worm.add(tuning.worm, "walkSpeedMps", 0.5, 10, 0.1).name("Walk speed (m/s)");
+  worm.add(tuning.worm, "aimSpeedRadPerSec", 0.5, 8, 0.1).name("Aim speed (rad/s)");
+  worm.add(tuning.worm, "linearDamping", 0, 2, 0.01).name("Linear damping");
+  worm.add(tuning.worm, "fallDamageThresholdImpulse", 1, 30, 0.5).name("Fall dmg threshold");
+  worm.add(tuning.worm, "fallDamageCapHp", 5, 100, 1).name("Fall dmg cap (HP)");
+
   window.addEventListener("keydown", (e) => {
     if (e.key === "`") {
       if (gui.closed) {
