@@ -1,19 +1,18 @@
-const canvas = document.getElementById("game");
-if (!(canvas instanceof HTMLCanvasElement)) {
-  throw new Error("#game canvas missing");
-}
+import * as Phaser from "phaser";
+import { GameScene } from "./scenes/GameScene";
 
-const ctx = canvas.getContext("2d");
-if (!ctx) {
-  throw new Error("2D canvas context unavailable");
-}
+const config: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  width: 1280,
+  height: 720,
+  parent: "game-container",
+  backgroundColor: "#0b0b0f",
+  physics: { default: "arcade" },
+  scene: [GameScene],
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+};
 
-ctx.fillStyle = "#e0e0e0";
-ctx.font = "24px system-ui, sans-serif";
-ctx.textAlign = "center";
-ctx.textBaseline = "middle";
-ctx.fillText("scaffolding ready", canvas.width / 2, canvas.height / 2);
-
-ctx.font = "14px system-ui, sans-serif";
-ctx.fillStyle = "#888";
-ctx.fillText(`vite dev - ${new Date().toISOString()}`, canvas.width / 2, canvas.height / 2 + 32);
+new Phaser.Game(config);
