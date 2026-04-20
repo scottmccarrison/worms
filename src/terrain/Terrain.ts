@@ -140,6 +140,11 @@ export class Terrain {
     return this.terrainBodies.size;
   }
 
+  /** Return a snapshot of the terrain mask pixels for spawn point scanning. */
+  getMaskImageData(): ImageData {
+    return this.ctx.getImageData(0, 0, this.widthPx, this.heightPx);
+  }
+
   private buildBodiesInRegion(yStart: number, yEnd: number): void {
     const imageData = this.ctx.getImageData(0, yStart, this.widthPx, yEnd - yStart);
     const boxes = scanMaskForBoxes(
