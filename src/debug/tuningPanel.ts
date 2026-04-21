@@ -41,9 +41,16 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
 
   const jet = gui.addFolder("JetPack");
   jet.add(tuning.jetpack, "fuelCapacity", 10, 500, 10).name("Fuel capacity");
-  jet.add(tuning.jetpack, "fuelPerFrame", 0.1, 5, 0.1).name("Fuel per frame");
+  jet.add(tuning.jetpack, "fuelPerSecond", 1, 100, 1).name("Fuel per second");
   jet.add(tuning.jetpack, "upwardImpulse", 0.5, 10, 0.1).name("Upward impulse");
   jet.add(tuning.jetpack, "sideImpulse", 0.1, 5, 0.1).name("Side impulse");
+
+  // Note: touch tuning values are read at button construction time;
+  // changing them via the panel won't resize/re-alpha existing buttons.
+  const touch = gui.addFolder("Touch");
+  touch.add(tuning.touch, "buttonRadiusPx", 10, 80, 1).name("Button radius (px)");
+  touch.add(tuning.touch, "buttonIdleAlpha", 0, 1, 0.05).name("Idle alpha");
+  touch.add(tuning.touch, "buttonPressedAlpha", 0, 1, 0.05).name("Pressed alpha");
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "`") {

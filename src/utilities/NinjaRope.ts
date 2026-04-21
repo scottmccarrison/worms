@@ -108,7 +108,7 @@ export class NinjaRope implements Utility {
 
       if (!body) {
         console.error("[NinjaRope] failed to create intermediate body");
-        this.deactivate();
+        this._cleanupPartialBuild();
         return;
       }
 
@@ -139,7 +139,7 @@ export class NinjaRope implements Utility {
 
       if (!joint) {
         console.error("[NinjaRope] createJoint returned null during build");
-        this.deactivate();
+        this._cleanupPartialBuild();
         return;
       }
       this.joints.push(joint);
@@ -163,7 +163,7 @@ export class NinjaRope implements Utility {
 
     if (!finalJoint) {
       console.error("[NinjaRope] createJoint returned null for final joint");
-      this.deactivate();
+      this._cleanupPartialBuild();
       return;
     }
     this.joints.push(finalJoint);
@@ -293,8 +293,30 @@ export class NinjaRope implements Utility {
     }
     this.joints.push(j1);
 
-    // Final joint: newBody -> worm
-    this._rebuildFinalJoint(newBody);
+    // Final joint: newBody -> worm (same half-length as j1 for symmetric sag)
+    const j2 = this.world.createJoint(
+      new DistanceJoint(
+        {
+          frequencyHz: tuning.rope.finalJointFreqHz,
+          dampingRatio: tuning.rope.dampingRatio,
+          length: tuning.rope.segmentLengthM * 0.5,
+        },
+        newBody,
+        this.worm.body,
+        newBody.getPosition(),
+        this.worm.body.getPosition(),
+      ),
+    );
+    if (!j2) {
+      console.error("[NinjaRope] extend: j2 null");
+      this.world.destroyBody(newBody);
+      this.intermediates.pop();
+      this.world.destroyJoint(j1);
+      this.joints.pop();
+      this._rebuildFinalJoint(lastBody);
+      return;
+    }
+    this.joints.push(j2);
   }
 
   /**
@@ -374,6 +396,38 @@ export class NinjaRope implements Utility {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Destroy whatever partial state was created during a failed activate().
+   * Called on any null return from createBody or createJoint before state
+   * is set to "attached". Safe to call regardless of current state.
+   */
+  private _cleanupPartialBuild(): void {
+    for (const j of this.joints) {
+      try {
+        this.world.destroyJoint(j);
+      } catch (_e) {
+        // Joint may already be gone
+      }
+    }
+    this.joints.length = 0;
+    for (const b of this.intermediates) {
+      try {
+        this.world.destroyBody(b);
+      } catch (_e) {
+        // Body may already be gone
+      }
+    }
+    this.intermediates.length = 0;
+    if (this.anchor) {
+      try {
+        this.world.destroyBody(this.anchor);
+      } catch (_e) {
+        // Body may already be gone
+      }
+      this.anchor = null;
+    }
+  }
 
   private _rebuildFinalJoint(fromBody: Body): void {
     const joint = this.world.createJoint(

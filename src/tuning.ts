@@ -30,7 +30,7 @@ interface Tuning {
   };
   jetpack: {
     fuelCapacity: number;
-    fuelPerFrame: number;
+    fuelPerSecond: number;
     upwardImpulse: number;
     sideImpulse: number;
   };
@@ -69,7 +69,7 @@ export const tuning: Tuning = {
   },
   jetpack: {
     fuelCapacity: 100,
-    fuelPerFrame: 0.5,
+    fuelPerSecond: 30,
     upwardImpulse: 1.5,
     sideImpulse: 0.8,
   },

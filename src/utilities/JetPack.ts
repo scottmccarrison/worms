@@ -61,7 +61,6 @@ export class JetPack implements Utility {
 
   /** Per-frame: apply thrust impulse and drain fuel. Called by GameScene.update. */
   update(dtMs: number): void {
-    void dtMs;
     if (!this._active) return;
 
     // Fuel check first
@@ -77,7 +76,7 @@ export class JetPack implements Utility {
 
     if (ix !== 0 || iy !== 0) {
       this.worm.body.applyLinearImpulse({ x: ix, y: iy }, this.worm.body.getPosition(), true);
-      this._fuel -= tuning.jetpack.fuelPerFrame;
+      this._fuel -= tuning.jetpack.fuelPerSecond * (dtMs / 1000);
     }
 
     if (this._fuel <= 0) {

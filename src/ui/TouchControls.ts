@@ -69,24 +69,21 @@ export class TouchControls {
       hitArea: new Phaser.Geom.Circle(0, 0, radius),
       hitAreaCallback: Phaser.Geom.Circle.Contains,
     });
+    const jetDeactivate = (): void => {
+      const w = getActiveWorm();
+      if (!w) return;
+      if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
+      this._setButtonAlpha(this.jetBtn, false);
+    };
     this.jetBtn.on("pointerdown", () => {
       const w = getActiveWorm();
       if (!w) return;
       if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
       this._setButtonAlpha(this.jetBtn, true);
     });
-    this.jetBtn.on("pointerup", () => {
-      const w = getActiveWorm();
-      if (!w) return;
-      if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-      this._setButtonAlpha(this.jetBtn, false);
-    });
-    this.jetBtn.on("pointerout", () => {
-      const w = getActiveWorm();
-      if (!w) return;
-      if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-      this._setButtonAlpha(this.jetBtn, false);
-    });
+    this.jetBtn.on("pointerup", jetDeactivate);
+    this.jetBtn.on("pointerupoutside", jetDeactivate);
+    this.jetBtn.on("pointerout", jetDeactivate);
 
     // Set idle alpha on both
     this.ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
