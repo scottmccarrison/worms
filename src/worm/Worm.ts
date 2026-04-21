@@ -167,6 +167,25 @@ export class Worm {
     this.aimDir = direction;
   }
 
+  /**
+   * Set aim angle directly (radians). Clamped to [-PI/2, PI/2].
+   * Facing is handled by the caller (fire.ts multiplies by firer.facing).
+   */
+  setAimAngle(rad: number): void {
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    this.aimAngle = clamp(rad, -Math.PI / 2, Math.PI / 2);
+  }
+
+  /** Set aim power 0..1, clamped. */
+  setAimPower(p: number): void {
+    this.aimPower01 = Math.max(0, Math.min(1, p));
+  }
+
+  /** Nudge aim power by delta, clamped. */
+  nudgeAimPower(delta: number): void {
+    this.setAimPower(this.aimPower01 + delta);
+  }
+
   setFacing(dir: -1 | 1): void {
     this.facing = dir;
   }
