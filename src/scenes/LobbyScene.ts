@@ -1,16 +1,32 @@
 import type { Client, Room, RoomAvailable } from "colyseus.js";
 import * as Phaser from "phaser";
 import { allIds, getById } from "../maps/registry";
+import { saveRoomToken } from "../net/clientStorage";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
 import { buildInviteUrl, shareInvite } from "./lobby/shareInvite";
 
-interface LobbySceneData {
+/**
+ * LobbyScene accepts two init shapes:
+ *
+ * 1. `{ netClient, autoJoinCode }` - the normal BootScene flow. We render
+ *    the home view; user picks Create or Join.
+ * 2. `{ netClient, room }` - Epic 10 reconnect flow. BootScene successfully
+ *    called `client.reconnect(token)` with a cached reconnectionToken and
+ *    is handing us the live Room. We skip the home view and jump straight
+ *    to the room view.
+ */
+interface LobbySceneDataHome {
   netClient: Client;
   autoJoinCode: string | null;
 }
+interface LobbySceneDataReconnect {
+  netClient: Client;
+  room: Room<LobbyState>;
+}
+type LobbySceneData = LobbySceneDataHome | LobbySceneDataReconnect;
 
 type View = "home" | "room";
 
@@ -84,12 +100,31 @@ export class LobbyScene extends Phaser.Scene {
     super("LobbyScene");
   }
 
+  // When BootScene hands us a live Room (Epic 10 reconnect path), we stash
+  // it here during init() and consume it in create() to jump straight to the
+  // room view. Cleared after consumption.
+  private pendingReconnectedRoom: Room<LobbyState> | null = null;
+
   init(data: LobbySceneData): void {
     this.netClient = data.netClient;
-    this.autoJoinCode = data.autoJoinCode;
+    if ("room" in data) {
+      this.pendingReconnectedRoom = data.room;
+      this.autoJoinCode = null;
+    } else {
+      this.autoJoinCode = data.autoJoinCode;
+    }
   }
 
   create(): void {
+    if (this.pendingReconnectedRoom) {
+      // Epic 10: BootScene already did the hard work. Slide straight into
+      // the room view with the live Room.
+      const room = this.pendingReconnectedRoom;
+      this.pendingReconnectedRoom = null;
+      this.onRoomJoined(room);
+      return;
+    }
+
     this.renderHome();
 
     // If we arrived with ?room=CODE in the URL, surface the code in the Join
@@ -302,9 +337,41 @@ export class LobbyScene extends Phaser.Scene {
     this.wireRoomStateListeners(room);
     this.view = "room";
     this.clearHome();
+    // Epic 10: cache the reconnectionToken keyed by the room code so a page
+    // reload within the grace window can slide back in via BootScene's
+    // reconnect path. Colyseus 0.15 fills state.code synchronously for the
+    // creator but may arrive a beat later for joiners, hence the code-ready
+    // guard + a belt-and-braces listener below.
+    this.saveRoomTokenIfReady(room);
     // First render can run immediately; state has already arrived by the time
     // the join promise resolves in Colyseus 0.15.
     this.renderRoom();
+  }
+
+  /**
+   * Save the reconnection token as soon as we know the room's code. The code
+   * is the only thing we can't derive on reload (roomId + token are in the
+   * Room instance already), so we key storage by code and wait for it.
+   *
+   * Idempotent: calling with an already-saved (code, token) pair just
+   * refreshes the timestamp, which is fine.
+   */
+  private saveRoomTokenIfReady(room: Room<LobbyState>): void {
+    const code = room.state?.code ?? "";
+    const token = room.reconnectionToken;
+    if (code && token) {
+      saveRoomToken(code, room.roomId, token);
+      return;
+    }
+    // Code not yet populated. Colyseus 0.15 lets us subscribe to a single
+    // field; fire once when code lands, then unhook.
+    if (!token) return; // token missing is terminal; never save
+    const unlisten = room.state.listen("code", (value) => {
+      if (value) {
+        saveRoomToken(value, room.roomId, token);
+        unlisten();
+      }
+    });
   }
 
   private wireRoomMessages(room: Room<LobbyState>): void {
@@ -438,10 +505,15 @@ export class LobbyScene extends Phaser.Scene {
       const tags: string[] = [];
       if (row.isHost) tags.push("host");
       if (row.isMe) tags.push("you");
+      if (row.disconnected) tags.push("disconnected");
       const tagStr = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+      // Disconnected rows render in a dim grey so the eye skips them. Takes
+      // precedence over the "you" highlight because if you're seeing your
+      // own row as disconnected we're in a weird state worth surfacing.
+      const nameColor = row.disconnected ? "#888888" : row.isMe ? "#ffffaa" : "#e0e0e0";
       const label = this.add.text(cx - 250, rowY, `${row.nickname}${tagStr}`, {
         ...TEXT_STYLE_BODY,
-        color: row.isMe ? "#ffffaa" : "#e0e0e0",
+        color: nameColor,
       });
       label.setOrigin(0, 0.5);
       this.roomObjects.push(label);

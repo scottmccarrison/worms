@@ -18,6 +18,11 @@
  *   storage quota exceeded, and sandboxed iframes can all throw.
  * - All keys are uppercased on write and read so the on-disk format is
  *   case-stable regardless of how the room code shows up in a URL.
+ * - Colyseus 0.15's `room.reconnectionToken` is already a composite
+ *   "roomId:token" string, so the `token` field below is the full opaque
+ *   string we pass to `client.reconnect()` and `roomId` is stored alongside
+ *   purely for diagnostics / logging. Callers should pass `token` to
+ *   `client.reconnect(token)` (NOT roomId + token).
  */
 
 const KEY = "worms.roomTokens.v1";
