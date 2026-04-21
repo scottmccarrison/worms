@@ -4,6 +4,7 @@ import type { Body, Fixture } from "planck";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters, toPixels } from "../physics/scale";
 import { tuning } from "../tuning";
+import type { JetPack } from "../utilities/JetPack";
 import type { NinjaRope } from "../utilities/NinjaRope";
 import type { Team } from "./Team";
 import { stepAim } from "./aimAngle";
@@ -36,7 +37,7 @@ export class Worm {
 
   // Utility state - set from GameScene after construction, not in constructor
   ropeUtility!: NinjaRope; // assigned by GameScene.create() after worm spawn
-  // jetPackUtility assigned after JetPack import in commit 4
+  jetPackUtility!: JetPack; // assigned by GameScene.create() after worm spawn
   private activeRope: NinjaRope | null = null;
   private jetPackActive = false;
 
@@ -233,7 +234,7 @@ export class Worm {
   destroy(): void {
     // Clean up utilities before destroying body (joints reference worm body)
     this.ropeUtility?.destroy();
-    // jetPackUtility cleanup handled once JetPack is wired in commit 4/8
+    this.jetPackUtility?.destroy();
     if (this.body.isActive()) {
       // Clear userData before destroying to break circular ref for GC
       this.body.setUserData(null);
