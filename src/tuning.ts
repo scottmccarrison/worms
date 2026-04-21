@@ -18,6 +18,27 @@ interface Tuning {
   input: {
     aimCoalesceFrames: number;
   };
+  rope: {
+    maxReachM: number;
+    segmentLengthM: number;
+    maxSegments: number;
+    minSegments: number;
+    intermediateFreqHz: number;
+    finalJointFreqHz: number;
+    dampingRatio: number;
+    intermediateRadiusM: number;
+  };
+  jetpack: {
+    fuelCapacity: number;
+    fuelPerFrame: number;
+    upwardImpulse: number;
+    sideImpulse: number;
+  };
+  touch: {
+    buttonRadiusPx: number;
+    buttonIdleAlpha: number;
+    buttonPressedAlpha: number;
+  };
 }
 
 export const tuning: Tuning = {
@@ -36,4 +57,25 @@ export const tuning: Tuning = {
   },
   team: { wormsPerTeam: 2 },
   input: { aimCoalesceFrames: 1 },
+  rope: {
+    maxReachM: 15,
+    segmentLengthM: 0.5,
+    maxSegments: 40,
+    minSegments: 3,
+    intermediateFreqHz: 10,
+    finalJointFreqHz: 25,
+    dampingRatio: 5,
+    intermediateRadiusM: 0.15,
+  },
+  jetpack: {
+    fuelCapacity: 100,
+    fuelPerFrame: 0.5,
+    upwardImpulse: 1.5,
+    sideImpulse: 0.8,
+  },
+  touch: {
+    buttonRadiusPx: 28,
+    buttonIdleAlpha: 0.55,
+    buttonPressedAlpha: 1.0,
+  },
 };
