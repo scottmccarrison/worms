@@ -28,7 +28,6 @@ export class InputController {
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
 
-
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
     this.worms = init.worms;
