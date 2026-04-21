@@ -33,6 +33,10 @@ export class GameRoom extends Room<LobbyState> {
   private disposeTimer: NodeJS.Timeout | null = null;
 
   async onCreate(options: { nickname?: string; color?: string } = {}): Promise<void> {
+    // Keep the room alive past the last-client-leaves moment so the
+    // EMPTY_ROOM_GRACE_MS timer can fire for rejoin/reconnect flows.
+    this.autoDispose = false;
+
     // Collect codes already in use so we don't collide with other rooms.
     const takenCodes = await collectTakenCodes();
     const code = generateUniqueCode(takenCodes);
@@ -70,26 +74,26 @@ export class GameRoom extends Room<LobbyState> {
       throw new Error("invalid_nickname");
     }
 
-    if (!isAllowedColor(colorInput)) {
+    // If the requested color is missing / invalid / already taken, auto-assign
+    // the first free one. This keeps two-player rooms working even without a
+    // client-side color picker. Rejection only happens if the palette is
+    // exhausted (8 colors, maxClients=8, so effectively never).
+    const color =
+      isAllowedColor(colorInput) && !isColorTaken(this.state, colorInput)
+        ? colorInput
+        : (firstFreeColor(this.state) ?? "");
+    if (color === "") {
       client.send("error", {
-        code: "invalid_color",
-        message: "Color is not in the allowed palette.",
+        code: "room_full_palette",
+        message: "No colors available in the palette.",
       });
-      throw new Error("invalid_color");
-    }
-
-    if (isColorTaken(this.state, colorInput)) {
-      client.send("error", {
-        code: "color_taken",
-        message: "Color is already taken by another player.",
-      });
-      throw new Error("color_taken");
+      throw new Error("room_full_palette");
     }
 
     const player = new LobbyPlayer();
     player.sessionId = client.sessionId;
     player.nickname = nickname;
-    player.color = colorInput;
+    player.color = color;
     player.ready = false;
     player.isHost = this.state.players.size === 0;
     player.joinedAt = Date.now();
@@ -294,7 +298,12 @@ export class GameRoom extends Room<LobbyState> {
 
 function normaliseNickname(input: unknown): string {
   if (typeof input !== "string") return "";
-  return input.trim();
+  // Strip C0/C1 control chars, zero-width + bidi overrides, and ZWNBSP.
+  // Without this a client could send RTL-override characters to spoof
+  // display order, or newlines to break the room-view layout.
+  return input
+    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+    .trim();
 }
 
 function isValidNickname(nickname: string): boolean {
@@ -311,6 +320,13 @@ function isColorTaken(state: LobbyState, color: string): boolean {
     if (p.color === color) taken = true;
   });
   return taken;
+}
+
+function firstFreeColor(state: LobbyState): string | null {
+  for (const c of ALLOWED_COLORS) {
+    if (!isColorTaken(state, c)) return c;
+  }
+  return null;
 }
 
 function isAllowedMap(mapId: string): boolean {

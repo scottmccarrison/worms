@@ -49,7 +49,7 @@ describe("GameRoom lobby", () => {
     await room.leave();
   });
 
-  it("rejects a duplicate color at join time", async () => {
+  it("auto-assigns a free color when requested is taken", async () => {
     const alice = await colyseus.sdk.joinOrCreate("game", {
       nickname: "Alice",
       color: ALLOWED_COLORS[0],
@@ -57,15 +57,32 @@ describe("GameRoom lobby", () => {
     await tick();
     const code = (alice.state as any).code as string;
 
-    await expect(
-      colyseus.sdk.joinOrCreate("game", {
-        code,
-        nickname: "Bob",
-        color: ALLOWED_COLORS[0], // same colour
-      }),
-    ).rejects.toBeDefined();
+    const bob = await colyseus.sdk.joinOrCreate("game", {
+      code,
+      nickname: "Bob",
+      color: ALLOWED_COLORS[0], // same as Alice
+    });
+    await tick();
+
+    const players = (bob.state as any).players;
+    const bobPlayer = players.get(bob.sessionId);
+    expect(bobPlayer).toBeDefined();
+    expect(bobPlayer.color).not.toBe(ALLOWED_COLORS[0]);
+    expect(ALLOWED_COLORS).toContain(bobPlayer.color);
 
     await alice.leave();
+    await bob.leave();
+  });
+
+  it("strips bidi + zero-width chars from nicknames", async () => {
+    const room = await colyseus.sdk.joinOrCreate("game", {
+      nickname: "‮evil‬​",
+      color: ALLOWED_COLORS[0],
+    });
+    await tick();
+    const me = (room.state as any).players.get(room.sessionId);
+    expect(me.nickname).toBe("evil");
+    await room.leave();
   });
 
   it("rejects a nickname longer than 16 characters", async () => {
