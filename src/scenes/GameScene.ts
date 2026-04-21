@@ -7,6 +7,7 @@ import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
 import type { LobbyState, TeamInit as NetTeamInit } from "../net/types";
+import { applyRemoteInput } from "./game/networkBridge";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -68,6 +69,9 @@ export class GameScene extends Phaser.Scene {
   // Team id owned by our sessionId (set in create() after teamsInit maps sessionIds
   // to team ids). Empty when spectating or offline.
   private myTeamId = "";
+  // Client-monotonic input sequence number. Server does not rely on it for
+  // ordering (WebSocket is ordered) but logs it for debugging.
+  private inputSeq = 0;
 
   constructor() {
     super("GameScene");
@@ -196,11 +200,20 @@ export class GameScene extends Phaser.Scene {
     this.inputController = new InputController({
       scene: this,
       allWorms: this.allWorms,
-      onEndTurn: () => this.turnManager.endTurnByPlayer(),
+      onEndTurn: () => {
+        this.sendLocalInput("input_end_turn", {});
+        this.turnManager.endTurnByPlayer();
+      },
       onSelectWeapon: (n) => {
-        this.getActiveWeaponManager()?.selectByKey(n);
+        const wm = this.getActiveWeaponManager();
+        wm?.selectByKey(n);
+        const selected = wm?.getSelected().id;
+        if (selected) {
+          this.sendLocalInput("input_select_weapon", { weaponId: selected });
+        }
       },
       onFire: () => {
+        this.sendLocalInput("input_fire", {});
         this.tryFireActiveWeapon();
       },
       onCycleMap: () => {
@@ -208,6 +221,13 @@ export class GameScene extends Phaser.Scene {
         const next = nextId(this.mapId);
         this.scene.restart({ mapId: next });
       },
+      // Epic 9 input relay. All callbacks are no-ops in offline mode
+      // because sendLocalInput early-returns when !isNetworked.
+      onWalk: (dir) => this.sendLocalInput("input_walk", { dir }),
+      onJump: () => this.sendLocalInput("input_jump", {}),
+      onBackflip: () => this.sendLocalInput("input_backflip", {}),
+      onAimAngleChange: (angleRad) => this.sendLocalInput("input_aim_angle", { angleRad }),
+      onAimPowerChange: (power) => this.sendLocalInput("input_aim_power", { power }),
     });
 
     // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
@@ -299,6 +319,44 @@ export class GameScene extends Phaser.Scene {
       // Subscribe to authoritative turn state.
       this.room.state.listen("currentTeamId", (teamId) => this.onActiveTeamChanged(teamId));
       this.room.state.listen("turnEndsAt", (t) => this.syncTurnTimer(t));
+
+      // Input relay handlers. Server broadcasts relayed messages to non-senders;
+      // when we're the active player we should never receive our own inputs, so
+      // these only fire for other players' actions.
+      this.room.onMessage("input_walk", (p: { dir?: -1 | 0 | 1 }) => {
+        this.applyRemoteToActiveWorm("walk", p);
+      });
+      this.room.onMessage("input_jump", (p: unknown) => {
+        this.applyRemoteToActiveWorm("jump", p);
+      });
+      this.room.onMessage("input_backflip", (p: unknown) => {
+        this.applyRemoteToActiveWorm("backflip", p);
+      });
+      this.room.onMessage("input_aim_angle", (p: { angleRad?: number }) => {
+        this.applyRemoteToActiveWorm("aim_angle", p);
+      });
+      this.room.onMessage("input_aim_power", (p: { power?: number }) => {
+        this.applyRemoteToActiveWorm("aim_power", p);
+      });
+      this.room.onMessage(
+        "input_select_weapon",
+        (p: { weaponId?: "bazooka" | "shotgun" | "handgrenade" }) => {
+          const wm = this.getActiveWeaponManager();
+          if (wm && p.weaponId) wm.select(p.weaponId);
+        },
+      );
+      this.room.onMessage("input_fire", () => {
+        // Fire is GameScene-level: networkBridge treats "fire" as a no-op
+        // because it needs WeaponManager + ProjectileManager context. We
+        // replay directly here using the active worm's current aim state
+        // (prior input_aim_angle / input_aim_power messages have synced it).
+        this.tryFireActiveWeapon();
+      });
+      this.room.onMessage("input_end_turn", () => {
+        // Server owns the turn machine; our local end-turn just drops us into
+        // turnEnding so the settle/snapshot cadence runs on all clients.
+        this.turnManager.endTurnByPlayer();
+      });
     }
 
     this.debugGfx = this.add.graphics();
@@ -541,6 +599,33 @@ export class GameScene extends Phaser.Scene {
   protected syncTurnTimer(_endsAt: number): void {
     // TurnManager reads endsAt on adoption; this hook is left wired so future
     // epics can inject latency compensation without changing the listener shape.
+  }
+
+  /**
+   * Forward a local input event to the server.
+   * No-op in offline mode or when we're not the active player (guards
+   * against races between gate-flips and in-flight key events).
+   */
+  protected sendLocalInput(type: string, payload: Record<string, unknown>): void {
+    if (!this.isNetworked || !this.room) return;
+    if (!this.iAmActive()) return;
+    this.inputSeq++;
+    this.room.send(type, { ...payload, seq: this.inputSeq });
+  }
+
+  /**
+   * Route a relayed input message onto the currently-active remote worm.
+   * Looks up the target worm by the server's `currentWormId` so if the
+   * server has already rotated worms within a team, we replay onto the
+   * right one.
+   */
+  private applyRemoteToActiveWorm(type: string, payload: unknown): void {
+    if (!this.isNetworked || !this.room) return;
+    const currentWormId = this.room.state.currentWormId;
+    if (!currentWormId) return;
+    const target = this.allWorms.find((w) => w.name === currentWormId);
+    if (!target) return;
+    applyRemoteInput(target, type, payload);
   }
 
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {

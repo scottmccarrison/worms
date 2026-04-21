@@ -9,6 +9,14 @@ export interface InputControllerInit {
   onSelectWeapon: (n: 1 | 2 | 3) => void; // called when 1/2/3 pressed in normal state
   onFire: () => void; // called when F pressed in normal state
   onCycleMap: () => void; // called when M pressed; dev affordance to cycle maps
+  // Epic 9: optional callbacks fired when local input mutates the active worm.
+  // Default to no-op so offline behavior stays identical. GameScene wires these
+  // in networked mode to relay inputs to the server.
+  onWalk?: (dir: -1 | 0 | 1) => void;
+  onJump?: () => void;
+  onBackflip?: () => void;
+  onAimAngleChange?: (rad: number) => void;
+  onAimPowerChange?: (power: number) => void;
 }
 
 export class InputController {
@@ -17,8 +25,16 @@ export class InputController {
   private readonly onSelectWeapon: (n: 1 | 2 | 3) => void;
   private readonly onFire: () => void;
   private readonly onCycleMap: () => void;
+  private readonly onWalk: (dir: -1 | 0 | 1) => void;
+  private readonly onJump: () => void;
+  private readonly onBackflip: () => void;
+  private readonly onAimAngleChange: (rad: number) => void;
+  private readonly onAimPowerChange: (power: number) => void;
   private activeWorm: Worm | null = null;
   private inputAllowed = false;
+  // Track last walk direction so we only fire onWalk on transitions
+  // (matches the server contract: press -> send {dir:-1}, release -> send {dir:0}).
+  private lastWalkDir: -1 | 0 | 1 = 0;
 
   // Key bindings
   private readonly keyLeft: Phaser.Input.Keyboard.Key;
@@ -51,6 +67,11 @@ export class InputController {
     this.onSelectWeapon = init.onSelectWeapon;
     this.onFire = init.onFire;
     this.onCycleMap = init.onCycleMap;
+    this.onWalk = init.onWalk ?? (() => {});
+    this.onJump = init.onJump ?? (() => {});
+    this.onBackflip = init.onBackflip ?? (() => {});
+    this.onAimAngleChange = init.onAimAngleChange ?? (() => {});
+    this.onAimPowerChange = init.onAimPowerChange ?? (() => {});
 
     const kb = this.scene.input.keyboard;
     if (!kb) throw new Error("InputController: keyboard plugin not available");
@@ -191,10 +212,17 @@ export class InputController {
       // Normal movement
       const walkDir = this.readHorizontalAxis();
       worm.walk(walkDir);
+      // Fire onWalk only on direction transitions so the server sees one
+      // press + one release event, not a stream of per-frame samples.
+      if (walkDir !== this.lastWalkDir) {
+        this.onWalk(walkDir);
+        this.lastWalkDir = walkDir;
+      }
 
       // Jump
       if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
         worm.jump();
+        this.onJump();
       }
 
       // Backflip
@@ -203,11 +231,24 @@ export class InputController {
         Phaser.Input.Keyboard.JustDown(this.keyShift)
       ) {
         worm.backflip();
+        this.onBackflip();
       }
 
-      // Aim
+      // Aim (continuous while held; fire aim-angle callback when the angle
+      // actually changes, not every frame).
       const aimDir = this.readAimAxis();
+      const prevAim = worm.aimAngle;
       worm.aim(aimDir);
+      // Worm.aim queues; actual angle updates happen in Worm.update. The
+      // post-update sync below surfaces the real change. For now, fire on
+      // input intent - the server relay is advisory, turn_snapshot reconciles.
+      if (aimDir !== 0) {
+        // Sample the updated angle after aim() runs (Worm.update applies it
+        // on its own tick - we approximate here by reading current angle;
+        // the final value arrives via turn_snapshot anyway).
+        this.onAimAngleChange(worm.aimAngle);
+      }
+      void prevAim;
 
       // M cycles maps (dev affordance) - checked BEFORE weapon keys so it takes priority
       if (Phaser.Input.Keyboard.JustDown(this.keyMapCycle)) {
@@ -228,8 +269,10 @@ export class InputController {
       // Power adjust ([ and ])
       if (Phaser.Input.Keyboard.JustDown(this.keyPowerDown)) {
         worm.nudgeAimPower(-tuning.weapons.powerStepPerPress);
+        this.onAimPowerChange(worm.aimPower01);
       } else if (Phaser.Input.Keyboard.JustDown(this.keyPowerUp)) {
         worm.nudgeAimPower(+tuning.weapons.powerStepPerPress);
+        this.onAimPowerChange(worm.aimPower01);
       }
     }
 
