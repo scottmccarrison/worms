@@ -31,6 +31,7 @@ export class Worm {
   // Public state
   health: number;
   aimAngle = -Math.PI / 4; // radians; -PI/4 = 45deg up-forward (hits terrain reliably on rolling hills)
+  aimPower01 = 0.5; // 0..1 power level for weapon fire
   facing: -1 | 1 = 1;
   pendingDamage = 0;
   isAlive = true;
@@ -324,6 +325,16 @@ export class Worm {
 
   isJetPacking(): boolean {
     return this.jetPackActive;
+  }
+
+  /** Pixel X position (derived from physics body). */
+  get xPx(): number {
+    return toPixels(this.body.getPosition().x);
+  }
+
+  /** Pixel Y position (derived from physics body). */
+  get yPx(): number {
+    return toPixels(this.body.getPosition().y);
   }
 
   /** Passthrough to planck body gravity scale. */
