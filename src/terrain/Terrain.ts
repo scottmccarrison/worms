@@ -170,7 +170,9 @@ export class Terrain {
       density: 1,
       friction: 1,
     });
-    this.bodyMeta.set(body, { kind: "terrain", rowY: cyPx });
+    const meta = { kind: "terrain" as const, rowY: cyPx };
+    this.bodyMeta.set(body, meta);
+    body.setUserData(meta);
     this.terrainBodies.add(body);
   }
 }
