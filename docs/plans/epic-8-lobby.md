@@ -322,3 +322,7 @@ Branch workflow:
 - `src/maps/registry.ts` (map whitelist source of truth)
 - `docs/decisions/001-framework-pivot.md` (pivot rationale)
 - Colyseus 0.15 docs: https://docs.colyseus.io/ (room lifecycle, schema, filterBy)
+
+## Post-merge notes
+
+**Mobile-first polish pass**: After the initial W1+W2+W3 landed, a follow-up W4 workstream addressed three gaps flagged from CLAUDE.md's mobile-first requirements: portrait orientation splash, Web Share API invite button, and uppercase + auto-focus on the join code input. The plan should have invoked `/frontend-design` up front for the lobby UI; future UI epics must include it as a required plan step per CLAUDE.md.
