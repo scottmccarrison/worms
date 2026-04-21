@@ -41,6 +41,8 @@ export class Worm {
   private activeRope: NinjaRope | null = null;
   private jetPackActive = false;
 
+  private isActivePlayer = false;
+
   // Foot contact tracking
   private footContactCount = 0;
   private footSensor: Fixture;
@@ -271,31 +273,36 @@ export class Worm {
 
     this.graphics.clear();
 
-    // Body circle
+    if (this.isActivePlayer) {
+      this.graphics.lineStyle(3, 0xffff00, 1);
+      this.graphics.strokeCircle(xPx, yPx, r + 4);
+    }
+
     this.graphics.fillStyle(color, 1);
     this.graphics.fillCircle(xPx, yPx, r);
 
-    // Outline - brighter when selected (toggled externally by GameScene)
     this.graphics.lineStyle(1.5, 0xffffff, 0.6);
     this.graphics.strokeCircle(xPx, yPx, r);
 
-    // Aim line
-    const aimLen = r * 2.2;
-    const ax = xPx + Math.cos(this.aimAngle) * this.facing * aimLen;
-    const ay = yPx + Math.sin(this.aimAngle) * aimLen;
-    this.graphics.lineStyle(2, 0xffffff, 0.8);
-    this.graphics.beginPath();
-    this.graphics.moveTo(xPx, yPx);
-    this.graphics.lineTo(ax, ay);
-    this.graphics.strokePath();
+    if (this.isActivePlayer) {
+      const aimLen = r * 2.2;
+      const ax = xPx + Math.cos(this.aimAngle) * this.facing * aimLen;
+      const ay = yPx + Math.sin(this.aimAngle) * aimLen;
+      this.graphics.lineStyle(2, 0xffffff, 0.8);
+      this.graphics.beginPath();
+      this.graphics.moveTo(xPx, yPx);
+      this.graphics.lineTo(ax, ay);
+      this.graphics.strokePath();
+    }
   }
 
   /** Highlight this worm as the active one. */
   setActive(active: boolean): void {
+    this.isActivePlayer = active;
     if (active) {
       this.graphics.setAlpha(1.0);
     } else {
-      this.graphics.setAlpha(this.isAlive ? 0.75 : 0.3);
+      this.graphics.setAlpha(this.isAlive ? 0.45 : 0.2);
     }
   }
 
