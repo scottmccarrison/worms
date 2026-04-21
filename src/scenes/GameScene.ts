@@ -13,13 +13,13 @@ import type {
   TeamInit as NetTeamInit,
   TurnResolvedMessage,
 } from "../net/types";
-import { applyRemoteInput, buildTurnSnapshot, setWormFromSnapshot } from "./game/networkBridge";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
+import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
@@ -33,6 +33,7 @@ import { Team } from "../worm/Team";
 import { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
 import { fallDamageFromImpulse } from "../worm/fallDamage";
+import { applyRemoteInput, buildTurnSnapshot, setWormFromSnapshot } from "./game/networkBridge";
 
 export class GameScene extends Phaser.Scene {
   private physicsSystem!: PhysicsSystem;
@@ -45,6 +46,8 @@ export class GameScene extends Phaser.Scene {
   private touchControls!: TouchControls;
   private turnManager!: TurnManager;
   private turnHUD!: TurnHUD;
+  // Epic 9: spectator "Waiting for X..." banner. Only instantiated in networked mode.
+  private spectatorHUD: SpectatorHUD | null = null;
 
   // Weapon system
   private projectileManager!: ProjectileManager;
@@ -136,6 +139,7 @@ export class GameScene extends Phaser.Scene {
       this.projectileManager.destroy();
       this.weaponDrawer.destroy();
       this.aimHUD.destroy();
+      this.spectatorHUD?.destroy();
     });
 
     // Spawn worms using map spawn points (predefined or scanned).
@@ -313,6 +317,10 @@ export class GameScene extends Phaser.Scene {
 
       // Server owns turn rotation; local SETTLED no longer cycles teams.
       this.turnManager.setExternallyDriven(true);
+
+      // Passive "Waiting for X..." banner, only mounted in networked mode.
+      this.spectatorHUD = new SpectatorHUD({ scene: this });
+      this.refreshSpectatorBanner();
 
       // Gate initial input based on the state we see at scene-create time.
       // If the server hasn't picked currentTeamId yet, err on the side of
@@ -603,6 +611,38 @@ export class GameScene extends Phaser.Scene {
     const active = this.iAmActive();
     this.inputController?.setInputAllowed(active);
     this.turnHUD?.setEndTurnEnabled(active);
+    this.refreshSpectatorBanner();
+  }
+
+  /**
+   * Toggle the spectator banner based on current turn ownership.
+   * - I'm active: hide.
+   * - Someone else is active: show "Waiting for {their nickname}...".
+   * - Active team has no owner (server about to auto-skip): show a
+   *   generic message. The banner will flip to the real owner a moment
+   *   later when the skip lands.
+   */
+  private refreshSpectatorBanner(): void {
+    if (!this.spectatorHUD || !this.room) return;
+    if (this.iAmActive()) {
+      this.spectatorHUD.hide();
+      return;
+    }
+    const activeTeamId = this.room.state.currentTeamId;
+    if (!activeTeamId) {
+      this.spectatorHUD.hide();
+      return;
+    }
+    // Find the owner's sessionId via teamsInit, then their nickname via
+    // state.players. Falls back to the team name if either lookup misses.
+    const team = this.teamsInit?.find((t) => t.id === activeTeamId);
+    const ownerSessionId = team?.ownerSessionId ?? "";
+    let label = team?.name ?? activeTeamId;
+    if (ownerSessionId) {
+      const player = this.room.state.players.get(ownerSessionId);
+      if (player?.nickname) label = player.nickname;
+    }
+    this.spectatorHUD.show(`Waiting for ${label}...`);
   }
 
   /**
@@ -693,6 +733,7 @@ export class GameScene extends Phaser.Scene {
   protected onServerGameOver(msg: GameOverMessage): void {
     this.inputController?.setInputAllowed(false);
     this.turnHUD?.setEndTurnEnabled(false);
+    this.spectatorHUD?.hide();
     const winningTeam = this.teams.find((t) => t.id === msg.winnerTeamId) ?? null;
     this.turnHUD?.showGameOver(winningTeam?.name ?? null);
   }

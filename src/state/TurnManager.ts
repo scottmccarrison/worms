@@ -145,8 +145,7 @@ export class TurnManager {
     // trigger a local cycle (maxSettleReached) to keep the server in charge.
     if (this.externallyDriven) {
       const willExpireTurn =
-        stateName === "turnActive" &&
-        snap.context.turnElapsedMs + dtMs >= tuning.turn.durationMs;
+        stateName === "turnActive" && snap.context.turnElapsedMs + dtMs >= tuning.turn.durationMs;
       const willExpireSettle =
         stateName === "turnEnding" &&
         snap.context.turnEndingElapsedMs + dtMs >= tuning.turn.maxSettleMs;
@@ -208,7 +207,9 @@ export class TurnManager {
    */
   adoptServerTurn(turnSeq: number, teamId: string, wormId: string, endsAt: number): void {
     if (!this.externallyDriven) {
-      console.warn("[TurnManager] adoptServerTurn called outside externally-driven mode; ignoring.");
+      console.warn(
+        "[TurnManager] adoptServerTurn called outside externally-driven mode; ignoring.",
+      );
       return;
     }
     if (turnSeq <= this.externalTurnSeq) {

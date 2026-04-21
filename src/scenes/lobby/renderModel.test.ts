@@ -29,7 +29,9 @@ function makeState(players: LobbyPlayer[], selectedMapId = "flat"): LobbyState {
       get length() {
         return teamOrder.length;
       },
-      forEach: (cb) => teamOrder.forEach((id) => cb(id)),
+      forEach: (cb) => {
+        for (const id of teamOrder) cb(id);
+      },
     },
     currentTeamId: "",
     currentWormId: "",

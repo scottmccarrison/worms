@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { toMeters, toPixels } from "../../physics/scale";
 import type { CircleCut, WormSnapshot } from "../../net/types";
+import { toMeters, toPixels } from "../../physics/scale";
 import {
   type TeamLike,
   type WormLike,
