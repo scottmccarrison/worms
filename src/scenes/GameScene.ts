@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
-import { mountTuningPanel } from "../debug/tuningPanel";
+import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
@@ -59,6 +59,10 @@ export class GameScene extends Phaser.Scene {
     const candidate =
       data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
+    // Register scene restart hook for dat.gui Maps panel
+    registerMapCycleFn((id: string) => {
+      this.scene.restart({ mapId: id });
+    });
   }
 
   private readMapQueryParam(): string | null {
