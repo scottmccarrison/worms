@@ -82,10 +82,16 @@ export class NinjaRope implements Utility {
     }
     this.anchor.setUserData({ kind: "rope-anchor" });
 
-    // Compute current distance; joint length = that distance (taut from frame 1).
-    const dx = wormPos.x - hit.pointMeters.x;
-    const dy = wormPos.y - hit.pointMeters.y;
-    this.lengthM = Math.hypot(dx, dy);
+    // Compute current worm-anchor distance. Joint length starts slightly shorter
+    // so the rope is under tension on frame 1 - pulls worm off the ground and
+    // initiates the pendulum swing.
+    const dx = hit.pointMeters.x - wormPos.x;
+    const dy = hit.pointMeters.y - wormPos.y;
+    const actualDistance = Math.hypot(dx, dy);
+    this.lengthM = Math.max(
+      actualDistance * tuning.rope.initialLengthScale,
+      tuning.rope.minLengthM,
+    );
 
     const joint = this.world.createJoint(
       new DistanceJoint(
@@ -107,6 +113,18 @@ export class NinjaRope implements Utility {
       return;
     }
     this.joint = joint as DistanceJoint;
+
+    // Kick the worm toward the anchor so it breaks off the ground and the
+    // pendulum has some initial velocity to swing with.
+    if (actualDistance > 0.001) {
+      const invDist = 1 / actualDistance;
+      const impulseMag = tuning.rope.fireImpulseMag;
+      this.worm.body.applyLinearImpulse(
+        { x: dx * invDist * impulseMag, y: dy * invDist * impulseMag },
+        this.worm.body.getPosition(),
+        true,
+      );
+    }
 
     this.worm.setActiveRope(this);
     this.state = "attached";

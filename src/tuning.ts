@@ -31,6 +31,11 @@ interface Tuning {
     jointFreqHz: number;
     /** DistanceJoint damping ratio. 0 = bouncy, 1 = critically damped. */
     dampingRatio: number;
+    /** Multiplier applied to actual worm-anchor distance for initial joint length.
+     * < 1 pulls worm toward anchor on fire (lifts off ground, starts swing). */
+    initialLengthScale: number;
+    /** Impulse applied toward anchor at fire (body-mass units, planck applyLinearImpulse). */
+    fireImpulseMag: number;
   };
   jetpack: {
     fuelCapacity: number;
@@ -66,8 +71,10 @@ export const tuning: Tuning = {
     minLengthM: 0.8,
     adjustStepM: 0.4,
     adjustCooldownMs: 60,
-    jointFreqHz: 8,
-    dampingRatio: 0.5,
+    jointFreqHz: 25,
+    dampingRatio: 0.3,
+    initialLengthScale: 0.9,
+    fireImpulseMag: 3,
   },
   jetpack: {
     fuelCapacity: 100,
