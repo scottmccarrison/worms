@@ -4,6 +4,7 @@ import type { Body, Fixture } from "planck";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters, toPixels } from "../physics/scale";
 import { tuning } from "../tuning";
+import type { NinjaRope } from "../utilities/NinjaRope";
 import type { Team } from "./Team";
 import { stepAim } from "./aimAngle";
 
@@ -32,6 +33,12 @@ export class Worm {
   facing: -1 | 1 = 1;
   pendingDamage = 0;
   isAlive = true;
+
+  // Utility state - set from GameScene after construction, not in constructor
+  ropeUtility!: NinjaRope; // assigned by GameScene.create() after worm spawn
+  // jetPackUtility assigned after JetPack import in commit 4
+  private activeRope: NinjaRope | null = null;
+  private jetPackActive = false;
 
   // Foot contact tracking
   private footContactCount = 0;
@@ -119,6 +126,8 @@ export class Worm {
 
   walk(direction: -1 | 0 | 1): void {
     if (!this.isAlive) return;
+    if (this.activeRope !== null) return; // rope controls own lateral physics
+    if (this.jetPackActive) return; // walk keys intercepted by JetPack.setHorizontalInput
     const vel = this.body.getLinearVelocity();
     const targetVx = direction * tuning.worm.walkSpeedMps;
     this.body.setLinearVelocity({ x: targetVx, y: vel.y });
@@ -127,6 +136,8 @@ export class Worm {
 
   jump(): void {
     if (!this.isAlive) return;
+    if (this.activeRope !== null) return; // no jumping while roped
+    if (this.jetPackActive) return; // no jumping while jetpacking
     if (!this.canJump()) return;
     const d = tuning.worm.density;
     this.body.applyLinearImpulse(
@@ -137,6 +148,8 @@ export class Worm {
 
   backflip(): void {
     if (!this.isAlive) return;
+    if (this.activeRope !== null) return; // no backflip while roped
+    if (this.jetPackActive) return; // no backflip while jetpacking
     if (!this.canJump()) return;
     const d = tuning.worm.density;
     this.body.applyLinearImpulse(
@@ -218,6 +231,9 @@ export class Worm {
   }
 
   destroy(): void {
+    // Clean up utilities before destroying body (joints reference worm body)
+    this.ropeUtility?.destroy();
+    // jetPackUtility cleanup handled once JetPack is wired in commit 4/8
     if (this.body.isActive()) {
       // Clear userData before destroying to break circular ref for GC
       this.body.setUserData(null);
@@ -278,6 +294,31 @@ export class Worm {
     } else {
       this.graphics.setAlpha(this.isAlive ? 0.75 : 0.3);
     }
+  }
+
+  // ------ Utility state (set by NinjaRope / JetPack, not by InputController) ------
+
+  /** Called by NinjaRope when attaching/detaching. */
+  setActiveRope(rope: NinjaRope | null): void {
+    this.activeRope = rope;
+  }
+
+  /** Called by JetPack when activating/deactivating. */
+  setJetPackActive(active: boolean): void {
+    this.jetPackActive = active;
+  }
+
+  isRoped(): boolean {
+    return this.activeRope !== null;
+  }
+
+  isJetPacking(): boolean {
+    return this.jetPackActive;
+  }
+
+  /** Passthrough to planck body gravity scale. */
+  setGravityScale(scale: number): void {
+    this.body.setGravityScale(scale);
   }
 
   /** Return foot sensor fixture for contact listener checks. */
