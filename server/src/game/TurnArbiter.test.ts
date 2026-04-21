@@ -74,10 +74,7 @@ describe("TurnArbiter", () => {
     const room = new StubRoom();
     room.connected = new Set(["alice", "bob"]);
 
-    const rosters: TeamRoster[] = [
-      rosterFor("red", "alice"),
-      rosterFor("blue", "bob"),
-    ];
+    const rosters: TeamRoster[] = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
     const arbiter = new TurnArbiter(room);
     arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
 
@@ -108,10 +105,7 @@ describe("TurnArbiter", () => {
     const room = new StubRoom();
     room.connected = new Set(["alice", "bob"]);
 
-    const rosters: TeamRoster[] = [
-      rosterFor("red", "alice"),
-      rosterFor("blue", "bob"),
-    ];
+    const rosters: TeamRoster[] = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
     const arbiter = new TurnArbiter(room);
     arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
 
