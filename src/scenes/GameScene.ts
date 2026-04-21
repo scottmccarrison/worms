@@ -165,6 +165,9 @@ export class GameScene extends Phaser.Scene {
       scene: this,
       weapons: allWeapons(),
       onSelect: (id) => {
+        // Guard: weapon select via touch drawer must respect the same inputAllowed
+        // gate as keyboard 1/2/3 select (InputController.update guards those).
+        if (!this.turnManager.isInputAllowed()) return;
         this.getActiveWeaponManager()?.select(id);
       },
       getAmmo: (id) => this.getActiveWeaponManager()?.ammoFor(id) ?? 0,
