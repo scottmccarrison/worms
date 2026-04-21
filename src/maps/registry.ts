@@ -1,3 +1,4 @@
+import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
@@ -41,6 +42,16 @@ export const MAPS: Record<string, RegistryEntry> = {
       generator: { id: "island", seed: 0 },
     },
     generator: islandGenerator,
+  },
+  cave: {
+    config: {
+      id: "cave",
+      name: "Cave System",
+      description: "Ceiling with stalactites + bumpy floor. Great for rope play.",
+      maxWorms: 4,
+      generator: { id: "cave", seed: 0 },
+    },
+    generator: caveGenerator,
   },
 };
 

@@ -1,5 +1,6 @@
 import { createCanvas } from "canvas";
 import { describe, expect, it } from "vitest";
+import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
@@ -76,6 +77,24 @@ describe("hillsGenerator", () => {
     const d1 = c1.getContext("2d").getImageData(0, 550, W, 1).data;
     const d2 = c2.getContext("2d").getImageData(0, 550, W, 1).data;
     expect(Array.from(d1)).toEqual(Array.from(d2));
+  });
+});
+
+describe("caveGenerator", () => {
+  it("produces some opaque pixels (terrain drawn)", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    caveGenerator(ctx, W, H, { seed: FIXED_SEED });
+    const opaqueCount = countOpaquePixels(canvas.getContext("2d"));
+    expect(opaqueCount).toBeGreaterThan(0);
+  });
+
+  it("does not fill all pixels (open cave interior exists)", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    caveGenerator(ctx, W, H, { seed: FIXED_SEED });
+    const opaqueCount = countOpaquePixels(canvas.getContext("2d"));
+    expect(opaqueCount).toBeLessThan(totalPixels());
   });
 });
 
