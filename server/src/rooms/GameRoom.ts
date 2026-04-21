@@ -19,6 +19,22 @@ const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000; // 5 minutes
 const MIN_PLAYERS_TO_START = 2;
 
 /**
+ * All gameplay-input message types the server relays from the active
+ * player to spectators. Kept as a const array so the handler wiring
+ * loop in `registerMessageHandlers` can stay declarative.
+ */
+const INPUT_MESSAGE_TYPES = [
+  "input_walk",
+  "input_jump",
+  "input_backflip",
+  "input_aim_angle",
+  "input_aim_power",
+  "input_select_weapon",
+  "input_fire",
+  "input_end_turn",
+] as const;
+
+/**
  * One GameRoom instance per active game.
  *
  * Epic 8 scope: lobby-only. Players join, pick nicknames/colors,
@@ -121,7 +137,20 @@ export class GameRoom extends Room<LobbyState> {
 
   onLeave(client: Client, consented: boolean): void {
     const wasHost = this.state.hostSessionId === client.sessionId;
+    const wasActiveOwner =
+      this.state.phase === "playing" &&
+      this.state.players.get(client.sessionId)?.ownerOfTeamId === this.state.currentTeamId &&
+      this.state.currentTeamId !== "";
+
     this.state.players.delete(client.sessionId);
+
+    // Post-lobby: let the arbiter know so it can force-advance if the
+    // active player just left. Arbiter itself also re-checks connected
+    // sessionIds on advanceTurn, so a non-active departure needs no
+    // explicit handling here.
+    if (this.state.phase === "playing" && this.arbiter && wasActiveOwner) {
+      this.arbiter.onPlayerLeft(client.sessionId);
+    }
 
     if (wasHost && this.state.players.size > 0) {
       // Promote the earliest-joined remaining player.
@@ -327,10 +356,40 @@ export class GameRoom extends Room<LobbyState> {
       }, 50);
     });
 
+    // ---- Epic 9 input relay ----
+    //
+    // Each gameplay input the active player sends is validated and then
+    // re-broadcast to every other client. Validation: phase==="playing"
+    // AND the sender owns state.currentTeamId. On violation we return
+    // silently (no error reply) so a non-malicious mis-timed keystroke
+    // from a backseater doesn't spam the error channel; see bugcheck
+    // targets in the Epic 9 plan for the "drop silently" rationale.
+    for (const inputType of INPUT_MESSAGE_TYPES) {
+      this.onMessage(inputType, (client, payload) => {
+        if (!this.validateActiveInput(client)) return;
+        this.broadcast(inputType, payload, { except: client });
+      });
+    }
+
     this.onMessage("leave", (client) => {
       // Client-initiated clean disconnect. Colyseus will call onLeave.
       client.leave();
     });
+  }
+
+  /**
+   * Guard common to all `input_*` and `turn_snapshot` handlers: the
+   * sender must be the active player for the current team. Silent on
+   * failure per Epic 9 plan (avoid giving cheaters confirmation that a
+   * forged message was seen).
+   */
+  private validateActiveInput(client: Client): boolean {
+    if (this.state.phase !== "playing") return false;
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return false;
+    if (!this.state.currentTeamId) return false;
+    if (player.ownerOfTeamId !== this.state.currentTeamId) return false;
+    return true;
   }
 
   // ---- helpers ----
