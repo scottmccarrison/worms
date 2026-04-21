@@ -6,7 +6,7 @@ import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
-import type { TeamInit as NetTeamInit } from "../net/types";
+import type { LobbyState, TeamInit as NetTeamInit } from "../net/types";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -58,10 +58,16 @@ export class GameScene extends Phaser.Scene {
   // Authoritative team roster from the lobby. Undefined falls back to the
   // hardcoded red/blue defaults that Epic 7 used for single-device play.
   private teamsInit: NetTeamInit[] | undefined;
-  // Colyseus room reference stashed for Epic 9 (authoritative netcode). Not
-  // used this epic - gameplay remains client-local. `protected` keeps TS's
-  // noUnusedLocals quiet until Epic 9 reads it.
-  protected room: Room | undefined;
+  // Colyseus room reference stashed in init(). Drives all Epic 9 netcode;
+  // undefined means single-device / ?offline=1 play (no network code runs).
+  private room: Room<LobbyState> | undefined;
+  // True iff `room` is present. Cached so hot paths don't re-check every frame.
+  private isNetworked = false;
+  // Our Colyseus sessionId when networked, "" otherwise.
+  private mySessionId = "";
+  // Team id owned by our sessionId (set in create() after teamsInit maps sessionIds
+  // to team ids). Empty when spectating or offline.
+  private myTeamId = "";
 
   constructor() {
     super("GameScene");
@@ -71,13 +77,17 @@ export class GameScene extends Phaser.Scene {
     mapId?: string;
     seed?: number;
     teams?: NetTeamInit[];
-    room?: Room;
+    room?: Room<LobbyState>;
   }): void {
     const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
     this.seedOverride = data?.seed;
     this.teamsInit = data?.teams;
     this.room = data?.room;
+    // Presence of room is the ONLY source of truth for networked mode.
+    // Offline / ?offline=1 paths pass no room and this stays false end-to-end.
+    this.isNetworked = !!this.room;
+    this.mySessionId = this.room?.sessionId ?? "";
     // Register scene restart hook for dat.gui Maps panel
     registerMapCycleFn((id: string) => {
       this.scene.restart({ mapId: id });
@@ -259,6 +269,25 @@ export class GameScene extends Phaser.Scene {
       },
     });
     this.turnManager.start();
+
+    // ---------------------------------------------------------------------
+    // Epic 9: networked mode wiring. All of this is gated on `isNetworked`
+    // so the `?offline=1` / single-device path runs zero network code.
+    // Per-commit scope: this commit establishes the listener surface only.
+    // Actual input forwarding + turn adoption land in later commits.
+    // ---------------------------------------------------------------------
+    if (this.isNetworked && this.room) {
+      // Find which team our sessionId owns. Matched against teamsInit's
+      // ownerSessionId (populated by the server on start_game).
+      const mine = this.teamsInit?.find((t) => t.ownerSessionId === this.mySessionId);
+      this.myTeamId = mine?.id ?? "";
+
+      // Subscribe to authoritative turn state. Later commits wire onActiveTeamChanged
+      // + syncTurnTimer to actually do work; for now we only attach the listeners
+      // so the contract is visible and compile-stable.
+      this.room.state.listen("currentTeamId", (teamId) => this.onActiveTeamChanged(teamId));
+      this.room.state.listen("turnEndsAt", (t) => this.syncTurnTimer(t));
+    }
 
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
@@ -462,6 +491,33 @@ export class GameScene extends Phaser.Scene {
       if (ud?.kind === "worm") ud.worm.onFootContactEnd();
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Epic 9 network hooks. No-ops until later commits fill them in; stubs keep
+  // create() compiling now that it references them.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * True when our sessionId is the owner of the currently active team.
+   * Returns false in offline mode.
+   */
+  protected iAmActive(): boolean {
+    if (!this.isNetworked || !this.room) return false;
+    return this.room.state.currentTeamId === this.myTeamId && this.myTeamId !== "";
+  }
+
+  /**
+   * Called every time the server advances `currentTeamId`. Later commits
+   * update input gating + SpectatorHUD; for now we only stash the value.
+   */
+  protected onActiveTeamChanged(_teamId: string): void {
+    // intentionally blank for commit 3; later commits replace.
+  }
+
+  /** Sync the local turn timer to the server's authoritative turnEndsAt. */
+  protected syncTurnTimer(_endsAt: number): void {
+    // intentionally blank for commit 3; later commits consume endsAt.
+  }
 
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
     const normalImpulse = impulse.normalImpulses[0] ?? 0;
