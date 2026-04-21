@@ -6,11 +6,15 @@ export interface InputControllerInit {
   scene: Phaser.Scene;
   allWorms: Worm[]; // renamed from worms; all worms for cycleWithinTeam lookups
   onEndTurn: () => void; // called on Enter keydown
+  onSelectWeapon: (n: 1 | 2 | 3) => void; // called when 1/2/3 pressed in normal state
+  onFire: () => void; // called when F pressed in normal state
 }
 
 export class InputController {
   private readonly scene: Phaser.Scene;
   private readonly onEndTurn: () => void;
+  private readonly onSelectWeapon: (n: 1 | 2 | 3) => void;
+  private readonly onFire: () => void;
   private activeWorm: Worm | null = null;
   private inputAllowed = false;
 
@@ -30,10 +34,19 @@ export class InputController {
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
   private readonly keyEnter: Phaser.Input.Keyboard.Key;
+  // Weapon keys
+  private readonly key1: Phaser.Input.Keyboard.Key;
+  private readonly key2: Phaser.Input.Keyboard.Key;
+  private readonly key3: Phaser.Input.Keyboard.Key;
+  private readonly keyFire: Phaser.Input.Keyboard.Key; // F
+  private readonly keyPowerDown: Phaser.Input.Keyboard.Key; // [
+  private readonly keyPowerUp: Phaser.Input.Keyboard.Key; // ]
 
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
     this.onEndTurn = init.onEndTurn;
+    this.onSelectWeapon = init.onSelectWeapon;
+    this.onFire = init.onFire;
 
     const kb = this.scene.input.keyboard;
     if (!kb) throw new Error("InputController: keyboard plugin not available");
@@ -53,6 +66,13 @@ export class InputController {
     this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    // Weapon keys
+    this.key1 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
+    this.key2 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
+    this.key3 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
+    this.keyFire = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyPowerDown = kb.addKey(Phaser.Input.Keyboard.KeyCodes.OPEN_BRACKET);
+    this.keyPowerUp = kb.addKey(Phaser.Input.Keyboard.KeyCodes.CLOSED_BRACKET);
 
     // Prevent Tab and Enter from bubbling to the browser (form submit etc)
     this.keyTab.on("down", (evt: KeyboardEvent) => {
@@ -173,6 +193,23 @@ export class InputController {
       // Aim
       const aimDir = this.readAimAxis();
       worm.aim(aimDir);
+
+      // Weapon select (1/2/3)
+      if (Phaser.Input.Keyboard.JustDown(this.key1)) this.onSelectWeapon(1);
+      else if (Phaser.Input.Keyboard.JustDown(this.key2)) this.onSelectWeapon(2);
+      else if (Phaser.Input.Keyboard.JustDown(this.key3)) this.onSelectWeapon(3);
+
+      // Fire (F)
+      if (Phaser.Input.Keyboard.JustDown(this.keyFire)) {
+        this.onFire();
+      }
+
+      // Power adjust ([ and ])
+      if (Phaser.Input.Keyboard.JustDown(this.keyPowerDown)) {
+        worm.nudgeAimPower(-tuning.weapons.powerStepPerPress);
+      } else if (Phaser.Input.Keyboard.JustDown(this.keyPowerUp)) {
+        worm.nudgeAimPower(+tuning.weapons.powerStepPerPress);
+      }
     }
 
     void dtMs; // available for future touch smoothing etc.

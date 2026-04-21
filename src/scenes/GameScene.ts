@@ -111,6 +111,8 @@ export class GameScene extends Phaser.Scene {
       scene: this,
       allWorms: this.allWorms,
       onEndTurn: () => this.turnManager.endTurnByPlayer(),
+      onSelectWeapon: () => { /* wired in commit 10 */ },
+      onFire: () => { /* wired in commit 10 */ },
     });
 
     // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
