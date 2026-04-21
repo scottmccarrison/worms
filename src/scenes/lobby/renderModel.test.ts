@@ -49,6 +49,8 @@ function makePlayer(overrides: Partial<LobbyPlayer> & { sessionId: string }): Lo
     ready: overrides.ready ?? false,
     isHost: overrides.isHost ?? false,
     ownerOfTeamId: overrides.ownerOfTeamId ?? "",
+    disconnected: overrides.disconnected ?? false,
+    disconnectGraceEndsAt: overrides.disconnectGraceEndsAt ?? 0,
   };
 }
 
