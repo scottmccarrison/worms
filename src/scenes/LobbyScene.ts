@@ -1,9 +1,11 @@
 import type { Client, Room, RoomAvailable } from "colyseus.js";
 import * as Phaser from "phaser";
 import { allIds, getById } from "../maps/registry";
-import { saveRoomToken } from "../net/clientStorage";
+import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
+import { runReconnectLoop } from "../net/reconnectLoop";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
+import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
 import { buildInviteUrl, shareInvite } from "./lobby/shareInvite";
@@ -104,6 +106,20 @@ export class LobbyScene extends Phaser.Scene {
   // it here during init() and consume it in create() to jump straight to the
   // room view. Cleared after consumption.
   private pendingReconnectedRoom: Room<LobbyState> | null = null;
+
+  // Epic 10: shared reconnect UI. Lazy-created on first use so a cleanly
+  // exited lobby never mounts it. Destroyed on scene shutdown.
+  private reconnectingOverlay: ReconnectingOverlay | null = null;
+
+  // Epic 10: guard against overlapping reconnect loops. If the network
+  // flaps twice in quick succession we must not kick off two parallel
+  // client.reconnect chains (they'd race and one would leave a ghost Room).
+  private reconnectInFlight = false;
+
+  // The code for the current room, cached at join time so the onLeave
+  // handler can look up the reconnection token without reading stale
+  // room state (state may have been freed by the time onLeave fires).
+  private currentRoomCode = "";
 
   init(data: LobbySceneData): void {
     this.netClient = data.netClient;
@@ -333,10 +349,13 @@ export class LobbyScene extends Phaser.Scene {
 
   private onRoomJoined(room: Room<LobbyState>): void {
     this.room = room;
+    this.currentRoomCode = room.state?.code ?? "";
     this.wireRoomMessages(room);
     this.wireRoomStateListeners(room);
     this.view = "room";
     this.clearHome();
+    // Hide any overlay left behind from a previous reconnect attempt.
+    this.reconnectingOverlay?.hide();
     // Epic 10: cache the reconnectionToken keyed by the room code so a page
     // reload within the grace window can slide back in via BootScene's
     // reconnect path. Colyseus 0.15 fills state.code synchronously for the
@@ -360,6 +379,7 @@ export class LobbyScene extends Phaser.Scene {
     const code = room.state?.code ?? "";
     const token = room.reconnectionToken;
     if (code && token) {
+      this.currentRoomCode = code;
       saveRoomToken(code, room.roomId, token);
       return;
     }
@@ -368,6 +388,7 @@ export class LobbyScene extends Phaser.Scene {
     if (!token) return; // token missing is terminal; never save
     const unlisten = room.state.listen("code", (value) => {
       if (value) {
+        this.currentRoomCode = value;
         saveRoomToken(value, room.roomId, token);
         unlisten();
       }
@@ -395,10 +416,83 @@ export class LobbyScene extends Phaser.Scene {
         room,
       });
     });
-    room.onLeave(() => {
+    room.onLeave((code) => {
+      // Colyseus close codes:
+      // - 1000 (CLOSE_NORMAL) = consented leave (tab close / room.leave()).
+      // - 4200 = Colyseus "consented" via room.leave(true).
+      // - anything else (1006, 1011, ...) = unexpected drop (wifi, crash).
+      // Treat 1000 + 4200 as "user meant this" and do NOT kick off a
+      // reconnect loop; any other code triggers the Epic 10 retry flow.
+      if (code === 1000 || code === 4200) {
+        this.room = null;
+        this.renderHome();
+        return;
+      }
+      // Unexpected drop: the server is holding our slot for up to 60s.
+      // Keep `this.room` pinned until the loop resolves; if it succeeds
+      // we'll swap it, if it fails we renderHome() in the final handler.
+      void this.startReconnectionLoop();
+    });
+  }
+
+  /**
+   * Epic 10: unexpected-drop reconnect loop. Shows the shared
+   * ReconnectingOverlay and walks the default backoff schedule. On success
+   * we rewire the new Room in place; on failure we drop the cached token
+   * and fall back to the home view.
+   */
+  private async startReconnectionLoop(): Promise<void> {
+    if (this.reconnectInFlight) return;
+    this.reconnectInFlight = true;
+    const code = this.currentRoomCode;
+    const stored = code ? readRoomToken(code) : null;
+    if (!stored) {
+      // No cached token - can't reconnect. Drop to home.
+      this.reconnectInFlight = false;
       this.room = null;
       this.renderHome();
+      return;
+    }
+
+    const overlay = this.ensureOverlay();
+    overlay.show(1);
+
+    const result = await runReconnectLoop<LobbyState>({
+      client: this.netClient,
+      token: stored.token,
+      onAttempt: (n) => overlay.show(n),
     });
+
+    if (result.ok && result.room) {
+      // Swap to the fresh Room instance. onRoomJoined rewires all listeners
+      // on the new room, caches the rotated token, and hides the overlay.
+      this.onRoomJoined(result.room);
+      this.reconnectInFlight = false;
+      return;
+    }
+
+    // All attempts failed. Token is stale by definition (past grace).
+    overlay.showFinal("Lost connection. Returning home.");
+    if (code) clearRoomToken(code);
+    this.currentRoomCode = "";
+    this.room = null;
+    // Brief pause so the final message is readable before we reset.
+    this.time.delayedCall(2000, () => {
+      overlay.hide();
+      this.renderHome();
+      this.reconnectInFlight = false;
+    });
+  }
+
+  private ensureOverlay(): ReconnectingOverlay {
+    if (!this.reconnectingOverlay) {
+      this.reconnectingOverlay = new ReconnectingOverlay({ scene: this });
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        this.reconnectingOverlay?.destroy();
+        this.reconnectingOverlay = null;
+      });
+    }
+    return this.reconnectingOverlay;
   }
 
   private wireRoomStateListeners(room: Room<LobbyState>): void {
