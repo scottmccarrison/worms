@@ -32,6 +32,28 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   worm.add(tuning.worm, "fallDamageThresholdImpulse", 1, 30, 0.5).name("Fall dmg threshold");
   worm.add(tuning.worm, "fallDamageCapHp", 5, 100, 1).name("Fall dmg cap (HP)");
 
+  const rope = gui.addFolder("Rope");
+  rope.add(tuning.rope, "maxReachM", 5, 60, 1).name("Max reach (m)");
+  rope.add(tuning.rope, "minLengthM", 0.2, 5, 0.1).name("Min length (m)");
+  rope.add(tuning.rope, "adjustRateMps", 1, 20, 0.5).name("Adjust rate (m/s)");
+  rope.add(tuning.rope, "jointFreqHz", 1, 60, 0.5).name("Joint freq (Hz)");
+  rope.add(tuning.rope, "dampingRatio", 0, 2, 0.05).name("Damping ratio");
+  rope.add(tuning.rope, "initialLengthScale", 0.5, 1.0, 0.01).name("Init length x");
+  rope.add(tuning.rope, "fireImpulseMag", 0, 15, 0.25).name("Fire impulse");
+
+  const jet = gui.addFolder("JetPack");
+  jet.add(tuning.jetpack, "fuelCapacity", 10, 500, 10).name("Fuel capacity");
+  jet.add(tuning.jetpack, "fuelPerSecond", 1, 100, 1).name("Fuel per second");
+  jet.add(tuning.jetpack, "upwardForce", 0, 50, 0.5).name("Upward force");
+  jet.add(tuning.jetpack, "sideForce", 0, 30, 0.5).name("Side force");
+
+  // Note: touch tuning values are read at button construction time;
+  // changing them via the panel won't resize/re-alpha existing buttons.
+  const touch = gui.addFolder("Touch");
+  touch.add(tuning.touch, "buttonRadiusPx", 10, 80, 1).name("Button radius (px)");
+  touch.add(tuning.touch, "buttonIdleAlpha", 0, 1, 0.05).name("Idle alpha");
+  touch.add(tuning.touch, "buttonPressedAlpha", 0, 1, 0.05).name("Pressed alpha");
+
   window.addEventListener("keydown", (e) => {
     if (e.key === "`") {
       if (gui.closed) {

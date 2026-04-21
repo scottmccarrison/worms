@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { tuning } from "../tuning";
 import type { Worm } from "../worm/Worm";
 
 export interface InputControllerInit {
@@ -24,6 +25,8 @@ export class InputController {
   private readonly keyW: Phaser.Input.Keyboard.Key;
   private readonly keyS: Phaser.Input.Keyboard.Key;
   private readonly keyTab: Phaser.Input.Keyboard.Key;
+  private readonly keyRope: Phaser.Input.Keyboard.Key; // R
+  private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
 
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
@@ -44,6 +47,8 @@ export class InputController {
     this.keyW = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.keyS = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyTab = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
+    this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
 
     // Prevent Tab from stealing browser focus
     this.keyTab.on("down", (evt: KeyboardEvent) => {
@@ -66,44 +71,79 @@ export class InputController {
     const worm = this.getActiveWorm();
     if (!worm) return;
 
-    // Walk axis: left/right or A/D
-    const goLeft = this.keyLeft.isDown || this.keyA.isDown;
-    const goRight = this.keyRight.isDown || this.keyD.isDown;
-    let walkDir: -1 | 0 | 1 = 0;
-    if (goLeft && !goRight) walkDir = -1;
-    else if (goRight && !goLeft) walkDir = 1;
-    worm.walk(walkDir);
+    // ---------------------------------------------------------------------------
+    // Rope and JetPack activation toggles (always available regardless of state)
+    // ---------------------------------------------------------------------------
 
-    // Jump
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-      worm.jump();
+    if (Phaser.Input.Keyboard.JustDown(this.keyRope)) {
+      worm.ropeUtility.isActive() ? worm.ropeUtility.deactivate() : worm.ropeUtility.activate();
     }
 
-    // Backflip
-    if (
-      Phaser.Input.Keyboard.JustDown(this.keyBackspace) ||
-      Phaser.Input.Keyboard.JustDown(this.keyShift)
-    ) {
-      worm.backflip();
+    if (Phaser.Input.Keyboard.JustDown(this.keyJetPack)) {
+      worm.jetPackUtility.isActive()
+        ? worm.jetPackUtility.deactivate()
+        : worm.jetPackUtility.activate();
     }
 
-    // Aim axis: up/down or W/S
-    const aimUp = this.keyUp.isDown || this.keyW.isDown;
-    const aimDown = this.keyDown.isDown || this.keyS.isDown;
-    let aimDir: -1 | 0 | 1 = 0;
-    if (aimUp && !aimDown) aimDir = -1;
-    else if (aimDown && !aimUp) aimDir = 1;
-    worm.aim(aimDir);
+    // ---------------------------------------------------------------------------
+    // State-dependent movement dispatch
+    // ---------------------------------------------------------------------------
 
-    void dtMs; // dtMs available for future use (touch smoothing, etc.)
+    if (worm.isRoped()) {
+      // While roped: up/down adjust rope length continuously (m/sec * dt).
+      // Aim is LOCKED (arrow keys consumed by rope control; no conflict).
+      const dtSec = dtMs / 1000;
+      const rate = tuning.rope.adjustRateMps * dtSec;
+      if (this.keyUp.isDown || this.keyW.isDown) {
+        worm.ropeUtility.adjust(-rate);
+      } else if (this.keyDown.isDown || this.keyS.isDown) {
+        worm.ropeUtility.adjust(+rate);
+      }
+    } else if (worm.isJetPacking()) {
+      // While jetpacking: walk keys steer horizontally, up thrusts vertical.
+      // Aim is LOCKED (arrow keys are consumed by thrust controls).
+      const hDir = this.readHorizontalAxis();
+      worm.jetPackUtility.setHorizontalInput(hDir);
+      worm.jetPackUtility.setVerticalInput(this.keyUp.isDown || this.keyW.isDown);
+    } else {
+      // Normal movement
+      const walkDir = this.readHorizontalAxis();
+      worm.walk(walkDir);
+
+      // Jump
+      if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+        worm.jump();
+      }
+
+      // Backflip
+      if (
+        Phaser.Input.Keyboard.JustDown(this.keyBackspace) ||
+        Phaser.Input.Keyboard.JustDown(this.keyShift)
+      ) {
+        worm.backflip();
+      }
+
+      // Aim
+      const aimDir = this.readAimAxis();
+      worm.aim(aimDir);
+    }
+
+    void dtMs; // available for future touch smoothing etc.
   }
 
-  /** Cycle to next alive worm. */
+  /** Cycle to next alive worm. Auto-detaches rope and deactivates jetpack on previous worm. */
   cycleActive(): void {
     const next = this.findNextAliveFrom(this.activeIndex + 1);
     if (next === this.activeIndex) return; // all dead or only one alive
-    // Deactivate previous highlight
+
+    // Deactivate utilities on previous worm
     const prev = this.worms[this.activeIndex];
+    if (prev) {
+      prev.ropeUtility?.deactivate();
+      prev.jetPackUtility?.deactivate();
+    }
+
+    // Deactivate previous highlight
     if (prev) prev.setActive(false);
     this.activeIndex = next;
     this.updateActiveHighlight();
@@ -115,6 +155,24 @@ export class InputController {
   }
 
   // ------ Private ------
+
+  /** Read horizontal walk axis. -1 left, 0 none, 1 right. */
+  private readHorizontalAxis(): -1 | 0 | 1 {
+    const goLeft = this.keyLeft.isDown || this.keyA.isDown;
+    const goRight = this.keyRight.isDown || this.keyD.isDown;
+    if (goLeft && !goRight) return -1;
+    if (goRight && !goLeft) return 1;
+    return 0;
+  }
+
+  /** Read aim axis. -1 up, 0 none, 1 down. */
+  private readAimAxis(): -1 | 0 | 1 {
+    const aimUp = this.keyUp.isDown || this.keyW.isDown;
+    const aimDown = this.keyDown.isDown || this.keyS.isDown;
+    if (aimUp && !aimDown) return -1;
+    if (aimDown && !aimUp) return 1;
+    return 0;
+  }
 
   /** Find next alive worm index starting at `from`, wrapping around. Returns current if all dead. */
   private findNextAliveFrom(from: number): number {

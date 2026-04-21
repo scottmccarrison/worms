@@ -7,6 +7,9 @@ import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
+import { TouchControls } from "../ui/TouchControls";
+import { JetPack } from "../utilities/JetPack";
+import { NinjaRope } from "../utilities/NinjaRope";
 import { Team } from "../worm/Team";
 import { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
@@ -20,6 +23,7 @@ export class GameScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private allWorms: Worm[] = [];
   private inputController!: InputController;
+  private touchControls!: TouchControls;
 
   constructor() {
     super("GameScene");
@@ -83,7 +87,26 @@ export class GameScene extends Phaser.Scene {
       this.allWorms.push(w);
     }
 
+    // Assign utilities to each worm AFTER construction (worm doesn't instantiate these)
+    for (const w of this.allWorms) {
+      w.ropeUtility = new NinjaRope({
+        scene: this,
+        world: this.physicsSystem.world,
+        worm: w,
+      });
+      w.jetPackUtility = new JetPack({
+        scene: this,
+        worm: w,
+      });
+    }
+
     this.inputController = new InputController({ scene: this, worms: this.allWorms });
+
+    // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
+    this.touchControls = new TouchControls({
+      scene: this,
+      getActiveWorm: () => this.inputController.getActiveWorm(),
+    });
 
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
@@ -96,7 +119,9 @@ export class GameScene extends Phaser.Scene {
       })
       .setDepth(20);
 
+    // Terrain-cut on click/tap - gate against touch buttons
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (this.touchControls.hitsButton(p)) return;
       this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
     });
 
@@ -114,6 +139,12 @@ export class GameScene extends Phaser.Scene {
       w.update(deltaMs);
     }
 
+    // Update utilities per worm
+    for (const w of this.allWorms) {
+      w.ropeUtility.update(deltaMs);
+      w.jetPackUtility.update(deltaMs);
+    }
+
     // Apply pending damage after physics step
     for (const w of this.allWorms) {
       w.applyPendingDamage();
@@ -123,7 +154,11 @@ export class GameScene extends Phaser.Scene {
 
     const active = this.inputController.getActiveWorm();
     const activeName = active ? active.name : "none";
-    this.hud.setText(`click to cut - bodies: ${this.terrain.bodyCount()} - active: ${activeName}`);
+    const ropeInfo = active?.isRoped() ? " [roped]" : "";
+    const jetInfo = active?.isJetPacking() ? " [jetpacking]" : "";
+    this.hud.setText(
+      `click to cut - bodies: ${this.terrain.bodyCount()} - active: ${activeName}${ropeInfo}${jetInfo}`,
+    );
   }
 
   // ------ Contact listeners ------
@@ -184,6 +219,8 @@ export class GameScene extends Phaser.Scene {
     c.height = height;
     const g = c.getContext("2d");
     if (!g) throw new Error("mask ctx");
+
+    // Ground: wavy hills at the bottom half.
     g.fillStyle = "#4a7d3c";
     g.beginPath();
     g.moveTo(0, height);
@@ -194,6 +231,19 @@ export class GameScene extends Phaser.Scene {
     g.lineTo(width, height);
     g.closePath();
     g.fill();
+
+    // Ceiling: rough rocky strip at the top so rope has something to grapple.
+    g.fillStyle = "#3d5d2f";
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(width, 0);
+    for (let x = width; x >= 0; x -= 4) {
+      const y = 40 + Math.sin(x * 0.015) * 18 + Math.sin(x * 0.04) * 10;
+      g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+
     return c;
   }
 }
