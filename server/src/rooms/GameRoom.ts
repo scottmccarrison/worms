@@ -1,28 +1,364 @@
-import { type Client, Room } from "@colyseus/core";
+import { type Client, Room, matchMaker } from "@colyseus/core";
+import { generateUniqueCode } from "../codegen.js";
+import { ALLOWED_COLORS, LobbyPlayer, LobbyState } from "../state/LobbyState.js";
+
+/**
+ * Whitelist of map ids a host may select. Mirrors
+ * `src/maps/registry.ts` on the client. Hard-coded here instead of
+ * shared so the server is the authority (client cannot widen it).
+ *
+ * Epic 7 added: flat, hills, island, cave.
+ */
+const MAP_WHITELIST = ["flat", "hills", "island", "cave"] as const;
+
+const NICKNAME_MIN = 1;
+const NICKNAME_MAX = 16;
+const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+const MIN_PLAYERS_TO_START = 2;
 
 /**
  * One GameRoom instance per active game.
  *
- * Scaffold only. Full implementation lands in Epic 8 (lobby + room codes),
- * Epic 9 (authoritative state + schema), and Epic 10 (reconnection).
- * See docs/decisions/001-framework-pivot.md for context.
+ * Epic 8 scope: lobby-only. Players join, pick nicknames/colors,
+ * host picks map + hits start, every client transitions to
+ * GameScene locally (no authoritative server sim yet).
+ *
+ * Authoritative physics + state sync land in Epic 9 (#9);
+ * reconnection robustness lands in Epic 10 (#10).
  */
-export class GameRoom extends Room {
+export class GameRoom extends Room<LobbyState> {
   maxClients = 8;
 
-  onCreate(): void {
-    console.log("GameRoom created", this.roomId);
+  /** Handle returned by setTimeout for the empty-room disposal timer. */
+  private disposeTimer: NodeJS.Timeout | null = null;
+
+  async onCreate(options: { nickname?: string; color?: string } = {}): Promise<void> {
+    // Collect codes already in use so we don't collide with other rooms.
+    const takenCodes = await collectTakenCodes();
+    const code = generateUniqueCode(takenCodes);
+
+    const state = new LobbyState();
+    state.code = code;
+    this.setState(state);
+
+    // Publish code to metadata so clients can filter by it when joining.
+    await this.setMetadata({ code });
+
+    this.registerMessageHandlers();
+
+    void options; // explicit - onCreate options are validated on onJoin instead
+    console.log(`GameRoom ${this.roomId} created with code ${code}`);
   }
 
-  onJoin(client: Client): void {
-    console.log(client.sessionId, "joined", this.roomId);
+  async onJoin(
+    client: Client,
+    options: { nickname?: string; color?: string } = {},
+  ): Promise<void> {
+    const nickname = normaliseNickname(options.nickname);
+    const colorInput = typeof options.color === "string" ? options.color : "";
+
+    if (!isValidNickname(nickname)) {
+      client.send("error", {
+        code: "invalid_nickname",
+        message: `Nickname must be ${NICKNAME_MIN}-${NICKNAME_MAX} characters (trimmed).`,
+      });
+      throw new Error("invalid_nickname");
+    }
+
+    if (!isAllowedColor(colorInput)) {
+      client.send("error", {
+        code: "invalid_color",
+        message: "Color is not in the allowed palette.",
+      });
+      throw new Error("invalid_color");
+    }
+
+    if (isColorTaken(this.state, colorInput)) {
+      client.send("error", {
+        code: "color_taken",
+        message: "Color is already taken by another player.",
+      });
+      throw new Error("color_taken");
+    }
+
+    const player = new LobbyPlayer();
+    player.sessionId = client.sessionId;
+    player.nickname = nickname;
+    player.color = colorInput;
+    player.ready = false;
+    player.isHost = this.state.players.size === 0;
+    player.joinedAt = Date.now();
+
+    this.state.players.set(client.sessionId, player);
+
+    if (player.isHost) {
+      this.state.hostSessionId = client.sessionId;
+    }
+
+    // A new joiner cancels any pending empty-room disposal.
+    this.clearDisposeTimer();
+
+    console.log(
+      `${client.sessionId} (${nickname}) joined ${this.roomId} (host=${player.isHost})`,
+    );
   }
 
-  onLeave(client: Client): void {
-    console.log(client.sessionId, "left", this.roomId);
+  onLeave(client: Client, consented: boolean): void {
+    const wasHost = this.state.hostSessionId === client.sessionId;
+    this.state.players.delete(client.sessionId);
+
+    if (wasHost && this.state.players.size > 0) {
+      // Promote the earliest-joined remaining player.
+      let nextHostId = "";
+      let earliest = Number.POSITIVE_INFINITY;
+      this.state.players.forEach((p, sid) => {
+        if (p.joinedAt < earliest) {
+          earliest = p.joinedAt;
+          nextHostId = sid;
+        }
+      });
+      if (nextHostId) {
+        this.state.hostSessionId = nextHostId;
+        const next = this.state.players.get(nextHostId);
+        if (next) next.isHost = true;
+      }
+    } else if (this.state.players.size === 0) {
+      this.state.hostSessionId = "";
+      // Schedule disposal after a grace period so a quick reconnect
+      // flow (Epic 10) can reclaim the room.
+      this.scheduleDisposeIfEmpty();
+    }
+
+    void consented;
+    console.log(`${client.sessionId} left ${this.roomId} (wasHost=${wasHost})`);
   }
 
   onDispose(): void {
-    console.log("GameRoom disposed", this.roomId);
+    this.clearDisposeTimer();
+    console.log(`GameRoom ${this.roomId} (${this.state?.code ?? "?"}) disposed`);
   }
+
+  // ---- message handlers ----
+
+  private registerMessageHandlers(): void {
+    this.onMessage("set_nickname", (client, payload: { nickname?: string } = {}) => {
+      const player = this.requirePlayer(client);
+      if (!player) return;
+      const nickname = normaliseNickname(payload.nickname);
+      if (!isValidNickname(nickname)) {
+        client.send("error", {
+          code: "invalid_nickname",
+          message: `Nickname must be ${NICKNAME_MIN}-${NICKNAME_MAX} characters (trimmed).`,
+        });
+        return;
+      }
+      player.nickname = nickname;
+    });
+
+    this.onMessage("set_color", (client, payload: { color?: string } = {}) => {
+      const player = this.requirePlayer(client);
+      if (!player) return;
+      const color = typeof payload.color === "string" ? payload.color : "";
+      if (!isAllowedColor(color)) {
+        client.send("error", {
+          code: "invalid_color",
+          message: "Color is not in the allowed palette.",
+        });
+        return;
+      }
+      if (color !== player.color && isColorTaken(this.state, color)) {
+        client.send("error", {
+          code: "color_taken",
+          message: "Color is already taken by another player.",
+        });
+        return;
+      }
+      player.color = color;
+    });
+
+    this.onMessage("set_ready", (client, payload: { ready?: boolean } = {}) => {
+      const player = this.requirePlayer(client);
+      if (!player) return;
+      if (this.state.phase !== "lobby") return;
+      player.ready = Boolean(payload.ready);
+    });
+
+    this.onMessage("select_map", (client, payload: { mapId?: string } = {}) => {
+      const player = this.requirePlayer(client);
+      if (!player) return;
+      if (!player.isHost) {
+        client.send("error", {
+          code: "not_host",
+          message: "Only the host may change the map.",
+        });
+        return;
+      }
+      const mapId = typeof payload.mapId === "string" ? payload.mapId : "";
+      if (!isAllowedMap(mapId)) {
+        client.send("error", {
+          code: "invalid_map",
+          message: "Map id is not in the allowed list.",
+        });
+        return;
+      }
+      this.state.selectedMapId = mapId;
+    });
+
+    this.onMessage("start_game", (client) => {
+      const player = this.requirePlayer(client);
+      if (!player) return;
+      if (!player.isHost) {
+        client.send("error", {
+          code: "not_host",
+          message: "Only the host may start the game.",
+        });
+        return;
+      }
+      if (this.state.phase !== "lobby") return;
+      if (this.state.players.size < MIN_PLAYERS_TO_START) {
+        client.send("error", {
+          code: "not_enough_players",
+          message: `Need at least ${MIN_PLAYERS_TO_START} players to start.`,
+        });
+        return;
+      }
+      // All non-host players must be ready.
+      let allReady = true;
+      this.state.players.forEach((p) => {
+        if (!p.isHost && !p.ready) allReady = false;
+      });
+      if (!allReady) {
+        client.send("error", {
+          code: "not_all_ready",
+          message: "All non-host players must be ready.",
+        });
+        return;
+      }
+
+      const seed = Math.floor(Math.random() * 2 ** 31);
+      const teams = buildDefaultTeams();
+      this.broadcast("game_started", {
+        mapId: this.state.selectedMapId,
+        seed,
+        teams,
+      });
+      this.state.phase = "playing";
+    });
+
+    this.onMessage("leave", (client) => {
+      // Client-initiated clean disconnect. Colyseus will call onLeave.
+      client.leave();
+    });
+  }
+
+  // ---- helpers ----
+
+  /** Look up the LobbyPlayer for this client; null if the client is a stranger. */
+  private requirePlayer(client: Client): LobbyPlayer | null {
+    const p = this.state.players.get(client.sessionId);
+    if (!p) {
+      client.send("error", {
+        code: "not_in_room",
+        message: "You are not a member of this room.",
+      });
+      return null;
+    }
+    return p;
+  }
+
+  private scheduleDisposeIfEmpty(): void {
+    this.clearDisposeTimer();
+    this.disposeTimer = setTimeout(() => {
+      if (this.state.players.size === 0) {
+        this.disconnect().catch((err) => {
+          console.error(`GameRoom ${this.roomId} failed to disconnect:`, err);
+        });
+      }
+    }, EMPTY_ROOM_GRACE_MS);
+  }
+
+  private clearDisposeTimer(): void {
+    if (this.disposeTimer) {
+      clearTimeout(this.disposeTimer);
+      this.disposeTimer = null;
+    }
+  }
+}
+
+// ---- pure helpers (exported for tests if needed) ----
+
+function normaliseNickname(input: unknown): string {
+  if (typeof input !== "string") return "";
+  return input.trim();
+}
+
+function isValidNickname(nickname: string): boolean {
+  return nickname.length >= NICKNAME_MIN && nickname.length <= NICKNAME_MAX;
+}
+
+function isAllowedColor(color: string): boolean {
+  return (ALLOWED_COLORS as readonly string[]).includes(color);
+}
+
+function isColorTaken(state: LobbyState, color: string): boolean {
+  let taken = false;
+  state.players.forEach((p) => {
+    if (p.color === color) taken = true;
+  });
+  return taken;
+}
+
+function isAllowedMap(mapId: string): boolean {
+  return (MAP_WHITELIST as readonly string[]).includes(mapId);
+}
+
+/**
+ * Collect codes currently in use across all live GameRooms. Uses
+ * matchMaker.query which reads from the presence store (in-memory by
+ * default).
+ */
+async function collectTakenCodes(): Promise<Set<string>> {
+  const taken = new Set<string>();
+  try {
+    const rooms = await matchMaker.query({ name: "game" });
+    for (const r of rooms) {
+      const code = r.metadata?.code;
+      if (typeof code === "string" && code.length > 0) taken.add(code);
+    }
+  } catch (err) {
+    // If the matchmaker is not reachable (e.g. in some test harnesses),
+    // fall back to an empty set. Uniqueness is still sanity-checked
+    // inside generateUniqueCode.
+    console.warn("collectTakenCodes: matchMaker.query failed, assuming empty set:", err);
+  }
+  return taken;
+}
+
+/**
+ * Placeholder team layout used by `game_started`. Matches the current
+ * GameScene default (2 teams x 2 worms). Replaced with real team
+ * configuration once Epic 9 / #23 lands.
+ */
+export interface TeamInit {
+  id: string;
+  name: string;
+  color: string;
+  wormNames: string[];
+}
+
+function buildDefaultTeams(): TeamInit[] {
+  return [
+    {
+      id: "team-red",
+      name: "Team Red",
+      color: "#ff4444",
+      wormNames: ["Red-1", "Red-2"],
+    },
+    {
+      id: "team-blue",
+      name: "Team Blue",
+      color: "#4488ff",
+      wormNames: ["Blue-1", "Blue-2"],
+    },
+  ];
 }
