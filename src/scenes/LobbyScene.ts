@@ -409,11 +409,14 @@ export class LobbyScene extends Phaser.Scene {
       // Host clicked Start. Hand off to GameScene with authoritative map +
       // seed + team roster; pass the room reference through so Epic 9 can
       // wire server-driven ticks without touching the scene boundary.
+      // Epic 10: also forward the NetClient so GameScene's reconnect loop
+      // has something to call reconnect() on.
       this.scene.start("GameScene", {
         mapId: msg.mapId,
         seed: msg.seed,
         teams: msg.teams,
         room,
+        netClient: this.netClient,
       });
     });
     room.onLeave((code) => {
