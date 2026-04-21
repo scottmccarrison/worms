@@ -1,8 +1,10 @@
 import * as Phaser from "phaser";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
-import { mountTuningPanel } from "../debug/tuningPanel";
+import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
+import { loadMap } from "../maps/loadMap";
+import { firstId, getById, nextId } from "../maps/registry";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -22,7 +24,6 @@ import { Team } from "../worm/Team";
 import { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
 import { fallDamageFromImpulse } from "../worm/fallDamage";
-import { findSpawnPoints } from "../worm/spawnPoints";
 
 export class GameScene extends Phaser.Scene {
   private physicsSystem!: PhysicsSystem;
@@ -47,12 +48,29 @@ export class GameScene extends Phaser.Scene {
   private dragStart: { x: number; y: number } | null = null;
   private dragPointerId: number | null = null;
 
+  // Active map id - set in init() before create() runs
+  private mapId: string = firstId();
+
   constructor() {
     super("GameScene");
   }
 
+  init(data?: { mapId?: string }): void {
+    const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
+    this.mapId = getById(candidate) ? candidate : firstId();
+    // Register scene restart hook for dat.gui Maps panel
+    registerMapCycleFn((id: string) => {
+      this.scene.restart({ mapId: id });
+    });
+  }
+
+  private readMapQueryParam(): string | null {
+    const url = new URL(window.location.href);
+    return url.searchParams.get("map");
+  }
+
   create(): void {
-    const mask = this.buildPlaceholderMask(this.scale.width, this.scale.height);
+    const loaded = loadMap(this.mapId, this.scale.width, this.scale.height);
 
     this.physicsSystem = new PhysicsSystem({ gravity: { x: 0, y: tuning.world.gravityY } });
     this.terrain = new Terrain({
@@ -60,7 +78,7 @@ export class GameScene extends Phaser.Scene {
       physics: this.physicsSystem,
       widthPx: this.scale.width,
       heightPx: this.scale.height,
-      sourceMask: mask,
+      sourceMask: loaded.mask,
     });
 
     // Register contact listeners BEFORE spawning worms
@@ -80,15 +98,9 @@ export class GameScene extends Phaser.Scene {
       this.aimHUD.destroy();
     });
 
-    // Spawn worms on terrain surface
-    const maskImgData = this.terrain.getMaskImageData();
+    // Spawn worms using map spawn points (predefined or scanned)
     const totalWorms = tuning.team.wormsPerTeam * 2;
-    const spawnPts = findSpawnPoints(
-      maskImgData.data,
-      maskImgData.width,
-      maskImgData.height,
-      totalWorms,
-    );
+    const spawnPts = loaded.spawnPoints;
 
     const red = new Team({ id: "red", name: "Red", color: 0xff4444 });
     const blue = new Team({ id: "blue", name: "Blue", color: 0x4488ff });
@@ -153,6 +165,11 @@ export class GameScene extends Phaser.Scene {
       },
       onFire: () => {
         this.tryFireActiveWeapon();
+      },
+      onCycleMap: () => {
+        if (!this.turnManager.isInputAllowed()) return;
+        const next = nextId(this.mapId);
+        this.scene.restart({ mapId: next });
       },
     });
 
@@ -422,38 +439,4 @@ export class GameScene extends Phaser.Scene {
       }
     }
   };
-
-  private buildPlaceholderMask(width: number, height: number): HTMLCanvasElement {
-    const c = document.createElement("canvas");
-    c.width = width;
-    c.height = height;
-    const g = c.getContext("2d");
-    if (!g) throw new Error("mask ctx");
-
-    // Ground: wavy hills at the bottom half.
-    g.fillStyle = "#4a7d3c";
-    g.beginPath();
-    g.moveTo(0, height);
-    for (let x = 0; x <= width; x += 4) {
-      const y = height / 2 + Math.sin(x * 0.01) * 60 + Math.sin(x * 0.03) * 30;
-      g.lineTo(x, y);
-    }
-    g.lineTo(width, height);
-    g.closePath();
-    g.fill();
-
-    // Ceiling: rough rocky strip at the top so rope has something to grapple.
-    g.fillStyle = "#3d5d2f";
-    g.beginPath();
-    g.moveTo(0, 0);
-    g.lineTo(width, 0);
-    for (let x = width; x >= 0; x -= 4) {
-      const y = 40 + Math.sin(x * 0.015) * 18 + Math.sin(x * 0.04) * 10;
-      g.lineTo(x, y);
-    }
-    g.closePath();
-    g.fill();
-
-    return c;
-  }
 }

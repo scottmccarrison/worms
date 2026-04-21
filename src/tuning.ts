@@ -59,6 +59,10 @@ interface Tuning {
     buttonIdleAlpha: number;
     buttonPressedAlpha: number;
   };
+  maps: {
+    /** Default map id used on first load. Must be a valid registry key. */
+    defaultId: string;
+  };
 }
 
 export const tuning: Tuning = {
@@ -109,5 +113,8 @@ export const tuning: Tuning = {
     buttonRadiusPx: 28,
     buttonIdleAlpha: 0.55,
     buttonPressedAlpha: 1.0,
+  },
+  maps: {
+    defaultId: "hills", // registry lookup; falls back to firstId() if invalid
   },
 };

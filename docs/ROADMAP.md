@@ -14,7 +14,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 | 4  | Worm entity (Phaser sprite + planck body) | Done (4a + 4b) | - | [epic-4a-worm](plans/epic-4a-worm.md) / [epic-4b-utilities](plans/epic-4b-utilities.md) |
 | 5  | Turn state + win condition (xstate)      | Done     | (PR #TBD) | [epic-5-turns](plans/epic-5-turns.md)             |
 | 6  | Weapon system (data-driven, 8 + Bazooka) | Partial  | (6a PR TBD) | [epic-6a-weapons-infra](plans/epic-6a-weapons-infra.md) |
-| 7  | Map loading + starter maps               | Todo     | -        | -                                                  |
+| 7  | Map loading + starter maps               | Done     | (Epic 7 PR) | [epic-7-maps](plans/epic-7-maps.md)             |
 | 8  | Colyseus integration: lobby + rooms [*]  | Todo     | -        | -                                                  |
 | 9  | Colyseus integration: state schema [*]   | Todo     | -        | -                                                  |
 | 10 | Colyseus integration: reconnection [*]   | Todo     | -        | -                                                  |

@@ -1,3 +1,4 @@
+import { allIds } from "../maps/registry";
 import { tuning } from "../tuning";
 
 /**
@@ -9,6 +10,13 @@ import { tuning } from "../tuning";
  * static `import "dat.gui"` would drag the ~80KB lib into prod even with a
  * runtime no-op.
  */
+/** Scene restart hook - GameScene sets this after init so tuning panel can cycle maps. */
+export let cycleMapFn: ((id: string) => void) | null = null;
+
+export function registerMapCycleFn(fn: (id: string) => void): void {
+  cycleMapFn = fn;
+}
+
 export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   if (!import.meta.env.DEV) return;
 
@@ -63,6 +71,12 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   touch.add(tuning.touch, "buttonRadiusPx", 10, 80, 1).name("Button radius (px)");
   touch.add(tuning.touch, "buttonIdleAlpha", 0, 1, 0.05).name("Idle alpha");
   touch.add(tuning.touch, "buttonPressedAlpha", 0, 1, 0.05).name("Pressed alpha");
+
+  const maps = gui.addFolder("Maps");
+  maps.add(tuning.maps, "defaultId", allIds()).name("Default Map");
+  // Restart button - calls registered scene hook if available, otherwise no-op
+  const mapControls = { restart: () => cycleMapFn?.(tuning.maps.defaultId) };
+  maps.add(mapControls, "restart").name("Restart with map");
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "`") {
