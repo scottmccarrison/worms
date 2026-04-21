@@ -45,6 +45,13 @@ export interface ArbiterRoomAdapter {
   broadcast(type: string, payload: unknown): void;
   /** Snapshot of session ids currently present; used to skip disconnected team owners. */
   getConnectedSessionIds(): Set<string>;
+  /**
+   * Whether the LobbyPlayer with this sessionId is in the reconnect
+   * grace window. Epic 10 advanceTurn uses this as a skip predicate so
+   * a disconnected non-active owner's upcoming turn is passed over
+   * until they return (or their team is forfeited when grace expires).
+   */
+  getPlayerDisconnected(sessionId: string): boolean;
 }
 
 /**
@@ -242,11 +249,81 @@ export class TurnArbiter {
 
   /**
    * Epic 10: the grace window expired (or a consented leave landed)
-   * while the disconnected player still owned this team. Stubbed in
-   * this commit; forfeit semantics land in the follow-up.
+   * while the disconnected player still owned this team. Mark every
+   * worm in the team's roster as dead in the alive tally. If this
+   * leaves only one team with alive worms, declare game_over.
+   * Otherwise emit a synthetic `turn_resolved` with the forfeited
+   * team's worms flagged alive=false+hp=0 so every client renders them
+   * as dead, then advance the turn.
+   *
+   * Intentionally tolerant of being called twice for the same team
+   * (e.g. forfeit + forceAdvance on the same tick): the second call
+   * finds alive=0 already and declareGameOver is idempotent via the
+   * `gameOver` guard.
    */
-  onTeamForfeit(_teamId: string): void {
-    void _teamId;
+  onTeamForfeit(teamId: string): void {
+    if (this.gameOver) return;
+    const roster = this.teamRosters.get(teamId);
+    if (!roster) return;
+    if ((this.aliveByTeam.get(teamId) ?? 0) === 0) return; // already forfeited
+    this.aliveByTeam.set(teamId, 0);
+
+    // Build the forfeit worm snapshot: every worm in the team is dead.
+    // We start from lastSnapshot's positions when we have them so
+    // clients can place bodies at the last-known spot; fall back to
+    // zeros otherwise.
+    const forfeitWorms: WormSnapshot[] = [];
+    for (const wormId of roster.wormIds) {
+      const prior = this.lastSnapshot?.worms.find((w) => w.id === wormId);
+      forfeitWorms.push({
+        id: wormId,
+        x: prior?.x ?? 0,
+        y: prior?.y ?? 0,
+        vx: 0,
+        vy: 0,
+        hp: 0,
+        alive: false,
+      });
+    }
+
+    // If only one team still has alive worms (or zero), end the game
+    // here rather than emitting an orphan turn_resolved.
+    let aliveTeamCount = 0;
+    let lastAliveTeamId: string | null = null;
+    for (const [tid, count] of this.aliveByTeam) {
+      if (count > 0) {
+        aliveTeamCount += 1;
+        lastAliveTeamId = tid;
+      }
+    }
+    if (aliveTeamCount <= 1) {
+      this.declareGameOver(lastAliveTeamId);
+      return;
+    }
+
+    // Merge the forfeit worms into lastSnapshot so future
+    // advanceTurn/pickNextWormInTeam calls see them as dead.
+    const mergedWorms: WormSnapshot[] = [];
+    const forfeitIds = new Set(forfeitWorms.map((w) => w.id));
+    if (this.lastSnapshot) {
+      for (const w of this.lastSnapshot.worms) {
+        if (!forfeitIds.has(w.id)) mergedWorms.push(w);
+      }
+    }
+    for (const w of forfeitWorms) mergedWorms.push(w);
+    this.lastSnapshot = { worms: mergedWorms, terrainCuts: [] };
+
+    const synth: TurnSnapshot = { worms: forfeitWorms, terrainCuts: [] };
+    const nextResolution = this.advanceTurn(synth);
+    if (nextResolution) {
+      this.room.broadcast("turn_resolved", {
+        turnSeq: nextResolution.turnSeq,
+        worms: forfeitWorms,
+        terrainCuts: [],
+        nextTeamId: nextResolution.nextTeamId,
+        nextWormId: nextResolution.nextWormId,
+      });
+    }
   }
 
   // ---- private helpers ----
@@ -277,7 +354,10 @@ export class TurnArbiter {
     }
 
     // Find the next team in teamOrder that's eligible: alive worms AND
-    // a connected owner. Skip ownerless / disconnected entries.
+    // a connected, non-disconnected owner. Skip ownerless entries,
+    // entries whose owner has physically dropped off the client list,
+    // and entries whose owner is still inside the Epic 10 reconnect
+    // grace window.
     const connected = this.room.getConnectedSessionIds();
     const teamOrderLen = this.room.state.teamOrder.length;
     let nextTeamId = "";
@@ -289,6 +369,7 @@ export class TurnArbiter {
       if (!roster) continue;
       if (!roster.ownerSessionId) continue;
       if (!connected.has(roster.ownerSessionId)) continue;
+      if (this.room.getPlayerDisconnected(roster.ownerSessionId)) continue;
       if ((this.aliveByTeam.get(candidate) ?? 0) <= 0) continue;
       this.currentTeamIdx = idx;
       nextTeamId = candidate;

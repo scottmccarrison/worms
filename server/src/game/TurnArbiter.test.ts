@@ -16,12 +16,16 @@ class StubRoom implements ArbiterRoomAdapter {
   state = new LobbyState();
   broadcasts: Array<{ type: string; payload: unknown }> = [];
   connected = new Set<string>();
+  disconnectedPlayers = new Set<string>();
 
   broadcast(type: string, payload: unknown): void {
     this.broadcasts.push({ type, payload });
   }
   getConnectedSessionIds(): Set<string> {
     return this.connected;
+  }
+  getPlayerDisconnected(sessionId: string): boolean {
+    return this.disconnectedPlayers.has(sessionId);
   }
 }
 

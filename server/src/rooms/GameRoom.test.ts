@@ -392,24 +392,26 @@ describe("GameRoom lobby", () => {
     await bob.leave();
   });
 
-  it("force-advances turn when the active player disconnects", async () => {
+  it("consented leave by the active player forfeits their team (2p -> game_over)", async () => {
     const { alice, bob } = await setupStartedGame();
 
     const firstTeamId = (alice.state as any).currentTeamId as string;
     const active = firstTeamId === "red" ? alice : bob;
     const spectator = firstTeamId === "red" ? bob : alice;
 
-    const resolved: any[] = [];
-    spectator.onMessage("turn_resolved", (p) => resolved.push(p));
+    const gameOvers: any[] = [];
+    spectator.onMessage("game_over", (p) => gameOvers.push(p));
 
+    // `room.leave()` without args is consented; arbiter forfeits the
+    // active team which in a 2-player game leaves one team alive and
+    // triggers game_over.
     await active.leave();
     await tick(200);
 
-    // Active player leaving while holding the turn forces an advance;
-    // the remaining client gets a turn_resolved pointing at itself.
-    expect(resolved.length).toBeGreaterThanOrEqual(1);
-    expect((spectator.state as any).currentTeamId).not.toBe(firstTeamId);
-    expect((spectator.state as any).currentTeamId).not.toBe("");
+    expect(gameOvers).toHaveLength(1);
+    expect(gameOvers[0].winnerTeamId).not.toBe(firstTeamId);
+    expect(gameOvers[0].winnerTeamId).not.toBe(null);
+    expect((spectator.state as any).currentTeamId).toBe("");
 
     await spectator.leave();
   });

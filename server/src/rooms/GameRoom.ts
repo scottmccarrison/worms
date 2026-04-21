@@ -271,6 +271,10 @@ export class GameRoom extends Room<LobbyState> {
         for (const c of self.clients) out.add(c.sessionId);
         return out;
       },
+      getPlayerDisconnected(sessionId: string) {
+        const p = self.state.players.get(sessionId);
+        return p?.disconnected === true;
+      },
     };
   }
 
