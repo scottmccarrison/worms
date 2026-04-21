@@ -3,7 +3,12 @@ import type { SurfacePoint } from "../worm/spawnPoints";
 import { getById } from "./registry";
 import type { LoadedMap } from "./types";
 
-export function loadMap(id: string, widthPx: number, heightPx: number): LoadedMap {
+export function loadMap(
+  id: string,
+  widthPx: number,
+  heightPx: number,
+  seedOverride?: number,
+): LoadedMap {
   const entry = getById(id);
   if (!entry) throw new Error(`Unknown map id: ${id}`);
 
@@ -13,7 +18,11 @@ export function loadMap(id: string, widthPx: number, heightPx: number): LoadedMa
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("loadMap: 2D context unavailable");
 
-  const seed = entry.config.generator.seed || Date.now();
+  // Precedence: explicit override (multiplayer host's authoritative seed) >
+  // config seed > runtime default. Falsy 0 is treated like "unset" to match
+  // the original behavior.
+  const seed =
+    seedOverride !== undefined ? seedOverride : entry.config.generator.seed || Date.now();
   entry.generator(ctx, widthPx, heightPx, {
     ...entry.config.generator.options,
     seed,

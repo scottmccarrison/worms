@@ -10,14 +10,27 @@ into `src/`.
 
 ## Quick start
 
-Requires Node 20+.
+Requires Node 20+. The game has a client (Phaser 3 + planck.js) and a
+Colyseus multiplayer server; run both for the lobby flow, or just the
+client for single-device dev (`?offline=1`).
+
+Client (terminal 1):
 
     npm install
-    npm run dev
+    npm run dev          # Vite on http://localhost:5173
 
-Then open http://localhost:5173.
+Multiplayer server (terminal 2):
+
+    cd server
+    npm install
+    npm run dev          # Colyseus on ws://localhost:2567
+
+Then open http://localhost:5173. For single-device dev that skips the
+lobby entirely, use http://localhost:5173/?offline=1.
 
 ## Scripts
+
+Client (root):
 
 | Command             | What it does                            |
 | ------------------- | --------------------------------------- |
@@ -27,13 +40,38 @@ Then open http://localhost:5173.
 | `npm run typecheck` | `tsc --noEmit`.                         |
 | `npm run lint`      | Biome check (lint + format).            |
 | `npm run format`    | Biome format (writes changes).          |
+| `npm test`          | Vitest run.                             |
+
+Server (`server/`):
+
+| Command             | What it does                            |
+| ------------------- | --------------------------------------- |
+| `npm run dev`       | Colyseus server via `tsx watch`.        |
+| `npm run build`     | `tsc` to `dist/`.                       |
+| `npm start`         | Run built server from `dist/`.          |
+| `npm run typecheck` | `tsc --noEmit`.                         |
+| `npm test`          | Vitest + `@colyseus/testing`.           |
 
 ## Stack
 
 - TypeScript 5 (strict, bundler resolution)
 - Vite 6 (dev server + bundler)
+- Phaser 3 + planck.js (game + physics)
+- Colyseus 0.15 (multiplayer rooms, schema, reconnection)
+- xstate 5 (turn state machine)
 - Biome 1.9 (lint + format)
-- *(Future)* Socket.IO, planck.js, canvas rendering
+- Vitest (unit + integration tests)
+
+## Multiplayer smoke test
+
+1. Start server: `cd server && npm run dev`
+2. Start client: `npm run dev`
+3. Tab A: http://localhost:5173/, nickname "Alice", Create Room, note the 4-letter code.
+4. Tab B (incognito): http://localhost:5173/?room=CODE, nickname "Bob", Join.
+5. Alice picks a map, both hit Ready, Alice clicks Start Game.
+6. Both tabs transition to the game with the selected map.
+
+Game state remains client-local in Epic 8; authoritative netcode lands in Epic 9.
 
 ## Structure
 
