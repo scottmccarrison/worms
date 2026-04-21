@@ -1,6 +1,6 @@
 import type * as Phaser from "phaser";
-import { Circle, DistanceJoint } from "planck";
-import type { Body, Joint, World } from "planck";
+import type { Body, World } from "planck";
+import { DistanceJoint } from "planck";
 import { toPixels } from "../physics/scale";
 import { tuning } from "../tuning";
 import type { Worm } from "../worm/Worm";
@@ -15,13 +15,21 @@ export interface NinjaRopeInit {
   worm: Worm;
 }
 
+/**
+ * Single-joint ninja rope. One DistanceJoint directly from worm to a static
+ * anchor at the raycast hit. Rope is visually a straight line worm -> anchor.
+ * Extend/retract changes the joint length in fixed steps.
+ *
+ * Simpler + snappier than the chain-of-intermediates approach: rope is taut
+ * from frame 1; worm starts swinging immediately under gravity.
+ */
 export class NinjaRope implements Utility {
   readonly worm: Worm;
 
   private state: RopeState = "inactive";
   private anchor: Body | null = null;
-  private readonly intermediates: Body[] = [];
-  private readonly joints: Joint[] = [];
+  private joint: DistanceJoint | null = null;
+  private lengthM = 0;
   private readonly renderGfx: Phaser.GameObjects.Graphics;
   private readonly world: World;
 
@@ -36,42 +44,34 @@ export class NinjaRope implements Utility {
     return this.state === "attached";
   }
 
-  /**
-   * Fire rope in current aim direction. No-op if already active or raycast misses.
-   */
+  /** Fire rope in current aim direction. No-op if already active or raycast misses. */
   activate(): void {
     if (this.state !== "inactive") return;
 
     const wormPos = this.worm.body.getPosition();
-
-    // Compute aim direction from aimAngle + facing
     const angle = this.worm.aimAngle;
     const facing = this.worm.facing;
     const dir = {
       x: Math.cos(angle) * facing,
       y: Math.sin(angle),
     };
-
-    // Normalize
-    const len = Math.sqrt(dir.x * dir.x + dir.y * dir.y);
+    const len = Math.hypot(dir.x, dir.y);
     if (len < 0.001) return;
     dir.x /= len;
     dir.y /= len;
 
-    // Raycast from worm center
     const hit = raycastFirstTerrain(
       this.world,
       { x: wormPos.x, y: wormPos.y },
       dir,
       tuning.rope.maxReachM,
     );
-
     if (!hit) {
       console.log("[NinjaRope] raycast miss - no terrain in range");
       return;
     }
 
-    // Create static anchor body at hit point
+    // Static anchor at hit point.
     this.anchor = this.world.createBody({
       type: "static",
       position: hit.pointMeters,
@@ -82,372 +82,88 @@ export class NinjaRope implements Utility {
     }
     this.anchor.setUserData({ kind: "rope-anchor" });
 
-    // Calculate segment count
+    // Compute current distance; joint length = that distance (taut from frame 1).
     const dx = wormPos.x - hit.pointMeters.x;
     const dy = wormPos.y - hit.pointMeters.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const rawN = Math.floor(distance / tuning.rope.segmentLengthM);
-    const N = Math.max(rawN, tuning.rope.minSegments);
+    this.lengthM = Math.hypot(dx, dy);
 
-    // Build intermediate bodies
-    let prevBody: Body = this.anchor;
-    const anchorPos = hit.pointMeters;
-
-    for (let i = 1; i < N; i++) {
-      const t = i / N;
-      const pos = {
-        x: anchorPos.x + (wormPos.x - anchorPos.x) * t,
-        y: anchorPos.y + (wormPos.y - anchorPos.y) * t,
-      };
-
-      const body = this.world.createBody({
-        type: "dynamic",
-        position: pos,
-        fixedRotation: true,
-      });
-
-      if (!body) {
-        console.error("[NinjaRope] failed to create intermediate body");
-        this._cleanupPartialBuild();
-        return;
-      }
-
-      body.createFixture({
-        shape: new Circle(tuning.rope.intermediateRadiusM),
-        density: 0.5,
-        friction: 1.0,
-        restitution: 0.0,
-      });
-      body.setUserData({ kind: "rope-segment" });
-      this.intermediates.push(body);
-
-      // Joint from prevBody to this intermediate
-      const freqHz = i === N - 1 ? tuning.rope.finalJointFreqHz : tuning.rope.intermediateFreqHz;
-      const joint = this.world.createJoint(
-        new DistanceJoint(
-          {
-            frequencyHz: freqHz,
-            dampingRatio: tuning.rope.dampingRatio,
-            length: tuning.rope.segmentLengthM,
-          },
-          prevBody,
-          body,
-          prevBody.getPosition(),
-          body.getPosition(),
-        ),
-      );
-
-      if (!joint) {
-        console.error("[NinjaRope] createJoint returned null during build");
-        this._cleanupPartialBuild();
-        return;
-      }
-      this.joints.push(joint);
-      prevBody = body;
-    }
-
-    // Final joint from last intermediate (or anchor if N=1) to worm body
-    const finalJoint = this.world.createJoint(
+    const joint = this.world.createJoint(
       new DistanceJoint(
         {
-          frequencyHz: tuning.rope.finalJointFreqHz,
+          frequencyHz: tuning.rope.jointFreqHz,
           dampingRatio: tuning.rope.dampingRatio,
-          length: tuning.rope.segmentLengthM,
+          length: this.lengthM,
         },
-        prevBody,
+        this.anchor,
         this.worm.body,
-        prevBody.getPosition(),
-        this.worm.body.getPosition(),
+        hit.pointMeters,
+        wormPos,
       ),
     );
-
-    if (!finalJoint) {
-      console.error("[NinjaRope] createJoint returned null for final joint");
-      this._cleanupPartialBuild();
+    if (!joint) {
+      console.error("[NinjaRope] createJoint returned null");
+      this.world.destroyBody(this.anchor);
+      this.anchor = null;
       return;
     }
-    this.joints.push(finalJoint);
+    this.joint = joint as DistanceJoint;
 
     this.worm.setActiveRope(this);
     this.state = "attached";
   }
 
-  /**
-   * Detach and clean up all physics bodies and joints. Idempotent.
-   */
   deactivate(): void {
-    if (this.state === "inactive" && this.joints.length === 0 && this.anchor === null) return;
-
-    // Destroy joints first (before bodies)
-    for (const j of this.joints) {
+    if (this.joint) {
       try {
-        this.world.destroyJoint(j);
+        this.world.destroyJoint(this.joint);
       } catch (_e) {
-        // Joint may already be gone
+        /* joint may already be gone */
       }
+      this.joint = null;
     }
-    this.joints.length = 0;
-
-    // Destroy intermediate bodies
-    for (const b of this.intermediates) {
-      if (b.isActive()) {
-        try {
-          this.world.destroyBody(b);
-        } catch (_e) {
-          // Body may already be gone
-        }
-      }
-    }
-    this.intermediates.length = 0;
-
-    // Destroy anchor
     if (this.anchor?.isActive()) {
       try {
         this.world.destroyBody(this.anchor);
       } catch (_e) {
-        // Body may already be gone
+        /* body may already be gone */
       }
     }
     this.anchor = null;
-
+    this.lengthM = 0;
     this.worm.setActiveRope(null);
     this.state = "inactive";
     this.renderGfx.clear();
   }
 
-  /**
-   * Extend rope by one segment (up to maxSegments).
-   */
+  /** Extend rope (worm drops farther from anchor). */
   extend(): void {
-    if (this.state !== "attached") return;
-    // Total segments = intermediates count + 1 (final-to-worm)
-    if (this.intermediates.length >= tuning.rope.maxSegments) return;
-
-    // Remove last joint (the one to worm)
-    const lastJoint = this.joints.pop();
-    if (!lastJoint) return;
-    try {
-      this.world.destroyJoint(lastJoint);
-    } catch (_e) {
-      /* ignore */
-    }
-
-    // Last intermediate (or anchor if no intermediates)
-    const lastBody =
-      this.intermediates.length > 0
-        ? this.intermediates[this.intermediates.length - 1]
-        : this.anchor;
-
-    if (!lastBody) return;
-
-    // Create new body between lastBody and worm
-    const lPos = lastBody.getPosition();
-    const wPos = this.worm.body.getPosition();
-    const midPos = {
-      x: lPos.x + (wPos.x - lPos.x) * 0.5,
-      y: lPos.y + (wPos.y - lPos.y) * 0.5,
-    };
-
-    const newBody = this.world.createBody({
-      type: "dynamic",
-      position: midPos,
-      fixedRotation: true,
-    });
-
-    if (!newBody) {
-      console.error("[NinjaRope] extend: failed to create body");
-      // Rebuild the final joint to keep chain valid
-      this._rebuildFinalJoint(lastBody);
-      return;
-    }
-
-    newBody.createFixture({
-      shape: new Circle(tuning.rope.intermediateRadiusM),
-      density: 0.5,
-      friction: 1.0,
-      restitution: 0.0,
-    });
-    newBody.setUserData({ kind: "rope-segment" });
-    this.intermediates.push(newBody);
-
-    // Joint: lastBody -> newBody
-    const j1 = this.world.createJoint(
-      new DistanceJoint(
-        {
-          frequencyHz: tuning.rope.intermediateFreqHz,
-          dampingRatio: tuning.rope.dampingRatio,
-          length: tuning.rope.segmentLengthM * 0.5,
-        },
-        lastBody,
-        newBody,
-        lastBody.getPosition(),
-        newBody.getPosition(),
-      ),
-    );
-    if (!j1) {
-      console.error("[NinjaRope] extend: j1 null");
-      this.world.destroyBody(newBody);
-      this.intermediates.pop();
-      this._rebuildFinalJoint(lastBody);
-      return;
-    }
-    this.joints.push(j1);
-
-    // Final joint: newBody -> worm (same half-length as j1 for symmetric sag)
-    const j2 = this.world.createJoint(
-      new DistanceJoint(
-        {
-          frequencyHz: tuning.rope.finalJointFreqHz,
-          dampingRatio: tuning.rope.dampingRatio,
-          length: tuning.rope.segmentLengthM * 0.5,
-        },
-        newBody,
-        this.worm.body,
-        newBody.getPosition(),
-        this.worm.body.getPosition(),
-      ),
-    );
-    if (!j2) {
-      console.error("[NinjaRope] extend: j2 null");
-      this.world.destroyBody(newBody);
-      this.intermediates.pop();
-      this.world.destroyJoint(j1);
-      this.joints.pop();
-      this._rebuildFinalJoint(lastBody);
-      return;
-    }
-    this.joints.push(j2);
+    if (this.state !== "attached" || !this.joint) return;
+    this.lengthM = Math.min(this.lengthM + tuning.rope.adjustStepM, tuning.rope.maxReachM);
+    this.joint.setLength(this.lengthM);
   }
 
-  /**
-   * Retract rope by one segment (down to minSegments).
-   */
+  /** Retract rope (worm pulled toward anchor). */
   retract(): void {
-    if (this.state !== "attached") return;
-    if (this.intermediates.length <= tuning.rope.minSegments) return;
-
-    // Remove last 2 joints (intermediate->last and last->worm)
-    const j2 = this.joints.pop(); // final-to-worm
-    const j1 = this.joints.pop(); // penultimate-to-last
-
-    if (j2) {
-      try {
-        this.world.destroyJoint(j2);
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-    if (j1) {
-      try {
-        this.world.destroyJoint(j1);
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-
-    // Remove last intermediate body
-    const lastBody = this.intermediates.pop();
-    if (lastBody?.isActive()) {
-      try {
-        this.world.destroyBody(lastBody);
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-
-    // Rebuild final joint from penultimate (or anchor) to worm
-    const newLastBody =
-      this.intermediates.length > 0
-        ? this.intermediates[this.intermediates.length - 1]
-        : this.anchor;
-
-    if (newLastBody) {
-      this._rebuildFinalJoint(newLastBody);
-    }
+    if (this.state !== "attached" || !this.joint) return;
+    this.lengthM = Math.max(this.lengthM - tuning.rope.adjustStepM, tuning.rope.minLengthM);
+    this.joint.setLength(this.lengthM);
   }
 
-  /** Per-frame: redraw rope line. */
   update(_dtMs: number): void {
     if (this.state !== "attached" || !this.anchor) return;
 
     this.renderGfx.clear();
     this.renderGfx.lineStyle(2, 0xffffff, 0.9);
+    const a = this.anchor.getPosition();
+    const w = this.worm.body.getPosition();
     this.renderGfx.beginPath();
-
-    const aPos = this.anchor.getPosition();
-    this.renderGfx.moveTo(toPixels(aPos.x), toPixels(aPos.y));
-
-    for (const seg of this.intermediates) {
-      const sPos = seg.getPosition();
-      this.renderGfx.lineTo(toPixels(sPos.x), toPixels(sPos.y));
-    }
-
-    const wPos = this.worm.body.getPosition();
-    this.renderGfx.lineTo(toPixels(wPos.x), toPixels(wPos.y));
+    this.renderGfx.moveTo(toPixels(a.x), toPixels(a.y));
+    this.renderGfx.lineTo(toPixels(w.x), toPixels(w.y));
     this.renderGfx.strokePath();
   }
 
-  /** Same as deactivate, but also destroys the graphics object. */
   destroy(): void {
     this.deactivate();
     this.renderGfx.destroy();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Destroy whatever partial state was created during a failed activate().
-   * Called on any null return from createBody or createJoint before state
-   * is set to "attached". Safe to call regardless of current state.
-   */
-  private _cleanupPartialBuild(): void {
-    for (const j of this.joints) {
-      try {
-        this.world.destroyJoint(j);
-      } catch (_e) {
-        // Joint may already be gone
-      }
-    }
-    this.joints.length = 0;
-    for (const b of this.intermediates) {
-      try {
-        this.world.destroyBody(b);
-      } catch (_e) {
-        // Body may already be gone
-      }
-    }
-    this.intermediates.length = 0;
-    if (this.anchor) {
-      try {
-        this.world.destroyBody(this.anchor);
-      } catch (_e) {
-        // Body may already be gone
-      }
-      this.anchor = null;
-    }
-  }
-
-  private _rebuildFinalJoint(fromBody: Body): void {
-    const joint = this.world.createJoint(
-      new DistanceJoint(
-        {
-          frequencyHz: tuning.rope.finalJointFreqHz,
-          dampingRatio: tuning.rope.dampingRatio,
-          length: tuning.rope.segmentLengthM,
-        },
-        fromBody,
-        this.worm.body,
-        fromBody.getPosition(),
-        this.worm.body.getPosition(),
-      ),
-    );
-    if (!joint) {
-      console.error("[NinjaRope] _rebuildFinalJoint: createJoint returned null");
-      this.deactivate();
-      return;
-    }
-    this.joints.push(joint);
   }
 }

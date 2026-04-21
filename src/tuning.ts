@@ -19,16 +19,18 @@ interface Tuning {
     aimCoalesceFrames: number;
   };
   rope: {
+    /** Max raycast reach for rope fire (meters). */
     maxReachM: number;
-    segmentLengthM: number;
-    maxSegments: number;
-    minSegments: number;
-    intermediateFreqHz: number;
-    finalJointFreqHz: number;
-    dampingRatio: number;
-    intermediateRadiusM: number;
-    /** ms between extend/retract segment changes while key held */
+    /** Minimum rope length (prevents retract-to-zero). */
+    minLengthM: number;
+    /** Meters added/removed per extend/retract tick. */
+    adjustStepM: number;
+    /** ms between extend/retract steps while key held. */
     adjustCooldownMs: number;
+    /** DistanceJoint frequency (Hz). Higher = stiffer / snappier swing. */
+    jointFreqHz: number;
+    /** DistanceJoint damping ratio. 0 = bouncy, 1 = critically damped. */
+    dampingRatio: number;
   };
   jetpack: {
     fuelCapacity: number;
@@ -61,14 +63,11 @@ export const tuning: Tuning = {
   input: { aimCoalesceFrames: 1 },
   rope: {
     maxReachM: 40,
-    segmentLengthM: 0.5,
-    maxSegments: 40,
-    minSegments: 3,
-    intermediateFreqHz: 10,
-    finalJointFreqHz: 25,
-    dampingRatio: 5,
-    intermediateRadiusM: 0.15,
-    adjustCooldownMs: 180,
+    minLengthM: 0.8,
+    adjustStepM: 0.4,
+    adjustCooldownMs: 60,
+    jointFreqHz: 8,
+    dampingRatio: 0.5,
   },
   jetpack: {
     fuelCapacity: 100,

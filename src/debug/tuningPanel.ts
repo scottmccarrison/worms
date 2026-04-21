@@ -33,11 +33,12 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   worm.add(tuning.worm, "fallDamageCapHp", 5, 100, 1).name("Fall dmg cap (HP)");
 
   const rope = gui.addFolder("Rope");
-  rope.add(tuning.rope, "maxReachM", 5, 30, 0.5).name("Max reach (m)");
-  rope.add(tuning.rope, "segmentLengthM", 0.2, 2, 0.05).name("Segment length (m)");
-  rope.add(tuning.rope, "intermediateFreqHz", 1, 30, 0.5).name("Intermediate freq (Hz)");
-  rope.add(tuning.rope, "finalJointFreqHz", 1, 30, 0.5).name("Final joint freq (Hz)");
-  rope.add(tuning.rope, "dampingRatio", 0, 100, 1).name("Damping ratio");
+  rope.add(tuning.rope, "maxReachM", 5, 60, 1).name("Max reach (m)");
+  rope.add(tuning.rope, "minLengthM", 0.2, 5, 0.1).name("Min length (m)");
+  rope.add(tuning.rope, "adjustStepM", 0.1, 2, 0.05).name("Adjust step (m)");
+  rope.add(tuning.rope, "adjustCooldownMs", 20, 500, 10).name("Adjust cooldown (ms)");
+  rope.add(tuning.rope, "jointFreqHz", 1, 30, 0.5).name("Joint freq (Hz)");
+  rope.add(tuning.rope, "dampingRatio", 0, 5, 0.05).name("Damping ratio");
 
   const jet = gui.addFolder("JetPack");
   jet.add(tuning.jetpack, "fuelCapacity", 10, 500, 10).name("Fuel capacity");
