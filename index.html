@@ -9,10 +9,88 @@
       html, body { margin: 0; padding: 0; height: 100%; background: #0b0b0f; color: #e0e0e0; font-family: system-ui, sans-serif; }
       body { display: flex; align-items: center; justify-content: center; }
       #game-container { background: #1a1a22; }
+
+      /*
+       * Portrait rotate splash. Covers every scene (BootScene, LobbyScene,
+       * GameScene) because it lives outside Phaser's canvas. Pure CSS media
+       * query handles most cases; the tiny script below adds a resize-based
+       * fallback for desktop browsers (where window orientation is portrait
+       * when the window is taller than wide, but no orientation event fires).
+       *
+       * The script toggles a data attribute on <html> so the CSS rule below
+       * can honor the JS signal in addition to the media query.
+       */
+      #rotate-splash {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #0b0b0f;
+        color: #e0e0e0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        font-family: system-ui, sans-serif;
+      }
+      #rotate-splash .rotate-icon {
+        width: 96px;
+        height: 96px;
+        margin-bottom: 24px;
+        opacity: 0.9;
+        animation: rotate-hint 2.4s ease-in-out infinite;
+      }
+      #rotate-splash h1 {
+        font-size: 28px;
+        margin: 0 0 12px 0;
+        font-weight: 600;
+      }
+      #rotate-splash p {
+        font-size: 16px;
+        margin: 0;
+        color: #aaaaaa;
+        max-width: 320px;
+        line-height: 1.5;
+      }
+      @keyframes rotate-hint {
+        0%, 100% { transform: rotate(-90deg); }
+        50% { transform: rotate(0deg); }
+      }
+      @media (orientation: portrait) {
+        #rotate-splash { display: flex; }
+      }
+      html[data-portrait="1"] #rotate-splash { display: flex; }
+      html[data-portrait="0"] #rotate-splash { display: none; }
     </style>
   </head>
   <body>
     <div id="game-container"></div>
+    <div id="rotate-splash" aria-live="polite" role="dialog" aria-label="Rotate your device">
+      <svg class="rotate-icon" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="14" y="6" width="36" height="52" rx="6" ry="6" fill="none" stroke="#e0e0e0" stroke-width="3" />
+        <circle cx="32" cy="52" r="2.5" fill="#e0e0e0" />
+        <path d="M 20 28 Q 32 18 44 28" fill="none" stroke="#88ddff" stroke-width="3" stroke-linecap="round" />
+        <polygon points="44,28 42,22 48,24" fill="#88ddff" />
+      </svg>
+      <h1>Please rotate your device</h1>
+      <p>This game is designed for landscape.</p>
+    </div>
+    <script>
+      // JS fallback: some desktop browsers with narrow tall windows do not
+      // trigger the orientation media query reliably. Compare dimensions
+      // directly and flip a data attribute on <html>.
+      (function () {
+        var root = document.documentElement;
+        function update() {
+          var portrait = window.innerHeight > window.innerWidth;
+          root.setAttribute("data-portrait", portrait ? "1" : "0");
+        }
+        window.addEventListener("resize", update);
+        window.addEventListener("orientationchange", update);
+        update();
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

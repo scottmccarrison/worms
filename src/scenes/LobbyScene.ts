@@ -5,6 +5,7 @@ import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
+import { buildInviteUrl, shareInvite } from "./lobby/shareInvite";
 
 interface LobbySceneData {
   netClient: Client;
@@ -76,6 +77,8 @@ export class LobbyScene extends Phaser.Scene {
 
   // Room view GameObjects (destroyed + rebuilt on every state change).
   private roomObjects: Phaser.GameObjects.GameObject[] = [];
+  private shareFeedbackText: Phaser.GameObjects.Text | null = null;
+  private rawInviteInput: Phaser.GameObjects.DOMElement | null = null;
 
   constructor() {
     super("LobbyScene");
@@ -135,16 +138,24 @@ export class LobbyScene extends Phaser.Scene {
     });
     this.homeObjects.push(...createBtn);
 
-    // Join Room section.
+    // Join Room section. Attribute hints help mobile keyboards surface the
+    // right key layout and auto-uppercase; the input listener is still the
+    // source of truth because browsers honour these attributes unevenly.
     const joinEl = this.add.dom(cx + 170, 400, "input", INPUT_CSS);
     const joinNode = joinEl.node as HTMLInputElement;
     joinNode.setAttribute("type", "text");
+    joinNode.setAttribute("inputmode", "text");
+    joinNode.setAttribute("autocapitalize", "characters");
     joinNode.setAttribute("maxlength", "4");
+    joinNode.setAttribute("pattern", "[A-Z]{4}");
+    joinNode.setAttribute("spellcheck", "false");
     joinNode.setAttribute("placeholder", "CODE");
     joinNode.style.textTransform = "uppercase";
     joinNode.style.textAlign = "center";
     joinNode.addEventListener("input", () => {
-      joinNode.value = joinNode.value.toUpperCase().replace(/[^A-Z]/g, "");
+      // Strip non-letters, uppercase, cap at 4. Runs on every keystroke so
+      // the user can never hold an invalid value.
+      joinNode.value = joinNode.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
     });
     this.joinCodeInput = joinEl;
     this.homeObjects.push(joinEl);
@@ -211,17 +222,32 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private async handleJoin(): Promise<void> {
-    const nick = this.validateNickname();
-    if (!nick) return;
-
-    const codeRaw = this.joinCodeInput
-      ? (this.joinCodeInput.node as HTMLInputElement).value
-      : "";
+    const codeEl = this.joinCodeInput
+      ? (this.joinCodeInput.node as HTMLInputElement)
+      : null;
+    const codeRaw = codeEl?.value ?? "";
     const code = codeRaw.trim().toUpperCase();
+
+    // Blind-click guard: if the code input is empty, focus it instead of
+    // attempting to join. Prevents "room not found" errors on accidental
+    // taps. Partial codes (1-3 chars) focus + show the explicit length rule.
+    if (code.length === 0) {
+      codeEl?.focus();
+      this.setHomeError("Enter a 4-letter room code");
+      return;
+    }
+    if (code.length < 4) {
+      codeEl?.focus();
+      this.setHomeError("Code must be 4 letters");
+      return;
+    }
     if (!/^[A-Z]{4}$/.test(code)) {
       this.setHomeError("Enter a 4-letter room code");
       return;
     }
+
+    const nick = this.validateNickname();
+    if (!nick) return;
 
     try {
       this.setHomeError("Looking up room...");
@@ -347,6 +373,10 @@ export class LobbyScene extends Phaser.Scene {
       void this.handleLeave();
     });
     this.roomObjects.push(...leaveBtn);
+
+    // Share Invite button sits below the big room code so the host can push
+    // the link via the OS share sheet on mobile or the clipboard on desktop.
+    this.renderShareInvite(cx, 175, state.code);
 
     // Map picker row (host = arrows; guest = read-only name).
     this.renderMapPicker(cx, 220, vm);
@@ -478,9 +508,74 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Share Invite button + feedback area. On mobile the Web Share API opens
+   * the OS share sheet; on desktop we fall back to the clipboard. If both
+   * fail we reveal a read-only text input with the raw URL so the host can
+   * select-and-copy manually.
+   */
+  private renderShareInvite(cx: number, y: number, code: string): void {
+    const shareBtn = this.makeButton(cx, y, 260, 60, "Share Invite", () => {
+      void this.handleShareInvite(code);
+    });
+    this.roomObjects.push(...shareBtn);
+
+    // Small feedback slot for transient "Link copied" messages.
+    const feedback = this.add.text(cx, y + 46, "", TEXT_STYLE_SMALL).setOrigin(0.5);
+    this.roomObjects.push(feedback);
+    this.shareFeedbackText = feedback;
+  }
+
+  private async handleShareInvite(code: string): Promise<void> {
+    const result = await shareInvite(code, window);
+    if (result === "shared") {
+      // No feedback: OS share sheet or user cancel is its own feedback.
+      return;
+    }
+    if (result === "copied") {
+      this.flashShareFeedback("Link copied");
+      return;
+    }
+    // Failed: reveal a read-only text field with the raw URL.
+    this.revealRawInviteUrl(code);
+  }
+
+  private flashShareFeedback(msg: string): void {
+    const el = this.shareFeedbackText;
+    if (!el) return;
+    el.setText(msg);
+    this.time.delayedCall(2000, () => {
+      if (!el.scene) return;
+      el.setText("");
+    });
+  }
+
+  private revealRawInviteUrl(code: string): void {
+    // Skip if already revealed (avoid stacking inputs on repeated failures).
+    if (this.rawInviteInput) return;
+    const cx = CANVAS_W / 2;
+    const url = buildInviteUrl(code, window);
+    const inputEl = this.add.dom(
+      cx,
+      255,
+      "input",
+      "width: 360px; height: 36px; font-size: 16px; padding: 4px 8px; color: #e0e0e0; background: #22222c; border: 1px solid #555; border-radius: 4px; color-scheme: dark; text-align: center;",
+    );
+    const node = inputEl.node as HTMLInputElement;
+    node.setAttribute("type", "text");
+    node.setAttribute("readonly", "readonly");
+    node.value = url;
+    node.addEventListener("focus", () => node.select());
+    this.rawInviteInput = inputEl;
+    this.roomObjects.push(inputEl);
+    this.flashShareFeedback("Copy manually:");
+  }
+
   private clearRoom(): void {
     for (const obj of this.roomObjects) obj.destroy();
     this.roomObjects = [];
+    this.shareFeedbackText = null;
+    this.rawInviteInput = null;
   }
 
   private flashRoomError(msg: string): void {
