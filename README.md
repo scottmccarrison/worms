@@ -69,9 +69,22 @@ Server (`server/`):
 3. Tab A: http://localhost:5173/, nickname "Alice", Create Room, note the 4-letter code.
 4. Tab B (incognito): http://localhost:5173/?room=CODE, nickname "Bob", Join.
 5. Alice picks a map, both hit Ready, Alice clicks Start Game.
-6. Both tabs transition to the game with the selected map.
+6. Both tabs transition to the same map with the same seed. Teams are
+   assigned by join order (Alice = team red, Bob = team blue).
+7. Alice's tab is active first; Bob's tab shows a "Waiting for Alice..."
+   banner and has input locked. Alice walks, fires, ends turn.
+8. Server rotates the active team; Bob's input unlocks and Alice's tab
+   shows the spectator banner. Positions snap at each turn boundary.
+9. Keep alternating until one team has no alive worms. Server broadcasts
+   game_over; both tabs show the win banner.
 
-Game state remains client-local in Epic 8; authoritative netcode lands in Epic 9.
+Architecture note (Epic 9 Option C): the server arbitrates turn
+ownership + relays the active player's inputs + accepts an authoritative
+snapshot at turn end. Each client still runs its own planck sim locally;
+physics drift within a turn is absorbed by the end-of-turn snapshot.
+No server-side physics. See `docs/plans/epic-9-netcode.md` for the full
+architecture and the `#45` issue for the upgrade path to authoritative
+server physics if the Option C model ever hits its limits.
 
 ## Structure
 

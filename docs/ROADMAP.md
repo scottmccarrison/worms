@@ -16,7 +16,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 | 6  | Weapon system (data-driven, 8 + Bazooka) | Partial  | (6a PR TBD) | [epic-6a-weapons-infra](plans/epic-6a-weapons-infra.md) |
 | 7  | Map loading + starter maps               | Done     | (Epic 7 PR) | [epic-7-maps](plans/epic-7-maps.md)             |
 | 8  | Colyseus integration: lobby + rooms [*]  | Done     | (Epic 8 PR) | [epic-8-lobby](plans/epic-8-lobby.md)           |
-| 9  | Colyseus integration: state schema [*]   | Todo     | -        | -                                                  |
+| 9  | Colyseus integration: state schema [*]   | Done (Option C) | (Epic 9 PR) | [epic-9-netcode](plans/epic-9-netcode.md)    |
 | 10 | Colyseus integration: reconnection [*]   | Todo     | -        | -                                                  |
 | 11 | Source original sprite assets (Aseprite) | Todo     | -        | -                                                  |
 | 12 | Source original audio assets             | Todo     | -        | -                                                  |
