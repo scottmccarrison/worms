@@ -47,6 +47,13 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   jet.add(tuning.jetpack, "upwardForce", 0, 50, 0.5).name("Upward force");
   jet.add(tuning.jetpack, "sideForce", 0, 30, 0.5).name("Side force");
 
+  const turn = gui.addFolder("Turn");
+  turn.add(tuning.turn, "durationMs", 5000, 120000, 1000).name("Duration (ms)");
+  turn.add(tuning.turn, "warnThresholdMs", 0, 15000, 500).name("Warn threshold (ms)");
+  turn.add(tuning.turn, "settleVelThresholdMps", 0.01, 2, 0.01).name("Settle vel (m/s)");
+  turn.add(tuning.turn, "settleHoldMs", 100, 3000, 100).name("Settle hold (ms)");
+  turn.add(tuning.turn, "maxSettleMs", 1000, 20000, 500).name("Max settle (ms)");
+
   // Note: touch tuning values are read at button construction time;
   // changing them via the panel won't resize/re-alpha existing buttons.
   const touch = gui.addFolder("Touch");

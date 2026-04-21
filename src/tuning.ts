@@ -2,6 +2,13 @@ interface Tuning {
   world: { gravityY: number };
   weapons: { testCutRadiusPx: number };
   terrain: { rowHeight: number };
+  turn: {
+    durationMs: number;
+    warnThresholdMs: number;
+    settleVelThresholdMps: number;
+    settleHoldMs: number;
+    maxSettleMs: number;
+  };
   worm: {
     radiusPx: number;
     density: number;
@@ -52,6 +59,13 @@ export const tuning: Tuning = {
   world: { gravityY: 10 },
   weapons: { testCutRadiusPx: 40 },
   terrain: { rowHeight: 5 },
+  turn: {
+    durationMs: 45000,
+    warnThresholdMs: 5000,
+    settleVelThresholdMps: 0.15,
+    settleHoldMs: 500,
+    maxSettleMs: 5000,
+  },
   worm: {
     radiusPx: 12,
     density: 1.0,
