@@ -35,8 +35,7 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   const rope = gui.addFolder("Rope");
   rope.add(tuning.rope, "maxReachM", 5, 60, 1).name("Max reach (m)");
   rope.add(tuning.rope, "minLengthM", 0.2, 5, 0.1).name("Min length (m)");
-  rope.add(tuning.rope, "adjustStepM", 0.1, 2, 0.05).name("Adjust step (m)");
-  rope.add(tuning.rope, "adjustCooldownMs", 20, 500, 10).name("Adjust cooldown (ms)");
+  rope.add(tuning.rope, "adjustRateMps", 1, 20, 0.5).name("Adjust rate (m/s)");
   rope.add(tuning.rope, "jointFreqHz", 1, 60, 0.5).name("Joint freq (Hz)");
   rope.add(tuning.rope, "dampingRatio", 0, 2, 0.05).name("Damping ratio");
   rope.add(tuning.rope, "initialLengthScale", 0.5, 1.0, 0.01).name("Init length x");

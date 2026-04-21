@@ -23,10 +23,8 @@ interface Tuning {
     maxReachM: number;
     /** Minimum rope length (prevents retract-to-zero). */
     minLengthM: number;
-    /** Meters added/removed per extend/retract tick. */
-    adjustStepM: number;
-    /** ms between extend/retract steps while key held. */
-    adjustCooldownMs: number;
+    /** Rate of length change while extend/retract key held (meters/second). Continuous. */
+    adjustRateMps: number;
     /** DistanceJoint frequency (Hz). Higher = stiffer / snappier swing. */
     jointFreqHz: number;
     /** DistanceJoint damping ratio. 0 = bouncy, 1 = critically damped. */
@@ -69,10 +67,9 @@ export const tuning: Tuning = {
   rope: {
     maxReachM: 40,
     minLengthM: 0.8,
-    adjustStepM: 0.4,
-    adjustCooldownMs: 60,
-    jointFreqHz: 25,
-    dampingRatio: 0.3,
+    adjustRateMps: 5,
+    jointFreqHz: 15,
+    dampingRatio: 0.4,
     initialLengthScale: 0.9,
     fireImpulseMag: 3,
   },

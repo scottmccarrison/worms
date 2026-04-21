@@ -153,17 +153,15 @@ export class NinjaRope implements Utility {
     this.renderGfx.clear();
   }
 
-  /** Extend rope (worm drops farther from anchor). */
-  extend(): void {
+  /**
+   * Change rope length by deltaM (positive = extend, negative = retract).
+   * Called each frame from InputController while up/down is held; deltaM is
+   * scaled by dt so change is smooth frame-to-frame instead of discrete steps.
+   */
+  adjust(deltaM: number): void {
     if (this.state !== "attached" || !this.joint) return;
-    this.lengthM = Math.min(this.lengthM + tuning.rope.adjustStepM, tuning.rope.maxReachM);
-    this.joint.setLength(this.lengthM);
-  }
-
-  /** Retract rope (worm pulled toward anchor). */
-  retract(): void {
-    if (this.state !== "attached" || !this.joint) return;
-    this.lengthM = Math.max(this.lengthM - tuning.rope.adjustStepM, tuning.rope.minLengthM);
+    const next = this.lengthM + deltaM;
+    this.lengthM = Math.max(tuning.rope.minLengthM, Math.min(next, tuning.rope.maxReachM));
     this.joint.setLength(this.lengthM);
   }
 

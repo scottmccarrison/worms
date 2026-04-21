@@ -28,8 +28,6 @@ export class InputController {
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
 
-  // Throttle for rope extend/retract while key held
-  private ropeAdjustCooldownMs = 0;
 
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
@@ -93,18 +91,14 @@ export class InputController {
     // ---------------------------------------------------------------------------
 
     if (worm.isRoped()) {
-      // While roped: up/down extend/retract the rope, throttled so holding
-      // a key adjusts a few times per second. Aim is LOCKED (arrow keys
-      // are consumed by rope control; no aim conflict).
-      this.ropeAdjustCooldownMs = Math.max(0, this.ropeAdjustCooldownMs - dtMs);
-      if (this.ropeAdjustCooldownMs === 0) {
-        if (this.keyUp.isDown || this.keyW.isDown) {
-          worm.ropeUtility.retract();
-          this.ropeAdjustCooldownMs = tuning.rope.adjustCooldownMs;
-        } else if (this.keyDown.isDown || this.keyS.isDown) {
-          worm.ropeUtility.extend();
-          this.ropeAdjustCooldownMs = tuning.rope.adjustCooldownMs;
-        }
+      // While roped: up/down adjust rope length continuously (m/sec * dt).
+      // Aim is LOCKED (arrow keys consumed by rope control; no conflict).
+      const dtSec = dtMs / 1000;
+      const rate = tuning.rope.adjustRateMps * dtSec;
+      if (this.keyUp.isDown || this.keyW.isDown) {
+        worm.ropeUtility.adjust(-rate);
+      } else if (this.keyDown.isDown || this.keyS.isDown) {
+        worm.ropeUtility.adjust(+rate);
       }
     } else if (worm.isJetPacking()) {
       // While jetpacking: walk keys steer horizontally, up thrusts vertical.
