@@ -5,9 +5,11 @@ import { mountTuningPanel } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
+import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
 import { TouchControls } from "../ui/TouchControls";
+import { TurnHUD } from "../ui/TurnHUD";
 import { JetPack } from "../utilities/JetPack";
 import { NinjaRope } from "../utilities/NinjaRope";
 import { Team } from "../worm/Team";
@@ -22,8 +24,11 @@ export class GameScene extends Phaser.Scene {
   private debugGfx!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Text;
   private allWorms: Worm[] = [];
+  private teams: Team[] = [];
   private inputController!: InputController;
   private touchControls!: TouchControls;
+  private turnManager!: TurnManager;
+  private turnHUD!: TurnHUD;
 
   constructor() {
     super("GameScene");
@@ -51,6 +56,8 @@ export class GameScene extends Phaser.Scene {
       this.physicsSystem.world.off("begin-contact", this.onBeginContact);
       this.physicsSystem.world.off("end-contact", this.onEndContact);
       this.physicsSystem.world.off("post-solve", this.onPostSolve);
+      this.turnManager.destroy();
+      this.turnHUD.destroy();
     });
 
     // Spawn worms on terrain surface
@@ -66,12 +73,12 @@ export class GameScene extends Phaser.Scene {
     const red = new Team({ id: "red", name: "Red", color: 0xff4444 });
     const blue = new Team({ id: "blue", name: "Blue", color: 0x4488ff });
 
-    const teams = [red, blue];
+    this.teams = [red, blue];
 
     // Spawn worms from terrain surface scan; fall back to width-spread for any missing slots
     const fallbackYPx = this.scale.height * 0.3;
     for (let i = 0; i < totalWorms; i++) {
-      const team = teams[i % 2];
+      const team = this.teams[i % 2];
       const pt = spawnPts[i];
       const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
       const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
@@ -100,13 +107,48 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    this.inputController = new InputController({ scene: this, worms: this.allWorms });
+    this.inputController = new InputController({
+      scene: this,
+      allWorms: this.allWorms,
+      onEndTurn: () => this.turnManager.endTurnByPlayer(),
+    });
 
     // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
     this.touchControls = new TouchControls({
       scene: this,
       getActiveWorm: () => this.inputController.getActiveWorm(),
     });
+
+    this.turnHUD = new TurnHUD({
+      scene: this,
+      onEndTurnPressed: () => this.turnManager.endTurnByPlayer(),
+    });
+
+    this.turnManager = new TurnManager({
+      scene: this,
+      teams: this.teams,
+      allWorms: this.allWorms,
+      onTurnStart: (team, worm) => {
+        this.inputController.setActiveWorm(worm);
+        this.inputController.setInputAllowed(true);
+        this.turnHUD.showTurnBanner(team.name, team.color);
+        this.turnHUD.setEndTurnEnabled(true);
+      },
+      onTurnEnd: () => {
+        this.inputController.setInputAllowed(false);
+        this.turnHUD.setEndTurnEnabled(false);
+        for (const w of this.allWorms) {
+          w.ropeUtility?.deactivate();
+          w.jetPackUtility?.deactivate();
+        }
+      },
+      onGameOver: (winner) => {
+        this.inputController.setInputAllowed(false);
+        this.turnHUD.setEndTurnEnabled(false);
+        this.turnHUD.showGameOver(winner?.name ?? null);
+      },
+    });
+    this.turnManager.start();
 
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
@@ -119,9 +161,10 @@ export class GameScene extends Phaser.Scene {
       })
       .setDepth(20);
 
-    // Terrain-cut on click/tap - gate against touch buttons
+    // Terrain-cut on click/tap - gate against touch buttons and HUD end button
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       if (this.touchControls.hitsButton(p)) return;
+      if (this.turnHUD.hitsButton(p)) return;
       this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
     });
 
@@ -134,31 +177,30 @@ export class GameScene extends Phaser.Scene {
     this.physicsSystem.step(deltaMs);
     this.terrain.flushPendingCuts();
 
-    this.inputController.update(deltaMs);
-    for (const w of this.allWorms) {
-      w.update(deltaMs);
-    }
-
-    // Update utilities per worm
-    for (const w of this.allWorms) {
-      w.ropeUtility.update(deltaMs);
-      w.jetPackUtility.update(deltaMs);
-    }
-
-    // Apply pending damage after physics step
+    // Apply pending damage BEFORE win check so same-frame kills are detected immediately
     for (const w of this.allWorms) {
       w.applyPendingDamage();
     }
 
+    // Win check + settle detection + timer tick
+    this.turnManager.update(deltaMs);
+
+    // Input: respects inputAllowed set by turn manager
+    this.inputController.update(deltaMs);
+
+    // Per-worm update + utilities
+    for (const w of this.allWorms) {
+      w.update(deltaMs);
+      w.ropeUtility.update(deltaMs);
+      w.jetPackUtility.update(deltaMs);
+    }
+
+    // HUD timer
+    this.turnHUD.update(this.turnManager.getTurnSecondsRemaining());
+
     drawDebug(this.debugGfx, this.physicsSystem.world);
 
-    const active = this.inputController.getActiveWorm();
-    const activeName = active ? active.name : "none";
-    const ropeInfo = active?.isRoped() ? " [roped]" : "";
-    const jetInfo = active?.isJetPacking() ? " [jetpacking]" : "";
-    this.hud.setText(
-      `click to cut - bodies: ${this.terrain.bodyCount()} - active: ${activeName}${ropeInfo}${jetInfo}`,
-    );
+    this.hud.setText(`click to cut - bodies: ${this.terrain.bodyCount()}`);
   }
 
   // ------ Contact listeners ------
