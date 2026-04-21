@@ -500,11 +500,25 @@ export class LobbyScene extends Phaser.Scene {
 
   private wireRoomStateListeners(room: Room<LobbyState>): void {
     // Colyseus 0.15: attach listeners directly on state. Every mutation path
-    // (add/remove/change/scalar listen) triggers a full re-render. The room
-    // view is small enough that tear-down + rebuild is fine; if perf ever
-    // bites, swap for targeted updates.
+    // (add/remove/change/scalar listen) triggers a full re-render.
+    //
+    // Debounced to once per animation frame. Without this, bursts of schema
+    // patches (join/ready/color change during connect) fire renderRoom many
+    // times within a single frame. Each render tears down + recreates the
+    // Ready button; each new button lands in Phaser's input `_pendingInsertion`
+    // queue. The queue only drains at frame tick - so the current Ready
+    // button is never hit-testable. Clicks silently miss.
+    //
+    // rAF coalescing lets Phaser's input plugin run between renders and
+    // promote each new button to the active hit-test list.
+    let pending = false;
     const rerender = () => {
-      if (this.view === "room") this.renderRoom();
+      if (pending || this.view !== "room") return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (this.view === "room") this.renderRoom();
+      });
     };
     room.state.players.onAdd(rerender);
     room.state.players.onRemove(rerender);
