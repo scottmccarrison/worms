@@ -11,6 +11,12 @@ export interface PlayerRow {
   ready: boolean;
   isHost: boolean;
   isMe: boolean;
+  /**
+   * Epic 10: true while the player's connection has dropped but the server
+   * is still holding their slot during the 60s grace window. UI renders a
+   * dimmed row + "(disconnected)" suffix.
+   */
+  disconnected: boolean;
 }
 
 /**
@@ -76,6 +82,7 @@ export function toViewModel(state: LobbyState, mySessionId: string): ViewModel {
     ready: p.ready,
     isHost: p.isHost,
     isMe: p.sessionId === mySessionId,
+    disconnected: p.disconnected,
   }));
 
   return {
