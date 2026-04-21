@@ -12,14 +12,14 @@ export class JetPack implements Utility {
   readonly worm: Worm;
 
   private _active = false;
-  private fuel: number;
+  private _fuel: number;
   private readonly flameGfx: Phaser.GameObjects.Graphics;
   private thrustH: -1 | 0 | 1 = 0; // horizontal from InputController
   private thrustUp = false; // vertical from InputController
 
   constructor(init: JetPackInit) {
     this.worm = init.worm;
-    this.fuel = tuning.jetpack.fuelCapacity;
+    this._fuel = tuning.jetpack.fuelCapacity;
     this.flameGfx = init.scene.add.graphics();
     this.flameGfx.setDepth(7);
     this.flameGfx.setVisible(false);
@@ -27,6 +27,11 @@ export class JetPack implements Utility {
 
   isActive(): boolean {
     return this._active;
+  }
+
+  /** Current fuel level (0..fuelCapacity). */
+  get fuel(): number {
+    return this._fuel;
   }
 
   /**
@@ -40,7 +45,7 @@ export class JetPack implements Utility {
     }
     // Mutual exclusion: can't jetpack while roped
     if (this.worm.isRoped()) return;
-    if (this.fuel <= 0) return;
+    if (this._fuel <= 0) return;
     this._active = true;
     this.worm.setJetPackActive(true);
     this.flameGfx.setVisible(true);
@@ -60,7 +65,7 @@ export class JetPack implements Utility {
     if (!this._active) return;
 
     // Fuel check first
-    if (this.fuel <= 0) {
+    if (this._fuel <= 0) {
       this.deactivate();
       return;
     }
@@ -72,11 +77,11 @@ export class JetPack implements Utility {
 
     if (ix !== 0 || iy !== 0) {
       this.worm.body.applyLinearImpulse({ x: ix, y: iy }, this.worm.body.getPosition(), true);
-      this.fuel -= tuning.jetpack.fuelPerFrame;
+      this._fuel -= tuning.jetpack.fuelPerFrame;
     }
 
-    if (this.fuel <= 0) {
-      this.fuel = 0;
+    if (this._fuel <= 0) {
+      this._fuel = 0;
       this.deactivate();
       return;
     }

@@ -228,7 +228,9 @@ export class Worm {
     // Update text positions
     this.nameText.setPosition(xPx, yPx - tuning.worm.radiusPx - 18);
     this.healthText.setPosition(xPx, yPx - tuning.worm.radiusPx - 6);
-    this.healthText.setText(`${this.health}`);
+    // Show fuel in health text area when jetpacking
+    const fuelStr = this.jetPackActive ? ` fuel:${Math.ceil(this.jetPackUtility?.fuel ?? 0)}` : "";
+    this.healthText.setText(`${this.health}${fuelStr}`);
   }
 
   destroy(): void {
