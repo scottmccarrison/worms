@@ -1,4 +1,4 @@
-import * as Phaser from "phaser";
+import type * as Phaser from "phaser";
 import type { Worm } from "../worm/Worm";
 
 interface AimHUDInit {
@@ -36,10 +36,7 @@ export class AimHUD {
 
     const worm = this.getActiveWorm();
     const shouldDraw =
-      this.isInputAllowed() &&
-      worm !== null &&
-      !worm.isRoped() &&
-      !worm.isJetPacking();
+      this.isInputAllowed() && worm !== null && !worm.isRoped() && !worm.isJetPacking();
 
     if (!shouldDraw || !worm) return;
 
@@ -90,8 +87,7 @@ export class AimHUD {
     this.gfx.fillRect(barX, barY, 20, 4);
 
     // Fill color: yellow < 50%, orange 50-80%, red >= 80%
-    const fillColor =
-      power >= 0.8 ? 0xff3300 : power >= 0.5 ? 0xff8800 : 0xffee00;
+    const fillColor = power >= 0.8 ? 0xff3300 : power >= 0.5 ? 0xff8800 : 0xffee00;
     const fillW = Math.round(20 * power);
     this.gfx.fillStyle(fillColor, 1.0);
     this.gfx.fillRect(barX, barY, fillW, 4);

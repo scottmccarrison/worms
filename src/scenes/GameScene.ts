@@ -14,10 +14,10 @@ import { TurnHUD } from "../ui/TurnHUD";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
 import { JetPack } from "../utilities/JetPack";
 import { NinjaRope } from "../utilities/NinjaRope";
-import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
-import { fire } from "../weapons/fire";
 import { ProjectileManager } from "../weapons/ProjectileManager";
 import { WeaponManager } from "../weapons/WeaponManager";
+import { fire } from "../weapons/fire";
+import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
 import { Team } from "../worm/Team";
 import { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
@@ -96,7 +96,8 @@ export class GameScene extends Phaser.Scene {
 
     const fallbackYPx = this.scale.height * 0.3;
     for (let i = 0; i < totalWorms; i++) {
-      const team = this.teams[i % 2]!;
+      const team = this.teams[i % 2];
+      if (!team) continue;
       const pt = spawnPts[i];
       const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
       const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
@@ -312,9 +313,7 @@ export class GameScene extends Phaser.Scene {
 
     const wm = this.getActiveWeaponManager();
     const selectedName = wm ? wm.getSelected().name : "-";
-    this.hud.setText(
-      `weapon: ${selectedName}  bodies: ${this.terrain.bodyCount()}`,
-    );
+    this.hud.setText(`weapon: ${selectedName}  bodies: ${this.terrain.bodyCount()}`);
   }
 
   // ---------------------------------------------------------------------------

@@ -132,7 +132,7 @@ export class ProjectileManager {
 
     // Remove detonated projectiles
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      if (this.projectiles[i]!.detonated) {
+      if (this.projectiles[i]?.detonated) {
         this.projectiles.splice(i, 1);
       }
     }

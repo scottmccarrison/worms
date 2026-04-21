@@ -1,10 +1,10 @@
 import { Circle, World } from "planck";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toMeters } from "../physics/scale";
-import { explode } from "./explode";
-import type { ExplosionConfig } from "./types";
 import type { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
+import { explode } from "./explode";
+import type { ExplosionConfig } from "./types";
 
 // ---------------------------------------------------------------------------
 // Minimal Terrain double - records cutCircle calls without rendering

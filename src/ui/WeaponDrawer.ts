@@ -1,4 +1,4 @@
-import * as Phaser from "phaser";
+import type * as Phaser from "phaser";
 import type { WeaponConfig } from "../weapons/types";
 
 interface WeaponDrawerInit {
@@ -81,7 +81,8 @@ export class WeaponDrawer {
 
     // Build icons - one Graphics per icon so alpha tweens work independently
     for (let i = 0; i < weapons.length; i++) {
-      const weapon = weapons[i]!;
+      const weapon = weapons[i];
+      if (!weapon) continue;
       const iconX = this.panelX + 10 + i * (56 + 8);
       const iconY = this.panelY + 8;
 
@@ -181,12 +182,7 @@ export class WeaponDrawer {
    */
   hitsIcon(p: Phaser.Input.Pointer): boolean {
     for (const icon of this.icons) {
-      if (
-        p.x >= icon.x &&
-        p.x <= icon.x + 56 &&
-        p.y >= icon.y &&
-        p.y <= icon.y + 56
-      ) {
+      if (p.x >= icon.x && p.x <= icon.x + 56 && p.y >= icon.y && p.y <= icon.y + 56) {
         return true;
       }
     }

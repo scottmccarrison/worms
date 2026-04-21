@@ -1,11 +1,18 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { Team } from "../worm/Team";
 import { WeaponManager } from "./WeaponManager";
 import { defaultAmmoForMatch } from "./registry";
-import type { Team } from "../worm/Team";
 
 // Minimal Team stub
 function makeTeam(id: string): Team {
-  return { id, name: id, color: 0xff0000, worms: [], addWorm: () => {}, isEliminated: () => false } as unknown as Team;
+  return {
+    id,
+    name: id,
+    color: 0xff0000,
+    worms: [],
+    addWorm: () => {},
+    isEliminated: () => false,
+  } as unknown as Team;
 }
 
 describe("WeaponManager", () => {

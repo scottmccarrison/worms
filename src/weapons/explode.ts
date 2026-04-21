@@ -1,7 +1,7 @@
 import type { World } from "planck";
 import { Vec2 } from "planck";
-import type { Terrain } from "../terrain/Terrain";
 import { toMeters } from "../physics/scale";
+import type { Terrain } from "../terrain/Terrain";
 import type { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
 import type { ExplosionConfig } from "./types";
@@ -67,10 +67,7 @@ export function explode(p: ExplodeParams): ExplodeResult {
     if (distM > 0.001) {
       const nx = dx / distM;
       const ny = dy / distM;
-      body.applyLinearImpulse(
-        Vec2(nx * impulseMag, ny * impulseMag),
-        body.getPosition(),
-      );
+      body.applyLinearImpulse(Vec2(nx * impulseMag, ny * impulseMag), body.getPosition());
     } else {
       // Worm is at exact center - push straight up
       body.applyLinearImpulse(Vec2(0, -impulseMag), body.getPosition());

@@ -1,6 +1,6 @@
 import { tuning } from "../tuning";
-import { raycastFirstHit } from "./hitscan";
 import { explode } from "./explode";
+import { raycastFirstHit } from "./hitscan";
 import type { FireContext, FireResult, WeaponConfig } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -14,11 +14,7 @@ import type { FireContext, FireResult, WeaponConfig } from "./types";
  *
  * @param shotsFiredBefore - how many shots have already been fired this activation
  */
-export function fire(
-  weapon: WeaponConfig,
-  ctx: FireContext,
-  shotsFiredBefore: number,
-): FireResult {
+export function fire(weapon: WeaponConfig, ctx: FireContext, shotsFiredBefore: number): FireResult {
   switch (weapon.archetype) {
     case "hitscan":
       return fireHitscan(weapon, ctx, shotsFiredBefore);
@@ -33,11 +29,7 @@ export function fire(
 // Hitscan (Shotgun)
 // ---------------------------------------------------------------------------
 
-function fireHitscan(
-  weapon: WeaponConfig,
-  ctx: FireContext,
-  shotsFiredBefore: number,
-): FireResult {
+function fireHitscan(weapon: WeaponConfig, ctx: FireContext, shotsFiredBefore: number): FireResult {
   const { world, terrain, firer, aimRadians } = ctx;
   const shotsAllowed = weapon.shotsPerActivation ?? 1;
 

@@ -1,14 +1,14 @@
 import { Circle, World } from "planck";
 import { describe, expect, it, vi } from "vitest";
 import { toMeters } from "../physics/scale";
-import { bazooka } from "./bazooka";
-import { handGrenade } from "./handgrenade";
-import { shotgun } from "./shotgun";
-import { fire } from "./fire";
-import type { FireContext } from "./types";
 import type { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
 import type { ProjectileManager } from "./ProjectileManager";
+import { bazooka } from "./bazooka";
+import { fire } from "./fire";
+import { handGrenade } from "./handgrenade";
+import { shotgun } from "./shotgun";
+import type { FireContext } from "./types";
 
 // ---------------------------------------------------------------------------
 // Minimal worm stub with xPx, yPx, facing, body, aimPower01

@@ -24,12 +24,7 @@ function makeStaticBox(
 }
 
 /** Create a dynamic circle body at the given center (pixels). */
-function makeDynamicCircle(
-  world: ReturnType<typeof World>,
-  xPx: number,
-  yPx: number,
-  rPx: number,
-) {
+function makeDynamicCircle(world: ReturnType<typeof World>, xPx: number, yPx: number, rPx: number) {
   const body = world.createBody({
     type: "dynamic",
     position: { x: toMeters(xPx), y: toMeters(yPx) },
@@ -64,7 +59,7 @@ describe("raycastFirstHit()", () => {
     const hit = raycastFirstHit(world, from, to);
     expect(hit).not.toBeNull();
     // Hit point should be near x=180 (left edge of near box at x=200 - 20 half-width)
-    expect(hit!.pointPx.x).toBeCloseTo(180, 0);
+    expect(hit?.pointPx.x).toBeCloseTo(180, 0);
   });
 
   it("excludes firer's own body", () => {
@@ -81,7 +76,7 @@ describe("raycastFirstHit()", () => {
     const hit = raycastFirstHit(world, from, to, firerBody);
     expect(hit).not.toBeNull();
     // Should NOT hit the firer; should hit the box at ~x=380
-    expect(hit!.fixture.getBody()).not.toBe(firerBody);
-    expect(hit!.pointPx.x).toBeGreaterThan(200);
+    expect(hit?.fixture.getBody()).not.toBe(firerBody);
+    expect(hit?.pointPx.x).toBeGreaterThan(200);
   });
 });
