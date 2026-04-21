@@ -48,9 +48,10 @@ describe("flatGenerator", () => {
     flatGenerator(c2.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, {
       seed: FIXED_SEED,
     });
-    // Compare alpha channel of row at y=500 (should be inside terrain)
-    const d1 = c1.getContext("2d").getImageData(0, 500, W, 1).data;
-    const d2 = c2.getContext("2d").getImageData(0, 500, W, 1).data;
+    // Compare alpha channel of row at y=600 (well below groundY=~504, inside terrain)
+    // NOTE: y=500 was sky (groundY = height*0.7 = ~504), making the test trivially pass.
+    const d1 = c1.getContext("2d").getImageData(0, 600, W, 1).data;
+    const d2 = c2.getContext("2d").getImageData(0, 600, W, 1).data;
     expect(Array.from(d1)).toEqual(Array.from(d2));
   });
 });

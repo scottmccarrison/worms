@@ -60,7 +60,9 @@ export function allIds(): string[] {
 }
 
 export function getById(id: string): RegistryEntry | null {
-  return MAPS[id] ?? null;
+  // Use Object.hasOwn to avoid prototype-pollution: MAPS["constructor"] etc. would be
+  // truthy via bracket access even though they are not registered map entries.
+  return Object.hasOwn(MAPS, id) ? (MAPS[id] ?? null) : null;
 }
 
 export function firstId(): string {
