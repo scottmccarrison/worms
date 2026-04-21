@@ -103,6 +103,14 @@ export class TurnManager {
     this.actor.send({ type: "END_TURN" });
   }
 
+  /**
+   * Record self-damage for the active worm. No-op in 6a; wired for 6b
+   * retreat-timer logic where self-damage can override the retreat window.
+   */
+  reportSelfDamage(_amount: number): void {
+    // 6b: use _amount to decide retreat timer override
+  }
+
   isInputAllowed(): boolean {
     return String(this.actor.getSnapshot().value) === "turnActive";
   }

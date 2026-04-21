@@ -31,6 +31,7 @@ export class Worm {
   // Public state
   health: number;
   aimAngle = -Math.PI / 4; // radians; -PI/4 = 45deg up-forward (hits terrain reliably on rolling hills)
+  aimPower01 = 0.5; // 0..1 power level for weapon fire
   facing: -1 | 1 = 1;
   pendingDamage = 0;
   isAlive = true;
@@ -166,6 +167,25 @@ export class Worm {
     this.aimDir = direction;
   }
 
+  /**
+   * Set aim angle directly (radians). Clamped to [-PI/2, PI/2].
+   * Facing is handled by the caller (fire.ts multiplies by firer.facing).
+   */
+  setAimAngle(rad: number): void {
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    this.aimAngle = clamp(rad, -Math.PI / 2, Math.PI / 2);
+  }
+
+  /** Set aim power 0..1, clamped. */
+  setAimPower(p: number): void {
+    this.aimPower01 = Math.max(0, Math.min(1, p));
+  }
+
+  /** Nudge aim power by delta, clamped. */
+  nudgeAimPower(delta: number): void {
+    this.setAimPower(this.aimPower01 + delta);
+  }
+
   setFacing(dir: -1 | 1): void {
     this.facing = dir;
   }
@@ -208,14 +228,11 @@ export class Worm {
   // ------ Lifecycle ------
 
   update(dtMs: number): void {
-    if (!this.isAlive) return;
-
     const pos = this.body.getPosition();
     const xPx = toPixels(pos.x);
     const yPx = toPixels(pos.y);
 
-    // Step aim angle
-    if (this.aimDir !== 0) {
+    if (this.isAlive && this.aimDir !== 0) {
       this.aimAngle = stepAim(
         this.aimAngle,
         this.aimDir,
@@ -227,11 +244,12 @@ export class Worm {
 
     this.drawWorm(xPx, yPx);
 
-    // Update text positions
     this.nameText.setPosition(xPx, yPx - tuning.worm.radiusPx - 18);
     this.healthText.setPosition(xPx, yPx - tuning.worm.radiusPx - 6);
-    // Show fuel in health text area when jetpacking
-    const fuelStr = this.jetPackActive ? ` fuel:${Math.ceil(this.jetPackUtility?.fuel ?? 0)}` : "";
+    const fuelStr =
+      this.isAlive && this.jetPackActive
+        ? ` fuel:${Math.ceil(this.jetPackUtility?.fuel ?? 0)}`
+        : "";
     this.healthText.setText(`${this.health}${fuelStr}`);
   }
 
@@ -324,6 +342,16 @@ export class Worm {
 
   isJetPacking(): boolean {
     return this.jetPackActive;
+  }
+
+  /** Pixel X position (derived from physics body). */
+  get xPx(): number {
+    return toPixels(this.body.getPosition().x);
+  }
+
+  /** Pixel Y position (derived from physics body). */
+  get yPx(): number {
+    return toPixels(this.body.getPosition().y);
   }
 
   /** Passthrough to planck body gravity scale. */
