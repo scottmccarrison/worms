@@ -247,9 +247,12 @@ export class GameScene extends Phaser.Scene {
       allWorms: this.allWorms,
       onTurnStart: (team, worm) => {
         this.inputController.setActiveWorm(worm);
-        this.inputController.setInputAllowed(true);
+        // In networked mode, input is gated on "is this my team?". In offline
+        // mode all turns are local so input is always allowed.
+        const allow = this.isNetworked ? this.iAmActive() : true;
+        this.inputController.setInputAllowed(allow);
         this.turnHUD.showTurnBanner(team.name, team.color);
-        this.turnHUD.setEndTurnEnabled(true);
+        this.turnHUD.setEndTurnEnabled(allow);
         // Reset per-turn weapon activation state
         this.shotsFiredThisTurn = 0;
         this.getActiveWeaponManager()?.resetActivation();
@@ -282,9 +285,18 @@ export class GameScene extends Phaser.Scene {
       const mine = this.teamsInit?.find((t) => t.ownerSessionId === this.mySessionId);
       this.myTeamId = mine?.id ?? "";
 
-      // Subscribe to authoritative turn state. Later commits wire onActiveTeamChanged
-      // + syncTurnTimer to actually do work; for now we only attach the listeners
-      // so the contract is visible and compile-stable.
+      // Server owns turn rotation; local SETTLED no longer cycles teams.
+      this.turnManager.setExternallyDriven(true);
+
+      // Gate initial input based on the state we see at scene-create time.
+      // If the server hasn't picked currentTeamId yet, err on the side of
+      // locked input - onActiveTeamChanged will unlock once it arrives.
+      const currentTeamId = this.room.state.currentTeamId ?? "";
+      const initiallyActive = currentTeamId !== "" && currentTeamId === this.myTeamId;
+      this.inputController.setInputAllowed(initiallyActive);
+      this.turnHUD.setEndTurnEnabled(initiallyActive);
+
+      // Subscribe to authoritative turn state.
       this.room.state.listen("currentTeamId", (teamId) => this.onActiveTeamChanged(teamId));
       this.room.state.listen("turnEndsAt", (t) => this.syncTurnTimer(t));
     }
@@ -507,16 +519,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Called every time the server advances `currentTeamId`. Later commits
-   * update input gating + SpectatorHUD; for now we only stash the value.
+   * Called every time the server advances `currentTeamId`. Flips the local
+   * InputController on iff the new active team belongs to us. Remote worms
+   * are driven entirely by relayed input messages in later commits.
    */
   protected onActiveTeamChanged(_teamId: string): void {
-    // intentionally blank for commit 3; later commits replace.
+    if (!this.isNetworked) return;
+    const active = this.iAmActive();
+    this.inputController?.setInputAllowed(active);
+    this.turnHUD?.setEndTurnEnabled(active);
   }
 
-  /** Sync the local turn timer to the server's authoritative turnEndsAt. */
+  /**
+   * Sync the local turn timer to the server's authoritative turnEndsAt.
+   * TurnManager.getTurnSecondsRemaining() already reads externalTurnEndsAt
+   * when externallyDriven, so we only need to forward the value on adoption
+   * (happens in applyTurnResolved, not here). This listener fires on every
+   * state mutation - we use it to proactively refresh the HUD so the timer
+   * stays accurate if the server clamps or extends the turn mid-run.
+   */
   protected syncTurnTimer(_endsAt: number): void {
-    // intentionally blank for commit 3; later commits consume endsAt.
+    // TurnManager reads endsAt on adoption; this hook is left wired so future
+    // epics can inject latency compensation without changing the listener shape.
   }
 
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {

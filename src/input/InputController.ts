@@ -109,6 +109,16 @@ export class InputController {
     this.inputAllowed = allowed;
   }
 
+  /**
+   * Expose the current input-allowed state. Epic 9 uses this as the
+   * authoritative "should I accept local input?" check - networked-mode
+   * GameScene flips this false on non-active turns so remote-input replay
+   * is the only path that drives the active worm.
+   */
+  isInputAllowed(): boolean {
+    return this.inputAllowed;
+  }
+
   getActiveWorm(): Worm | null {
     return this.activeWorm?.isAlive ? this.activeWorm : null;
   }
