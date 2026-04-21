@@ -43,8 +43,9 @@ export class GameScene extends Phaser.Scene {
   private aimHUD!: AimHUD;
   private shotsFiredThisTurn = 0;
 
-  // Drag-to-aim state
+  // Drag-to-aim state - tracked per primary pointer ID to block multitouch conflicts
   private dragStart: { x: number; y: number } | null = null;
+  private dragPointerId: number | null = null;
 
   constructor() {
     super("GameScene");
@@ -236,13 +237,17 @@ export class GameScene extends Phaser.Scene {
         this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
         return;
       }
-      // Begin drag-to-aim
+      // Only track the FIRST (primary) pointer for drag-to-aim.
+      // Multitouch: ignore secondary fingers so a second tap can't steal
+      // dragStart and cause an accidental fire when the first finger lifts.
+      if (this.dragPointerId !== null) return;
       this.dragStart = { x: p.x, y: p.y };
+      this.dragPointerId = p.id;
     });
 
     // Drag updates aim angle + power in real-time relative to active worm position
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart) return;
+      if (!this.dragStart || p.id !== this.dragPointerId) return;
       const worm = this.inputController.getActiveWorm();
       if (!worm || !this.turnManager.isInputAllowed()) return;
 
@@ -267,9 +272,10 @@ export class GameScene extends Phaser.Scene {
 
     // Drag release: if distance >= deadzone, fire current weapon
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart) return;
+      if (!this.dragStart || p.id !== this.dragPointerId) return;
       const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
       this.dragStart = null;
+      this.dragPointerId = null;
       if (dragDist < tuning.weapons.dragDeadZonePx) return; // tap, not a drag
       this.tryFireActiveWeapon();
     });
