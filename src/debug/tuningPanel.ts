@@ -32,6 +32,19 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   worm.add(tuning.worm, "fallDamageThresholdImpulse", 1, 30, 0.5).name("Fall dmg threshold");
   worm.add(tuning.worm, "fallDamageCapHp", 5, 100, 1).name("Fall dmg cap (HP)");
 
+  const rope = gui.addFolder("Rope");
+  rope.add(tuning.rope, "maxReachM", 5, 30, 0.5).name("Max reach (m)");
+  rope.add(tuning.rope, "segmentLengthM", 0.2, 2, 0.05).name("Segment length (m)");
+  rope.add(tuning.rope, "intermediateFreqHz", 1, 30, 0.5).name("Intermediate freq (Hz)");
+  rope.add(tuning.rope, "finalJointFreqHz", 1, 30, 0.5).name("Final joint freq (Hz)");
+  rope.add(tuning.rope, "dampingRatio", 0, 100, 1).name("Damping ratio");
+
+  const jet = gui.addFolder("JetPack");
+  jet.add(tuning.jetpack, "fuelCapacity", 10, 500, 10).name("Fuel capacity");
+  jet.add(tuning.jetpack, "fuelPerFrame", 0.1, 5, 0.1).name("Fuel per frame");
+  jet.add(tuning.jetpack, "upwardImpulse", 0.5, 10, 0.1).name("Upward impulse");
+  jet.add(tuning.jetpack, "sideImpulse", 0.1, 5, 0.1).name("Side impulse");
+
   window.addEventListener("keydown", (e) => {
     if (e.key === "`") {
       if (gui.closed) {
