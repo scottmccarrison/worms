@@ -36,6 +36,15 @@ export class LobbyPlayer extends Schema {
   @type("boolean") isHost = false;
   @type("number") joinedAt = 0;
   @type("string") ownerOfTeamId = "";
+  // Epic 10: set to true while the server is holding this player's slot
+  // inside a Colyseus `allowReconnection` grace window. Cleared on
+  // successful reconnect; the player is deleted from the map when the
+  // grace expires or a consented leave lands.
+  @type("boolean") disconnected = false;
+  // Server wall-clock ms at which the grace window ends (Date.now() +
+  // DISCONNECT_GRACE_MS). Zero when not disconnected. Clients read this
+  // to render a per-player countdown in the HUD.
+  @type("number") disconnectGraceEndsAt = 0;
 }
 
 /**

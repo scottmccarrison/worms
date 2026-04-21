@@ -3,7 +3,7 @@ import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ALLOWED_COLORS } from "../state/LobbyState.js";
-import { GameRoom } from "./GameRoom.js";
+import { GameRoom, __setReconnectionGraceSecondsForTests } from "./GameRoom.js";
 
 let colyseus: ColyseusTestServer;
 
@@ -392,24 +392,26 @@ describe("GameRoom lobby", () => {
     await bob.leave();
   });
 
-  it("force-advances turn when the active player disconnects", async () => {
+  it("consented leave by the active player forfeits their team (2p -> game_over)", async () => {
     const { alice, bob } = await setupStartedGame();
 
     const firstTeamId = (alice.state as any).currentTeamId as string;
     const active = firstTeamId === "red" ? alice : bob;
     const spectator = firstTeamId === "red" ? bob : alice;
 
-    const resolved: any[] = [];
-    spectator.onMessage("turn_resolved", (p) => resolved.push(p));
+    const gameOvers: any[] = [];
+    spectator.onMessage("game_over", (p) => gameOvers.push(p));
 
+    // `room.leave()` without args is consented; arbiter forfeits the
+    // active team which in a 2-player game leaves one team alive and
+    // triggers game_over.
     await active.leave();
     await tick(200);
 
-    // Active player leaving while holding the turn forces an advance;
-    // the remaining client gets a turn_resolved pointing at itself.
-    expect(resolved.length).toBeGreaterThanOrEqual(1);
-    expect((spectator.state as any).currentTeamId).not.toBe(firstTeamId);
-    expect((spectator.state as any).currentTeamId).not.toBe("");
+    expect(gameOvers).toHaveLength(1);
+    expect(gameOvers[0].winnerTeamId).not.toBe(firstTeamId);
+    expect(gameOvers[0].winnerTeamId).not.toBe(null);
+    expect((spectator.state as any).currentTeamId).toBe("");
 
     await spectator.leave();
   });
@@ -433,5 +435,168 @@ describe("GameRoom lobby", () => {
     expect((alice.state as any).selectedMapId).toBe("hills");
 
     await alice.leave();
+  });
+
+  // ---- Epic 10: reconnection + grace window ----
+
+  it("unexpected disconnect flags player as disconnected and preserves the slot; reconnect clears the flag", async () => {
+    const alice = await colyseus.sdk.joinOrCreate("game", {
+      nickname: "Alice",
+      color: ALLOWED_COLORS[0],
+    });
+    await tick();
+    const code = (alice.state as any).code as string;
+
+    const bob = await colyseus.sdk.joinOrCreate("game", {
+      code,
+      nickname: "Bob",
+      color: ALLOWED_COLORS[1],
+    });
+    await tick();
+
+    const bobSessionId = bob.sessionId;
+    const bobToken = bob.reconnectionToken;
+
+    // Non-consented leave (simulates a TCP / network drop).
+    await bob.leave(false);
+    // Give the server a moment to run onLeave + flag the schema row.
+    await tick(150);
+
+    // Bob's LobbyPlayer should still be in the map with disconnected=true.
+    const players = (alice.state as any).players;
+    const bobRow = players.get(bobSessionId);
+    expect(bobRow).toBeDefined();
+    expect(bobRow.disconnected).toBe(true);
+    expect(bobRow.disconnectGraceEndsAt).toBeGreaterThan(Date.now());
+
+    // Now reconnect. `state + listeners` are preserved; onJoin should
+    // NOT re-fire on the server side (we assert indirectly by checking
+    // Bob's color / nickname are the originals, not auto-assigned).
+    const bobAgain = await colyseus.sdk.reconnect(bobToken);
+    await tick(150);
+
+    const bobRowAfter = (alice.state as any).players.get(bobAgain.sessionId);
+    expect(bobRowAfter).toBeDefined();
+    expect(bobRowAfter.disconnected).toBe(false);
+    expect(bobRowAfter.disconnectGraceEndsAt).toBe(0);
+    expect(bobRowAfter.nickname).toBe("Bob");
+    expect(bobRowAfter.color).toBe(ALLOWED_COLORS[1]);
+    // sessionId is preserved across reconnects (that's the whole point).
+    expect(bobAgain.sessionId).toBe(bobSessionId);
+
+    await alice.leave();
+    await bobAgain.leave();
+  });
+
+  it("active-owner disconnect pauses the turn timer; reconnect resumes with the same remaining time", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    const firstTeamId = (alice.state as any).currentTeamId as string;
+    const active = firstTeamId === "red" ? alice : bob;
+    const spectator = firstTeamId === "red" ? bob : alice;
+    const activeToken = active.reconnectionToken;
+
+    // Grab the remaining time before the drop so we can assert the
+    // resume clock matches within a small tolerance.
+    const turnEndsAtBefore = (spectator.state as any).turnEndsAt as number;
+    const remainingBefore = turnEndsAtBefore - Date.now();
+    expect(remainingBefore).toBeGreaterThan(0);
+
+    await active.leave(false);
+    await tick(150);
+
+    // While paused the sentinel pushes turnEndsAt way into the future;
+    // Number.MAX_SAFE_INTEGER - Date.now() > 10 years is a trivially
+    // safe lower bound that distinguishes "paused" from "unpaused".
+    const turnEndsAtPaused = (spectator.state as any).turnEndsAt as number;
+    expect(turnEndsAtPaused - Date.now()).toBeGreaterThan(10 * 365 * 24 * 60 * 60 * 1000);
+
+    // Reconnect mid-grace.
+    const activeAgain = await colyseus.sdk.reconnect(activeToken);
+    await tick(150);
+
+    const turnEndsAtResumed = (spectator.state as any).turnEndsAt as number;
+    const remainingAfter = turnEndsAtResumed - Date.now();
+    // The turnEndsAt field is no longer the sentinel.
+    expect(turnEndsAtResumed).toBeLessThan(Number.MAX_SAFE_INTEGER);
+    // Resume remaining should be within ~500ms of pre-drop remaining
+    // (test latency + tick delays).
+    expect(Math.abs(remainingAfter - remainingBefore)).toBeLessThan(500);
+
+    await activeAgain.leave();
+    await spectator.leave();
+  });
+
+  it("grace expiry forfeits the active team (2p -> game_over)", async () => {
+    // Shrink the grace to ~1s so the test completes in under ~2s of
+    // real time. Restored in a finally block.
+    __setReconnectionGraceSecondsForTests(1);
+    try {
+      const { alice, bob } = await setupStartedGame();
+
+      const firstTeamId = (alice.state as any).currentTeamId as string;
+      const active = firstTeamId === "red" ? alice : bob;
+      const spectator = firstTeamId === "red" ? bob : alice;
+
+      const gameOvers: any[] = [];
+      spectator.onMessage("game_over", (p) => gameOvers.push(p));
+
+      // Non-consented leave so onLeave actually awaits allowReconnection.
+      await active.leave(false);
+      // Wait past the 1s grace + a bit for bookkeeping.
+      await tick(1500);
+
+      // The remaining team won by forfeit.
+      expect(gameOvers).toHaveLength(1);
+      expect(gameOvers[0].winnerTeamId).not.toBe(firstTeamId);
+      expect(gameOvers[0].winnerTeamId).not.toBe(null);
+      expect((spectator.state as any).currentTeamId).toBe("");
+
+      await spectator.leave();
+    } finally {
+      __setReconnectionGraceSecondsForTests(60);
+    }
+  });
+
+  it("host disconnect + reconnect preserves isHost", async () => {
+    const alice = await colyseus.sdk.joinOrCreate("game", {
+      nickname: "Alice",
+      color: ALLOWED_COLORS[0],
+    });
+    await tick();
+    const code = (alice.state as any).code as string;
+
+    const bob = await colyseus.sdk.joinOrCreate("game", {
+      code,
+      nickname: "Bob",
+      color: ALLOWED_COLORS[1],
+    });
+    await tick();
+
+    expect((alice.state as any).hostSessionId).toBe(alice.sessionId);
+    const aliceToken = alice.reconnectionToken;
+
+    await alice.leave(false);
+    await tick(150);
+
+    // During the grace window host stays on Alice's slot; the LobbyPlayer
+    // is flagged disconnected but still host.
+    const aliceRow = (bob.state as any).players.get(alice.sessionId);
+    expect(aliceRow).toBeDefined();
+    expect(aliceRow.disconnected).toBe(true);
+    expect(aliceRow.isHost).toBe(true);
+    expect((bob.state as any).hostSessionId).toBe(alice.sessionId);
+
+    const aliceAgain = await colyseus.sdk.reconnect(aliceToken);
+    await tick(150);
+
+    const aliceRowAfter = (bob.state as any).players.get(aliceAgain.sessionId);
+    expect(aliceRowAfter).toBeDefined();
+    expect(aliceRowAfter.isHost).toBe(true);
+    expect(aliceRowAfter.disconnected).toBe(false);
+    expect((bob.state as any).hostSessionId).toBe(aliceAgain.sessionId);
+
+    await aliceAgain.leave();
+    await bob.leave();
   });
 });
