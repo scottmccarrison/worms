@@ -219,6 +219,8 @@ export class GameScene extends Phaser.Scene {
     c.height = height;
     const g = c.getContext("2d");
     if (!g) throw new Error("mask ctx");
+
+    // Ground: wavy hills at the bottom half.
     g.fillStyle = "#4a7d3c";
     g.beginPath();
     g.moveTo(0, height);
@@ -229,6 +231,19 @@ export class GameScene extends Phaser.Scene {
     g.lineTo(width, height);
     g.closePath();
     g.fill();
+
+    // Ceiling: rough rocky strip at the top so rope has something to grapple.
+    g.fillStyle = "#3d5d2f";
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(width, 0);
+    for (let x = width; x >= 0; x -= 4) {
+      const y = 40 + Math.sin(x * 0.015) * 18 + Math.sin(x * 0.04) * 10;
+      g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+
     return c;
   }
 }
