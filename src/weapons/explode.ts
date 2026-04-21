@@ -43,6 +43,7 @@ export function explode(p: ExplodeParams): ExplodeResult {
     if (!ud || ud.kind !== "worm") return true; // skip non-worms
 
     const worm = ud.worm;
+    if (!worm.isAlive) return true; // skip corpses - body still in world but worm is dead
     if (seen.has(worm)) return true; // each worm once
     seen.add(worm);
 
