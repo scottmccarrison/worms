@@ -72,9 +72,10 @@ export class TurnHUD {
     );
   }
 
-  /** Returns true if the pointer is over the end-turn button. GameScene uses this to gate terrain cut. */
+  /** Returns true if the pointer is over the end-turn button. GameScene uses this to gate terrain cut.
+   * Blocks cuts even when the button is visually disabled - the greyed button still occupies screen space
+   * and tapping there during turnEnding should not leak through to terrain cut. */
   hitsButton(pointer: Phaser.Input.Pointer): boolean {
-    if (!this.endEnabled) return false;
     const local = this.endBtn.getLocalPoint(pointer.x, pointer.y);
     return Phaser.Geom.Circle.Contains(
       new Phaser.Geom.Circle(0, 0, this.BTN_RADIUS),

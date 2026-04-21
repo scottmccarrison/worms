@@ -152,11 +152,16 @@ export class TurnManager {
 
       // Team._currentWormIdx starts at -1, so the very first advanceWorm lands on worm 0.
       // On subsequent turns for this team, advanceWorm rotates to the next alive worm.
-      // If all worms on this team are dead, advanceWorm returns null - but this should
-      // be impossible because the update() win check fires first.
+      // If all worms on this team are dead, advanceWorm returns null - this should be
+      // impossible because the update() win check fires first, but log defensively so
+      // a silent hang is visible if the invariant ever breaks.
       const worm = team.advanceWorm();
       if (worm?.isAlive) {
         this.onTurnStart(team, worm);
+      } else {
+        console.warn(
+          `[TurnManager] turnActive entered for team ${team.id} but advanceWorm returned no alive worm. This indicates the win check missed a same-frame full-team elimination.`,
+        );
       }
     } else if (stateName === "turnEnding") {
       this.onTurnEnd();
