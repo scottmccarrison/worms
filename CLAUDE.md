@@ -93,6 +93,31 @@ Before writing a plan, pull current docs via Context7 MCP (installed user-scope)
 
 When Context7 doesn't have a library or the topic is non-library (game netcode theory, asset licensing, hosting), use WebFetch against the authoritative URL. See "References by epic" below.
 
+## Lobby UX (Epic 8)
+
+Scene graph is `BootScene -> LobbyScene -> GameScene`. Entry points:
+
+- `/` - normal flow. BootScene creates the Colyseus NetClient and starts LobbyScene (home view).
+- `/?room=WAVE` - deep link. LobbyScene home view auto-fills the join code input; user types a nickname and taps Join.
+- `/?offline=1` - dev shortcut. Skips LobbyScene and goes straight to GameScene with the hardcoded red/blue teams (Epic 7 behavior). Combine with `?map=hills` to pick the map.
+
+Lobby scene is DOM-augmented (Phaser `dom.createContainer: true` in main.ts) so the nickname + code inputs are real `<input>` elements - mobile virtual keyboards focus them correctly and tap targets stay native. Buttons are oversized (>=60px) for thumb use in landscape.
+
+Joining by code uses the standard Colyseus 0.15 pattern: `client.getAvailableRooms("game")` returns `RoomAvailable[]`, the client finds the room whose `metadata.code` matches the entered 4-letter code, then calls `client.joinById(roomId, opts)`. This avoids `joinOrCreate`'s implicit create-on-miss, which would silently spawn a new room if the code is wrong. Create path stays simple: `client.create("game", opts)` always creates fresh.
+
+State listeners use the classic 0.15 API, attached directly on `room.state`:
+
+```ts
+room.state.players.onAdd(rerender);
+room.state.players.onRemove(rerender);
+room.state.players.onChange(rerender);
+room.state.listen("selectedMapId", rerender);
+```
+
+No `getStateCallbacks` (that's 0.16+). The room view re-renders on every state mutation by tearing down + rebuilding its GameObjects; fine at lobby sizes.
+
+The `game_started` message carries `{ mapId, seed, teams }` - GameScene.init accepts this plus an optional `room?: Room` so Epic 9 can drop authoritative state-sync in without changing the scene boundary. If `teams` is omitted (solo/offline flow), GameScene falls back to the Epic 7 hardcoded red/blue defaults via `buildTeams`.
+
 ## Pick-up ritual
 
 When resuming work after `/clear` or a new session:
