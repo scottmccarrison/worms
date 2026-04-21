@@ -230,6 +230,190 @@ describe("GameRoom lobby", () => {
     await bob.leave();
   });
 
+  // ---- Epic 9: turn arbiter integration ----
+
+  /**
+   * Spin up two players and start the game. Returns both rooms plus
+   * the `game_started` payload so Epic 9 tests can read team owners /
+   * current active team without duplicating 40 lines of setup.
+   */
+  async function setupStartedGame(): Promise<{
+    alice: Awaited<ReturnType<typeof colyseus.sdk.joinOrCreate>>;
+    bob: Awaited<ReturnType<typeof colyseus.sdk.joinOrCreate>>;
+    payload: any;
+  }> {
+    const alice = await colyseus.sdk.joinOrCreate("game", {
+      nickname: "Alice",
+      color: ALLOWED_COLORS[0],
+    });
+    await tick();
+    const code = (alice.state as any).code as string;
+
+    const bob = await colyseus.sdk.joinOrCreate("game", {
+      code,
+      nickname: "Bob",
+      color: ALLOWED_COLORS[1],
+    });
+    await tick();
+
+    bob.send("set_ready", { ready: true });
+    await tick(60);
+
+    const starts: any[] = [];
+    alice.onMessage("game_started", (p) => starts.push(p));
+
+    alice.send("start_game", {});
+    await tick(150);
+
+    return { alice, bob, payload: starts[0] };
+  }
+
+  it("start_game assigns team owners deterministically from player join order", async () => {
+    const { alice, bob, payload } = await setupStartedGame();
+
+    // Player 0 (Alice, first joiner) gets team 0 ("red"); Bob gets "blue".
+    expect(payload.teams[0].id).toBe("red");
+    expect(payload.teams[0].ownerSessionId).toBe(alice.sessionId);
+    expect(payload.teams[1].id).toBe("blue");
+    expect(payload.teams[1].ownerSessionId).toBe(bob.sessionId);
+
+    // And ownership is mirrored onto the replicated LobbyPlayer rows so
+    // clients can do the lookup without reparsing the teams array.
+    const alicePlayer = (alice.state as any).players.get(alice.sessionId);
+    const bobPlayer = (alice.state as any).players.get(bob.sessionId);
+    expect(alicePlayer.ownerOfTeamId).toBe("red");
+    expect(bobPlayer.ownerOfTeamId).toBe("blue");
+
+    await alice.leave();
+    await bob.leave();
+  });
+
+  it("drops input_walk from the non-active player silently", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    // Whichever one is non-active sends input_walk; it must not reach
+    // the other. Determine active via currentTeamId -> owner mapping.
+    const activeTeamId = (alice.state as any).currentTeamId as string;
+    const nonActive = activeTeamId === "red" ? bob : alice;
+    const other = activeTeamId === "red" ? alice : bob;
+
+    const walkReceived: any[] = [];
+    other.onMessage("input_walk", (p) => walkReceived.push(p));
+
+    nonActive.send("input_walk", { dir: 1, seq: 1 });
+    await tick(100);
+
+    expect(walkReceived).toHaveLength(0);
+
+    await alice.leave();
+    await bob.leave();
+  });
+
+  it("relays input_walk from the active player to the other client only", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    const activeTeamId = (alice.state as any).currentTeamId as string;
+    const active = activeTeamId === "red" ? alice : bob;
+    const spectator = activeTeamId === "red" ? bob : alice;
+
+    const activeWalkSelfEcho: any[] = [];
+    const spectatorWalk: any[] = [];
+    active.onMessage("input_walk", (p) => activeWalkSelfEcho.push(p));
+    spectator.onMessage("input_walk", (p) => spectatorWalk.push(p));
+
+    active.send("input_walk", { dir: -1, seq: 7 });
+    await tick(100);
+
+    // Server re-broadcasts with { except: sender } so the active
+    // player's own client does NOT receive an echo back.
+    expect(activeWalkSelfEcho).toHaveLength(0);
+    expect(spectatorWalk).toHaveLength(1);
+    expect(spectatorWalk[0]).toMatchObject({ dir: -1, seq: 7 });
+
+    await alice.leave();
+    await bob.leave();
+  });
+
+  it("broadcasts turn_resolved to all clients on turn_snapshot from the active player", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    const activeTeamId = (alice.state as any).currentTeamId as string;
+    const active = activeTeamId === "red" ? alice : bob;
+
+    const aliceResolved: any[] = [];
+    const bobResolved: any[] = [];
+    alice.onMessage("turn_resolved", (p) => aliceResolved.push(p));
+    bob.onMessage("turn_resolved", (p) => bobResolved.push(p));
+
+    active.send("turn_snapshot", {
+      worms: [
+        { id: "red-0", x: 10, y: 20, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "red-1", x: 30, y: 20, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-0", x: 50, y: 20, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-1", x: 70, y: 20, vx: 0, vy: 0, hp: 100, alive: true },
+      ],
+      terrainCuts: [{ x: 100, y: 100, r: 40, seq: 1 }],
+    });
+    await tick(150);
+
+    // Both clients (including the sender) receive turn_resolved since
+    // the server broadcasts to everyone, not just spectators.
+    expect(aliceResolved).toHaveLength(1);
+    expect(bobResolved).toHaveLength(1);
+    expect(typeof aliceResolved[0].turnSeq).toBe("number");
+    expect(aliceResolved[0].turnSeq).toBeGreaterThanOrEqual(2);
+
+    await alice.leave();
+    await bob.leave();
+  });
+
+  it("advances state.currentTeamId to the next team after turn_resolved", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    const firstTeamId = (alice.state as any).currentTeamId as string;
+    const active = firstTeamId === "red" ? alice : bob;
+
+    active.send("turn_snapshot", {
+      worms: [
+        { id: "red-0", x: 0, y: 0, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "red-1", x: 0, y: 0, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-0", x: 0, y: 0, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-1", x: 0, y: 0, vx: 0, vy: 0, hp: 100, alive: true },
+      ],
+      terrainCuts: [],
+    });
+    await tick(150);
+
+    const secondTeamId = (alice.state as any).currentTeamId as string;
+    expect(secondTeamId).not.toBe("");
+    expect(secondTeamId).not.toBe(firstTeamId);
+
+    await alice.leave();
+    await bob.leave();
+  });
+
+  it("force-advances turn when the active player disconnects", async () => {
+    const { alice, bob } = await setupStartedGame();
+
+    const firstTeamId = (alice.state as any).currentTeamId as string;
+    const active = firstTeamId === "red" ? alice : bob;
+    const spectator = firstTeamId === "red" ? bob : alice;
+
+    const resolved: any[] = [];
+    spectator.onMessage("turn_resolved", (p) => resolved.push(p));
+
+    await active.leave();
+    await tick(200);
+
+    // Active player leaving while holding the turn forces an advance;
+    // the remaining client gets a turn_resolved pointing at itself.
+    expect(resolved.length).toBeGreaterThanOrEqual(1);
+    expect((spectator.state as any).currentTeamId).not.toBe(firstTeamId);
+    expect((spectator.state as any).currentTeamId).not.toBe("");
+
+    await spectator.leave();
+  });
+
   it("select_map from host updates selectedMapId; rejects unknown map ids", async () => {
     const alice = await colyseus.sdk.joinOrCreate("game", {
       nickname: "Alice",

@@ -1,6 +1,8 @@
 import { type Client, Room, matchMaker } from "@colyseus/core";
 import { generateUniqueCode } from "../codegen.js";
+import { type ArbiterRoomAdapter, type TeamRoster, TurnArbiter } from "../game/TurnArbiter.js";
 import { ALLOWED_COLORS, LobbyPlayer, LobbyState } from "../state/LobbyState.js";
+import { TURN_DURATION_MS } from "../state/constants.js";
 
 /**
  * Whitelist of map ids a host may select. Mirrors
@@ -17,6 +19,22 @@ const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000; // 5 minutes
 const MIN_PLAYERS_TO_START = 2;
 
 /**
+ * All gameplay-input message types the server relays from the active
+ * player to spectators. Kept as a const array so the handler wiring
+ * loop in `registerMessageHandlers` can stay declarative.
+ */
+const INPUT_MESSAGE_TYPES = [
+  "input_walk",
+  "input_jump",
+  "input_backflip",
+  "input_aim_angle",
+  "input_aim_power",
+  "input_select_weapon",
+  "input_fire",
+  "input_end_turn",
+] as const;
+
+/**
  * One GameRoom instance per active game.
  *
  * Epic 8 scope: lobby-only. Players join, pick nicknames/colors,
@@ -31,6 +49,16 @@ export class GameRoom extends Room<LobbyState> {
 
   /** Handle returned by setTimeout for the empty-room disposal timer. */
   private disposeTimer: NodeJS.Timeout | null = null;
+
+  /** Epic 9 turn arbiter; null until `start_game` promotes the room to "playing". */
+  private arbiter: TurnArbiter | null = null;
+
+  /**
+   * Plain 20Hz setInterval driving TurnArbiter.onTick. We deliberately
+   * use a vanilla setInterval instead of Colyseus' setSimulationInterval
+   * so the arbiter stays decoupled from Colyseus' internal patch loop.
+   */
+  private simInterval: NodeJS.Timeout | null = null;
 
   async onCreate(options: { nickname?: string; color?: string } = {}): Promise<void> {
     // Keep the room alive past the last-client-leaves moment so the
@@ -109,7 +137,20 @@ export class GameRoom extends Room<LobbyState> {
 
   onLeave(client: Client, consented: boolean): void {
     const wasHost = this.state.hostSessionId === client.sessionId;
+    const wasActiveOwner =
+      this.state.phase === "playing" &&
+      this.state.players.get(client.sessionId)?.ownerOfTeamId === this.state.currentTeamId &&
+      this.state.currentTeamId !== "";
+
     this.state.players.delete(client.sessionId);
+
+    // Post-lobby: let the arbiter know so it can force-advance if the
+    // active player just left. Arbiter itself also re-checks connected
+    // sessionIds on advanceTurn, so a non-active departure needs no
+    // explicit handling here.
+    if (this.state.phase === "playing" && this.arbiter && wasActiveOwner) {
+      this.arbiter.onPlayerLeft(client.sessionId);
+    }
 
     if (wasHost && this.state.players.size > 0) {
       // Promote the earliest-joined remaining player.
@@ -139,7 +180,33 @@ export class GameRoom extends Room<LobbyState> {
 
   onDispose(): void {
     this.clearDisposeTimer();
+    if (this.simInterval) {
+      clearInterval(this.simInterval);
+      this.simInterval = null;
+    }
     console.log(`GameRoom ${this.roomId} (${this.state?.code ?? "?"}) disposed`);
+  }
+
+  /**
+   * Build the narrow adapter the TurnArbiter consumes. Intentionally
+   * inline so arbiter doesn't need to know about Colyseus' Client type.
+   */
+  private makeArbiterAdapter(): ArbiterRoomAdapter {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    return {
+      get state() {
+        return self.state;
+      },
+      broadcast(type, payload) {
+        self.broadcast(type, payload);
+      },
+      getConnectedSessionIds() {
+        const out = new Set<string>();
+        for (const c of self.clients) out.add(c.sessionId);
+        return out;
+      },
+    };
   }
 
   // ---- message handlers ----
@@ -243,19 +310,99 @@ export class GameRoom extends Room<LobbyState> {
       }
 
       const seed = Math.floor(Math.random() * 2 ** 31);
-      const teams = buildDefaultTeams();
+
+      // Build teams keyed to player join order so team-to-sessionId
+      // ownership is deterministic (Alice joined first -> owns team 0).
+      const sortedPlayers = [...this.state.players.values()].sort(
+        (a, b) => a.joinedAt - b.joinedAt,
+      );
+      const teamCount = Math.min(sortedPlayers.length, 4);
+      const teams = buildTeamsForPlayers(sortedPlayers, teamCount);
+
+      // Mirror ownership onto the replicated LobbyPlayer rows so
+      // clients (and the arbiter's adapter) can see who owns what.
+      for (const t of teams) {
+        if (!t.ownerSessionId) continue;
+        const p = this.state.players.get(t.ownerSessionId);
+        if (p) p.ownerOfTeamId = t.id;
+      }
+
+      // Shuffle teamOrder so turn cycle is randomised per game. Order
+      // is what the arbiter walks; ownership lives on the per-team
+      // roster, so shuffling here is purely about turn rotation.
+      const teamOrder = shuffle(teams.map((t) => t.id));
+
       this.broadcast("game_started", {
         mapId: this.state.selectedMapId,
         seed,
         teams,
       });
       this.state.phase = "playing";
+
+      // Hand off to the arbiter. Roster shape deliberately mirrors the
+      // client-facing TeamInit so the arbiter has wormIds + owner.
+      const rosters: TeamRoster[] = teams.map((t) => ({
+        id: t.id,
+        ownerSessionId: t.ownerSessionId,
+        wormIds: t.wormNames.map((_, idx) => `${t.id}-${idx}`),
+      }));
+      this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
+      this.arbiter.start(teamOrder, rosters, TURN_DURATION_MS);
+
+      // 20Hz tick (every 50ms) is plenty for a turn-based game; we only
+      // need to detect end-of-turn timeouts, not per-frame physics.
+      this.simInterval = setInterval(() => {
+        this.arbiter?.onTick(50);
+      }, 50);
     });
+
+    // ---- Epic 9 turn resolution ----
+    //
+    // Active player tells us the authoritative end-of-turn state; we
+    // forward to the arbiter which broadcasts `turn_resolved` (or
+    // `game_over`) on our behalf and advances the turn.
+    this.onMessage("turn_snapshot", (client, payload: unknown) => {
+      if (!this.validateActiveInput(client)) return;
+      if (!this.arbiter) return;
+      const snap = sanitiseTurnSnapshot(payload);
+      if (!snap) return;
+      this.arbiter.onSnapshot(snap);
+    });
+
+    // ---- Epic 9 input relay ----
+    //
+    // Each gameplay input the active player sends is validated and then
+    // re-broadcast to every other client. Validation: phase==="playing"
+    // AND the sender owns state.currentTeamId. On violation we return
+    // silently (no error reply) so a non-malicious mis-timed keystroke
+    // from a backseater doesn't spam the error channel; see bugcheck
+    // targets in the Epic 9 plan for the "drop silently" rationale.
+    for (const inputType of INPUT_MESSAGE_TYPES) {
+      this.onMessage(inputType, (client, payload) => {
+        if (!this.validateActiveInput(client)) return;
+        this.broadcast(inputType, payload, { except: client });
+      });
+    }
 
     this.onMessage("leave", (client) => {
       // Client-initiated clean disconnect. Colyseus will call onLeave.
       client.leave();
     });
+  }
+
+  /**
+   * Guard common to all `input_*` and `turn_snapshot` handlers: the
+   * sender must be the active player for the current team. Silent on
+   * failure per Epic 9 plan (avoid giving cheaters confirmation that a
+   * forged message was seen).
+   */
+  private validateActiveInput(client: Client): boolean {
+    if (this.state.phase !== "playing") return false;
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return false;
+    if (!this.state.currentTeamId) return false;
+    if (player.ownerOfTeamId !== this.state.currentTeamId) return false;
+    return true;
   }
 
   // ---- helpers ----
@@ -334,6 +481,68 @@ function isAllowedMap(mapId: string): boolean {
 }
 
 /**
+ * Defensive parse of a `turn_snapshot` payload. Returns null for
+ * anything that doesn't match the expected shape so a malformed
+ * message doesn't crash the arbiter or poison the alive-count tally.
+ */
+function sanitiseTurnSnapshot(input: unknown): {
+  worms: Array<{
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    alive: boolean;
+  }>;
+  terrainCuts: Array<{ x: number; y: number; r: number; seq: number }>;
+} | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { worms?: unknown; terrainCuts?: unknown };
+  if (!Array.isArray(raw.worms)) return null;
+  if (!Array.isArray(raw.terrainCuts)) return null;
+
+  const worms: Array<{
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    alive: boolean;
+  }> = [];
+  for (const w of raw.worms) {
+    if (!w || typeof w !== "object") continue;
+    const r = w as {
+      id?: unknown;
+      x?: unknown;
+      y?: unknown;
+      vx?: unknown;
+      vy?: unknown;
+      hp?: unknown;
+      alive?: unknown;
+    };
+    if (typeof r.id !== "string") continue;
+    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
+    if (typeof r.vx !== "number" || typeof r.vy !== "number") continue;
+    if (typeof r.hp !== "number") continue;
+    if (typeof r.alive !== "boolean") continue;
+    worms.push({ id: r.id, x: r.x, y: r.y, vx: r.vx, vy: r.vy, hp: r.hp, alive: r.alive });
+  }
+
+  const terrainCuts: Array<{ x: number; y: number; r: number; seq: number }> = [];
+  for (const c of raw.terrainCuts) {
+    if (!c || typeof c !== "object") continue;
+    const r = c as { x?: unknown; y?: unknown; r?: unknown; seq?: unknown };
+    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
+    if (typeof r.r !== "number" || typeof r.seq !== "number") continue;
+    terrainCuts.push({ x: r.x, y: r.y, r: r.r, seq: r.seq });
+  }
+
+  return { worms, terrainCuts };
+}
+
+/**
  * Collect codes currently in use across all live GameRooms. Uses
  * matchMaker.query which reads from the presence store (in-memory by
  * default).
@@ -356,30 +565,72 @@ async function collectTakenCodes(): Promise<Set<string>> {
 }
 
 /**
- * Placeholder team layout used by `game_started`. Matches the current
- * GameScene default (2 teams x 2 worms). Replaced with real team
- * configuration once Epic 9 / #23 lands.
+ * Team roster shipped in the `game_started` message. `ownerSessionId`
+ * is the sessionId of the player who drives this team's worms; empty
+ * string means the slot is unowned (small game + unused 3rd/4th team).
  */
 export interface TeamInit {
   id: string;
   name: string;
   color: string;
   wormNames: string[];
+  ownerSessionId: string;
 }
 
-function buildDefaultTeams(): TeamInit[] {
-  return [
-    {
-      id: "team-red",
-      name: "Team Red",
-      color: "#ff4444",
-      wormNames: ["Red-1", "Red-2"],
-    },
-    {
-      id: "team-blue",
-      name: "Team Blue",
-      color: "#4488ff",
-      wormNames: ["Blue-1", "Blue-2"],
-    },
-  ];
+/**
+ * Fixed 4-team palette. Intentionally separate from ALLOWED_COLORS
+ * (which is the per-player UI palette); team colours are a different
+ * axis and we want them to stay stable even as the player palette
+ * grows.
+ */
+const TEAM_PALETTE: Array<{ id: string; name: string; color: string; prefix: string }> = [
+  { id: "red", name: "Team Red", color: "#ff4444", prefix: "Red" },
+  { id: "blue", name: "Team Blue", color: "#4488ff", prefix: "Blue" },
+  { id: "green", name: "Team Green", color: "#44dd44", prefix: "Green" },
+  { id: "yellow", name: "Team Yellow", color: "#ffdd44", prefix: "Yellow" },
+];
+
+const WORMS_PER_TEAM = 2;
+
+/**
+ * Assign teams to the given players in join order. Team i goes to
+ * player i for i < players.length; remaining team slots (up to
+ * teamCount) are created with empty ownerSessionId so the arbiter
+ * can skip them.
+ */
+export function buildTeamsForPlayers(sortedPlayers: LobbyPlayer[], teamCount: number): TeamInit[] {
+  const teams: TeamInit[] = [];
+  const capped = Math.min(teamCount, TEAM_PALETTE.length);
+  for (let i = 0; i < capped; i++) {
+    const slot = TEAM_PALETTE[i];
+    const owner = sortedPlayers[i];
+    const wormNames: string[] = [];
+    for (let w = 0; w < WORMS_PER_TEAM; w++) {
+      wormNames.push(`${slot.prefix}-${w + 1}`);
+    }
+    teams.push({
+      id: slot.id,
+      name: slot.name,
+      color: slot.color,
+      wormNames,
+      ownerSessionId: owner?.sessionId ?? "",
+    });
+  }
+  return teams;
+}
+
+/**
+ * Fisher-Yates shuffle using Math.random. Deterministic seeding isn't
+ * needed here; turn rotation order is broadcast via `teamOrder` so
+ * clients share the same sequence.
+ */
+function shuffle<T>(input: readonly T[]): T[] {
+  const out = [...input];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
 }
