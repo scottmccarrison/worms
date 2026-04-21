@@ -8,10 +8,16 @@ import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
+import { AimHUD } from "../ui/AimHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
+import { WeaponDrawer } from "../ui/WeaponDrawer";
 import { JetPack } from "../utilities/JetPack";
 import { NinjaRope } from "../utilities/NinjaRope";
+import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
+import { fire } from "../weapons/fire";
+import { ProjectileManager } from "../weapons/ProjectileManager";
+import { WeaponManager } from "../weapons/WeaponManager";
 import { Team } from "../worm/Team";
 import { Worm } from "../worm/Worm";
 import type { WormUserData } from "../worm/Worm";
@@ -29,6 +35,16 @@ export class GameScene extends Phaser.Scene {
   private touchControls!: TouchControls;
   private turnManager!: TurnManager;
   private turnHUD!: TurnHUD;
+
+  // Weapon system
+  private projectileManager!: ProjectileManager;
+  private weaponManagers!: Map<Team, WeaponManager>;
+  private weaponDrawer!: WeaponDrawer;
+  private aimHUD!: AimHUD;
+  private shotsFiredThisTurn = 0;
+
+  // Drag-to-aim state
+  private dragStart: { x: number; y: number } | null = null;
 
   constructor() {
     super("GameScene");
@@ -51,13 +67,16 @@ export class GameScene extends Phaser.Scene {
     this.physicsSystem.world.on("end-contact", this.onEndContact);
     this.physicsSystem.world.on("post-solve", this.onPostSolve);
 
-    // Clean up contact listeners on scene shutdown to prevent HMR stacking
+    // Clean up on scene shutdown
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.physicsSystem.world.off("begin-contact", this.onBeginContact);
       this.physicsSystem.world.off("end-contact", this.onEndContact);
       this.physicsSystem.world.off("post-solve", this.onPostSolve);
       this.turnManager.destroy();
       this.turnHUD.destroy();
+      this.projectileManager.destroy();
+      this.weaponDrawer.destroy();
+      this.aimHUD.destroy();
     });
 
     // Spawn worms on terrain surface
@@ -75,10 +94,9 @@ export class GameScene extends Phaser.Scene {
 
     this.teams = [red, blue];
 
-    // Spawn worms from terrain surface scan; fall back to width-spread for any missing slots
     const fallbackYPx = this.scale.height * 0.3;
     for (let i = 0; i < totalWorms; i++) {
-      const team = this.teams[i % 2];
+      const team = this.teams[i % 2]!;
       const pt = spawnPts[i];
       const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
       const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
@@ -94,7 +112,7 @@ export class GameScene extends Phaser.Scene {
       this.allWorms.push(w);
     }
 
-    // Assign utilities to each worm AFTER construction (worm doesn't instantiate these)
+    // Assign utilities to each worm AFTER construction
     for (const w of this.allWorms) {
       w.ropeUtility = new NinjaRope({
         scene: this,
@@ -107,18 +125,56 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    // Weapon system - instantiate before inputController so callbacks can reference them
+    this.projectileManager = new ProjectileManager({
+      scene: this,
+      world: this.physicsSystem.world,
+      terrain: this.terrain,
+      onDetonate: (firer, selfDamage) => {
+        if (selfDamage > 0 && firer === this.inputController.getActiveWorm()) {
+          this.turnManager.reportSelfDamage(selfDamage);
+        }
+      },
+    });
+
+    this.weaponManagers = new Map();
+    for (const team of this.teams) {
+      this.weaponManagers.set(team, new WeaponManager(team, defaultAmmoForMatch()));
+    }
+
     this.inputController = new InputController({
       scene: this,
       allWorms: this.allWorms,
       onEndTurn: () => this.turnManager.endTurnByPlayer(),
-      onSelectWeapon: () => { /* wired in commit 10 */ },
-      onFire: () => { /* wired in commit 10 */ },
+      onSelectWeapon: (n) => {
+        this.getActiveWeaponManager()?.selectByKey(n);
+      },
+      onFire: () => {
+        this.tryFireActiveWeapon();
+      },
     });
 
     // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
     this.touchControls = new TouchControls({
       scene: this,
       getActiveWorm: () => this.inputController.getActiveWorm(),
+    });
+
+    this.weaponDrawer = new WeaponDrawer({
+      scene: this,
+      weapons: allWeapons(),
+      onSelect: (id) => {
+        this.getActiveWeaponManager()?.select(id);
+      },
+      getAmmo: (id) => this.getActiveWeaponManager()?.ammoFor(id) ?? 0,
+      getSelectedId: () => this.getActiveWeaponManager()?.getSelected().id ?? "",
+      getTeamColor: () => this.getActiveTeam()?.color ?? 0xffffff,
+    });
+
+    this.aimHUD = new AimHUD({
+      scene: this,
+      getActiveWorm: () => this.inputController.getActiveWorm(),
+      isInputAllowed: () => this.turnManager.isInputAllowed(),
     });
 
     this.turnHUD = new TurnHUD({
@@ -135,6 +191,9 @@ export class GameScene extends Phaser.Scene {
         this.inputController.setInputAllowed(true);
         this.turnHUD.showTurnBanner(team.name, team.color);
         this.turnHUD.setEndTurnEnabled(true);
+        // Reset per-turn weapon activation state
+        this.shotsFiredThisTurn = 0;
+        this.getActiveWeaponManager()?.resetActivation();
       },
       onTurnEnd: () => {
         this.inputController.setInputAllowed(false);
@@ -163,11 +222,52 @@ export class GameScene extends Phaser.Scene {
       })
       .setDepth(20);
 
-    // Terrain-cut on click/tap - gate against touch buttons and HUD end button
+    // Pointerdown chain: TurnHUD -> TouchControls -> WeaponDrawer -> Shift+click dev cut -> drag-to-aim
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (this.touchControls.hitsButton(p)) return;
       if (this.turnHUD.hitsButton(p)) return;
-      this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
+      if (this.touchControls.hitsButton(p)) return;
+      if (this.weaponDrawer.hitsIcon(p)) return; // drawer owns tap via its zones
+      // Shift+click = dev terrain cut (removed in Epic 7)
+      if ((p.event as MouseEvent | undefined)?.shiftKey) {
+        this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
+        return;
+      }
+      // Begin drag-to-aim
+      this.dragStart = { x: p.x, y: p.y };
+    });
+
+    // Drag updates aim angle + power in real-time relative to active worm position
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      if (!this.dragStart) return;
+      const worm = this.inputController.getActiveWorm();
+      if (!worm || !this.turnManager.isInputAllowed()) return;
+
+      const dx = p.x - worm.xPx;
+      const dy = p.y - worm.yPx;
+      const mag = Math.hypot(dx, dy);
+      const cap = tuning.weapons.dragMaxLengthPx;
+      const power = Math.min(1, mag / cap);
+
+      // Compute raw aim angle; flip facing if drag goes behind worm
+      const rawAngle = Math.atan2(dy, dx);
+      const facingDot = Math.cos(rawAngle) * worm.facing;
+      if (facingDot < 0) {
+        // Pointer is on the opposite side - flip facing
+        worm.setFacing(-worm.facing as -1 | 1);
+      }
+      // Aim angle is relative to facing; atan2(dy, |dx|) gives correct up/down angle
+      const aimRad = Math.atan2(dy, Math.abs(dx));
+      worm.setAimAngle(aimRad);
+      worm.setAimPower(power);
+    });
+
+    // Drag release: if distance >= deadzone, fire current weapon
+    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
+      if (!this.dragStart) return;
+      const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
+      this.dragStart = null;
+      if (dragDist < tuning.weapons.dragDeadZonePx) return; // tap, not a drag
+      this.tryFireActiveWeapon();
     });
 
     void mountTuningPanel(() => {
@@ -179,7 +279,11 @@ export class GameScene extends Phaser.Scene {
     this.physicsSystem.step(deltaMs);
     this.terrain.flushPendingCuts();
 
-    // Apply pending damage BEFORE win check so same-frame kills are detected immediately
+    // ProjectileManager runs AFTER physics + terrain flush, BEFORE damage apply
+    // so same-frame detonation damage is visible in the win check
+    this.projectileManager.update(deltaMs);
+
+    // Apply pending damage BEFORE win check so same-frame kills are detected
     for (const w of this.allWorms) {
       w.applyPendingDamage();
     }
@@ -200,9 +304,64 @@ export class GameScene extends Phaser.Scene {
     // HUD timer
     this.turnHUD.update(this.turnManager.getTurnSecondsRemaining());
 
+    // Weapon UI
+    this.weaponDrawer.update();
+    this.aimHUD.update();
+
     drawDebug(this.debugGfx, this.physicsSystem.world);
 
-    this.hud.setText(`click to cut - bodies: ${this.terrain.bodyCount()}`);
+    const wm = this.getActiveWeaponManager();
+    const selectedName = wm ? wm.getSelected().name : "-";
+    this.hud.setText(
+      `weapon: ${selectedName}  bodies: ${this.terrain.bodyCount()}`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Weapon helpers
+  // ---------------------------------------------------------------------------
+
+  private getActiveTeam(): Team | null {
+    const worm = this.inputController.getActiveWorm();
+    if (!worm) return null;
+    return worm.team;
+  }
+
+  private getActiveWeaponManager(): WeaponManager | null {
+    const team = this.getActiveTeam();
+    if (!team) return null;
+    return this.weaponManagers.get(team) ?? null;
+  }
+
+  private tryFireActiveWeapon(): void {
+    if (!this.turnManager.isInputAllowed()) return;
+    const wm = this.getActiveWeaponManager();
+    const worm = this.inputController.getActiveWorm();
+    if (!wm || !worm) return;
+
+    const weapon = wm.getSelected();
+    if (!wm.hasAmmo(weapon.id)) return; // out of ammo
+
+    const result = fire(
+      weapon,
+      {
+        world: this.physicsSystem.world,
+        terrain: this.terrain,
+        firer: worm,
+        aimRadians: worm.aimAngle,
+        aimPower01: worm.aimPower01,
+        projectileManager: this.projectileManager,
+      },
+      wm.shotsFiredThisActivation,
+    );
+
+    wm.consumeOne(weapon.id);
+    wm.shotsFiredThisActivation++;
+    this.shotsFiredThisTurn++;
+
+    if (result.turnEndsImmediately) {
+      this.turnManager.endTurnByPlayer();
+    }
   }
 
   // ------ Contact listeners ------
@@ -242,7 +401,6 @@ export class GameScene extends Phaser.Scene {
     const a = contact.getFixtureA();
     const b = contact.getFixtureB();
 
-    // Only apply fall damage via non-sensor fixtures (not foot sensor)
     for (const fixture of [a, b]) {
       if (fixture.isSensor()) continue;
       const ud = fixture.getBody().getUserData() as WormUserData | null;
