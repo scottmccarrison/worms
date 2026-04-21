@@ -81,6 +81,12 @@ export class TurnArbiter {
   /** True once game_over has been declared; arbiter becomes a no-op. */
   private gameOver = false;
   private turnDurationMs = 0;
+  /**
+   * Epic 10: when the active-team owner disconnects we freeze the turn
+   * timer. Stores remaining ms at freeze time so we can resume with
+   * the same clock on reconnect. `null` means not paused.
+   */
+  private pausedRemainingMs: number | null = null;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -128,6 +134,10 @@ export class TurnArbiter {
   onTick(_dtMs: number): void {
     if (this.gameOver) return;
     if (this.gotSnapshotThisTurn) return;
+    // Epic 10: while paused for a disconnected owner, never force-advance.
+    // The room's reconnect grace owns the deadline; if it expires, the
+    // grace-expiry path calls forceAdvance directly.
+    if (this.pausedRemainingMs !== null) return;
     const now = Date.now();
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
       this.forceAdvance();
@@ -195,20 +205,39 @@ export class TurnArbiter {
   /**
    * Epic 10: an active-team owner has disconnected and the room is
    * holding their slot inside Colyseus' `allowReconnection` grace
-   * window. Stubbed in this commit; pause semantics land in the
-   * follow-up.
+   * window. If this sessionId owns the current team, freeze the turn
+   * timer by storing the remaining ms and pushing `turnEndsAt` to a
+   * sentinel far in the future so the client HUD stops counting down.
+   * Non-active owner disconnects are a no-op here; advanceTurn's skip
+   * predicate handles them lazily on the next rotation.
    */
-  onOwnerDisconnected(_sessionId: string): void {
-    void _sessionId;
+  onOwnerDisconnected(sessionId: string): void {
+    if (this.gameOver) return;
+    const activeTeamId = this.room.state.currentTeamId;
+    if (!activeTeamId) return;
+    const activeTeam = this.teamRosters.get(activeTeamId);
+    if (!activeTeam || activeTeam.ownerSessionId !== sessionId) return;
+    if (this.pausedRemainingMs !== null) return; // already paused
+    const remaining = Math.max(0, this.room.state.turnEndsAt - Date.now());
+    this.pausedRemainingMs = remaining;
+    this.room.state.turnEndsAt = Number.MAX_SAFE_INTEGER;
   }
 
   /**
    * Epic 10: the disconnected owner reconnected before the grace
-   * window elapsed. Stubbed in this commit; resume semantics land in
-   * the follow-up.
+   * window elapsed. If we're currently paused and this sessionId owns
+   * the active team, resume with the previously recorded remaining
+   * time. Everything else is a no-op.
    */
-  onOwnerReconnected(_sessionId: string): void {
-    void _sessionId;
+  onOwnerReconnected(sessionId: string): void {
+    if (this.gameOver) return;
+    if (this.pausedRemainingMs === null) return;
+    const activeTeamId = this.room.state.currentTeamId;
+    if (!activeTeamId) return;
+    const activeTeam = this.teamRosters.get(activeTeamId);
+    if (!activeTeam || activeTeam.ownerSessionId !== sessionId) return;
+    this.room.state.turnEndsAt = Date.now() + this.pausedRemainingMs;
+    this.pausedRemainingMs = null;
   }
 
   /**
@@ -280,6 +309,8 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.gotSnapshotThisTurn = false;
+    // New turn = fresh clock; any prior pause state is stale.
+    this.pausedRemainingMs = null;
 
     return {
       turnSeq: this.room.state.turnSeq,
