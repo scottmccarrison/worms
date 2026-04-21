@@ -24,6 +24,9 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
 
   const weapons = gui.addFolder("Weapons");
   weapons.add(tuning.weapons, "testCutRadiusPx", 10, 150, 1).name("Cut radius (px)");
+  weapons.add(tuning.weapons, "dragMaxLengthPx", 50, 400, 5).name("Drag max (px)");
+  weapons.add(tuning.weapons, "dragDeadZonePx", 2, 30, 1).name("Drag dead zone (px)");
+  weapons.add(tuning.weapons, "powerStepPerPress", 0.01, 0.2, 0.01).name("Power step/press");
 
   const worm = gui.addFolder("Worm");
   worm.add(tuning.worm, "walkSpeedMps", 0.5, 10, 0.1).name("Walk speed (m/s)");

@@ -1,6 +1,12 @@
 interface Tuning {
   world: { gravityY: number };
-  weapons: { testCutRadiusPx: number };
+  weapons: {
+    testCutRadiusPx: number;
+    dragMaxLengthPx: number;
+    dragDeadZonePx: number;
+    powerStepPerPress: number;
+    ammo: { bazooka: number; shotgun: number; handgrenade: number };
+  };
   terrain: { rowHeight: number };
   turn: {
     durationMs: number;
@@ -57,7 +63,13 @@ interface Tuning {
 
 export const tuning: Tuning = {
   world: { gravityY: 10 },
-  weapons: { testCutRadiusPx: 40 },
+  weapons: {
+    testCutRadiusPx: 40,
+    dragMaxLengthPx: 200,
+    dragDeadZonePx: 8,
+    powerStepPerPress: 0.05,
+    ammo: { bazooka: -1, shotgun: -1, handgrenade: -1 },
+  },
   terrain: { rowHeight: 5 },
   turn: {
     durationMs: 45000,
