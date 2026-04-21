@@ -4,13 +4,15 @@ import type { Worm } from "../worm/Worm";
 
 export interface InputControllerInit {
   scene: Phaser.Scene;
-  worms: Worm[]; // all worms, alive + dead
+  allWorms: Worm[]; // renamed from worms; all worms for cycleWithinTeam lookups
+  onEndTurn: () => void; // called on Enter keydown
 }
 
 export class InputController {
   private readonly scene: Phaser.Scene;
-  private readonly worms: Worm[];
-  private activeIndex: number;
+  private readonly onEndTurn: () => void;
+  private activeWorm: Worm | null = null;
+  private inputAllowed = false;
 
   // Key bindings
   private readonly keyLeft: Phaser.Input.Keyboard.Key;
@@ -27,10 +29,11 @@ export class InputController {
   private readonly keyTab: Phaser.Input.Keyboard.Key;
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
+  private readonly keyEnter: Phaser.Input.Keyboard.Key;
 
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
-    this.worms = init.worms;
+    this.onEndTurn = init.onEndTurn;
 
     const kb = this.scene.input.keyboard;
     if (!kb) throw new Error("InputController: keyboard plugin not available");
@@ -49,22 +52,66 @@ export class InputController {
     this.keyTab = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
     this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
 
-    // Prevent Tab from stealing browser focus
+    // Prevent Tab and Enter from bubbling to the browser (form submit etc)
     this.keyTab.on("down", (evt: KeyboardEvent) => {
       evt.preventDefault?.();
     });
+    this.keyEnter.on("down", (evt: KeyboardEvent) => {
+      evt.preventDefault?.();
+    });
 
-    // Start at first alive worm
-    this.activeIndex = this.findNextAliveFrom(0);
-    this.updateActiveHighlight();
+    // NOTE: active worm is NOT initialized here; TurnManager.start() will call
+    // setActiveWorm() inside its START_GAME -> turnActive transition. Until then,
+    // no worm is highlighted and inputAllowed is false.
+  }
+
+  setActiveWorm(worm: Worm | null): void {
+    if (this.activeWorm === worm) return; // idempotent: same worm = no-op
+
+    // Deactivate previous utilities + highlight
+    if (this.activeWorm) {
+      this.activeWorm.ropeUtility?.deactivate();
+      this.activeWorm.jetPackUtility?.deactivate();
+      this.activeWorm.setActive(false);
+    }
+    this.activeWorm = worm;
+    if (worm) worm.setActive(true);
+  }
+
+  setInputAllowed(allowed: boolean): void {
+    this.inputAllowed = allowed;
+  }
+
+  getActiveWorm(): Worm | null {
+    return this.activeWorm?.isAlive ? this.activeWorm : null;
+  }
+
+  /** Cycles to next alive worm on the active worm's OWN team (no jumping teams). */
+  cycleWithinTeam(): void {
+    if (!this.activeWorm) return;
+    const team = this.activeWorm.team;
+    const aliveInTeam = team.worms.filter((w) => w.isAlive);
+    if (aliveInTeam.length <= 1) return;
+    const idx = aliveInTeam.indexOf(this.activeWorm);
+    const next = aliveInTeam[(idx + 1) % aliveInTeam.length];
+    if (next) this.setActiveWorm(next);
   }
 
   /** Called from GameScene.update. Polls keys, dispatches to active worm. */
   update(dtMs: number): void {
-    // Tab cycles on single press
+    if (!this.inputAllowed) return;
+
+    // Enter ends turn
+    if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
+      this.onEndTurn();
+      return;
+    }
+
+    // Tab cycles within active team
     if (Phaser.Input.Keyboard.JustDown(this.keyTab)) {
-      this.cycleActive();
+      this.cycleWithinTeam();
       return;
     }
 
@@ -131,29 +178,6 @@ export class InputController {
     void dtMs; // available for future touch smoothing etc.
   }
 
-  /** Cycle to next alive worm. Auto-detaches rope and deactivates jetpack on previous worm. */
-  cycleActive(): void {
-    const next = this.findNextAliveFrom(this.activeIndex + 1);
-    if (next === this.activeIndex) return; // all dead or only one alive
-
-    // Deactivate utilities on previous worm
-    const prev = this.worms[this.activeIndex];
-    if (prev) {
-      prev.ropeUtility?.deactivate();
-      prev.jetPackUtility?.deactivate();
-    }
-
-    // Deactivate previous highlight
-    if (prev) prev.setActive(false);
-    this.activeIndex = next;
-    this.updateActiveHighlight();
-  }
-
-  getActiveWorm(): Worm | null {
-    const w = this.worms[this.activeIndex];
-    return w?.isAlive ? w : null;
-  }
-
   // ------ Private ------
 
   /** Read horizontal walk axis. -1 left, 0 none, 1 right. */
@@ -172,23 +196,5 @@ export class InputController {
     if (aimUp && !aimDown) return -1;
     if (aimDown && !aimUp) return 1;
     return 0;
-  }
-
-  /** Find next alive worm index starting at `from`, wrapping around. Returns current if all dead. */
-  private findNextAliveFrom(from: number): number {
-    const len = this.worms.length;
-    if (len === 0) return 0;
-    for (let i = 0; i < len; i++) {
-      const idx = (from + i) % len;
-      if (this.worms[idx]?.isAlive) return idx;
-    }
-    // All dead - return current (or 0)
-    return this.activeIndex ?? 0;
-  }
-
-  private updateActiveHighlight(): void {
-    for (let i = 0; i < this.worms.length; i++) {
-      this.worms[i]?.setActive(i === this.activeIndex);
-    }
   }
 }
