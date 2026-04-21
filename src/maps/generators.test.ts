@@ -42,8 +42,12 @@ describe("flatGenerator", () => {
   it("is deterministic with same seed (sample row check)", () => {
     const c1 = createCanvas(W, H);
     const c2 = createCanvas(W, H);
-    flatGenerator(c1.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, { seed: FIXED_SEED });
-    flatGenerator(c2.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, { seed: FIXED_SEED });
+    flatGenerator(c1.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, {
+      seed: FIXED_SEED,
+    });
+    flatGenerator(c2.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, {
+      seed: FIXED_SEED,
+    });
     // Compare alpha channel of row at y=500 (should be inside terrain)
     const d1 = c1.getContext("2d").getImageData(0, 500, W, 1).data;
     const d2 = c2.getContext("2d").getImageData(0, 500, W, 1).data;
@@ -71,8 +75,12 @@ describe("hillsGenerator", () => {
   it("is deterministic with same seed (sample row check)", () => {
     const c1 = createCanvas(W, H);
     const c2 = createCanvas(W, H);
-    hillsGenerator(c1.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, { seed: FIXED_SEED });
-    hillsGenerator(c2.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, { seed: FIXED_SEED });
+    hillsGenerator(c1.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, {
+      seed: FIXED_SEED,
+    });
+    hillsGenerator(c2.getContext("2d") as unknown as CanvasRenderingContext2D, W, H, {
+      seed: FIXED_SEED,
+    });
     // Compare alpha channel of row at y=550 (should be inside terrain for hills)
     const d1 = c1.getContext("2d").getImageData(0, 550, W, 1).data;
     const d2 = c2.getContext("2d").getImageData(0, 550, W, 1).data;

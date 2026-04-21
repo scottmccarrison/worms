@@ -1,5 +1,5 @@
-import { xorshift } from "../xorshift";
 import type { MapGenerator } from "../types";
+import { xorshift } from "../xorshift";
 
 export const caveGenerator: MapGenerator = (ctx, width, height, opts) => {
   const rng = xorshift(opts.seed);

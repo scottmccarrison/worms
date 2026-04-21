@@ -56,8 +56,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   init(data?: { mapId?: string }): void {
-    const candidate =
-      data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
+    const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
     // Register scene restart hook for dat.gui Maps panel
     registerMapCycleFn((id: string) => {
@@ -440,5 +439,4 @@ export class GameScene extends Phaser.Scene {
       }
     }
   };
-
 }

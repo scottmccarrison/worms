@@ -3,11 +3,7 @@ import type { SurfacePoint } from "../worm/spawnPoints";
 import { getById } from "./registry";
 import type { LoadedMap } from "./types";
 
-export function loadMap(
-  id: string,
-  widthPx: number,
-  heightPx: number,
-): LoadedMap {
+export function loadMap(id: string, widthPx: number, heightPx: number): LoadedMap {
   const entry = getById(id);
   if (!entry) throw new Error(`Unknown map id: ${id}`);
 
@@ -29,12 +25,7 @@ export function loadMap(
     spawnPoints = entry.config.spawnPoints;
   } else {
     const imgData = ctx.getImageData(0, 0, widthPx, heightPx);
-    spawnPoints = findSpawnPoints(
-      imgData.data,
-      widthPx,
-      heightPx,
-      entry.config.maxWorms,
-    );
+    spawnPoints = findSpawnPoints(imgData.data, widthPx, heightPx, entry.config.maxWorms);
   }
 
   return { config: entry.config, mask: canvas, spawnPoints };
