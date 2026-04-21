@@ -31,8 +31,8 @@ interface Tuning {
   jetpack: {
     fuelCapacity: number;
     fuelPerSecond: number;
-    upwardImpulse: number;
-    sideImpulse: number;
+    upwardForce: number;
+    sideForce: number;
   };
   touch: {
     buttonRadiusPx: number;
@@ -70,8 +70,8 @@ export const tuning: Tuning = {
   jetpack: {
     fuelCapacity: 100,
     fuelPerSecond: 30,
-    upwardImpulse: 1.5,
-    sideImpulse: 0.8,
+    upwardForce: 15,
+    sideForce: 8,
   },
   touch: {
     buttonRadiusPx: 28,

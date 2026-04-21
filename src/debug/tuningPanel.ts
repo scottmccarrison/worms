@@ -42,8 +42,8 @@ export async function mountTuningPanel(onChange?: () => void): Promise<void> {
   const jet = gui.addFolder("JetPack");
   jet.add(tuning.jetpack, "fuelCapacity", 10, 500, 10).name("Fuel capacity");
   jet.add(tuning.jetpack, "fuelPerSecond", 1, 100, 1).name("Fuel per second");
-  jet.add(tuning.jetpack, "upwardImpulse", 0.5, 10, 0.1).name("Upward impulse");
-  jet.add(tuning.jetpack, "sideImpulse", 0.1, 5, 0.1).name("Side impulse");
+  jet.add(tuning.jetpack, "upwardForce", 0, 50, 0.5).name("Upward force");
+  jet.add(tuning.jetpack, "sideForce", 0, 30, 0.5).name("Side force");
 
   // Note: touch tuning values are read at button construction time;
   // changing them via the panel won't resize/re-alpha existing buttons.

@@ -69,13 +69,14 @@ export class JetPack implements Utility {
       return;
     }
 
-    // Build impulse vector
+    // Build force vector - use applyForce (continuous acceleration, dt-integrated by solver)
+    // not applyLinearImpulse (instant velocity kick that stacks every frame at 60fps).
     // Negative Y = upward in planck (y-down coordinate system)
-    const ix = this.thrustH * tuning.jetpack.sideImpulse;
-    const iy = this.thrustUp ? -tuning.jetpack.upwardImpulse : 0;
+    const fx = this.thrustH * tuning.jetpack.sideForce;
+    const fy = this.thrustUp ? -tuning.jetpack.upwardForce : 0;
 
-    if (ix !== 0 || iy !== 0) {
-      this.worm.body.applyLinearImpulse({ x: ix, y: iy }, this.worm.body.getPosition(), true);
+    if (fx !== 0 || fy !== 0) {
+      this.worm.body.applyForce({ x: fx, y: fy }, this.worm.body.getPosition(), true);
       this._fuel -= tuning.jetpack.fuelPerSecond * (dtMs / 1000);
     }
 

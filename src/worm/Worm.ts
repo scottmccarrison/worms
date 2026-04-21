@@ -30,7 +30,7 @@ export class Worm {
 
   // Public state
   health: number;
-  aimAngle = 0; // radians; 0 = aim right
+  aimAngle = -Math.PI / 4; // radians; -PI/4 = 45deg up-forward (hits terrain reliably on rolling hills)
   facing: -1 | 1 = 1;
   pendingDamage = 0;
   isAlive = true;
