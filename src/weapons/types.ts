@@ -24,18 +24,13 @@ export interface WeaponConfig {
   explosion: ExplosionConfig;
 }
 
-// Forward reference - ProjectileManager is defined in ./ProjectileManager.ts
-// Using `unknown` here until ProjectileManager is created; GameScene wires the real type.
-// biome-ignore lint/suspicious/noExplicitAny: forward ref resolved when ProjectileManager exists
-export type ProjectileManagerRef = any;
-
 export interface FireContext {
   world: import("planck").World;
   terrain: import("../terrain/Terrain").Terrain;
   firer: import("../worm/Worm").Worm;
   aimRadians: number;
   aimPower01: number; // 0..1
-  projectileManager: ProjectileManagerRef;
+  projectileManager: import("./ProjectileManager").ProjectileManager;
 }
 
 export interface FireResult {
