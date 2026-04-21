@@ -192,6 +192,34 @@ export class TurnArbiter {
     }
   }
 
+  /**
+   * Epic 10: an active-team owner has disconnected and the room is
+   * holding their slot inside Colyseus' `allowReconnection` grace
+   * window. Stubbed in this commit; pause semantics land in the
+   * follow-up.
+   */
+  onOwnerDisconnected(_sessionId: string): void {
+    void _sessionId;
+  }
+
+  /**
+   * Epic 10: the disconnected owner reconnected before the grace
+   * window elapsed. Stubbed in this commit; resume semantics land in
+   * the follow-up.
+   */
+  onOwnerReconnected(_sessionId: string): void {
+    void _sessionId;
+  }
+
+  /**
+   * Epic 10: the grace window expired (or a consented leave landed)
+   * while the disconnected player still owned this team. Stubbed in
+   * this commit; forfeit semantics land in the follow-up.
+   */
+  onTeamForfeit(_teamId: string): void {
+    void _teamId;
+  }
+
   // ---- private helpers ----
 
   /**

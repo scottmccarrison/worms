@@ -2,7 +2,21 @@ import { type Client, Room, matchMaker } from "@colyseus/core";
 import { generateUniqueCode } from "../codegen.js";
 import { type ArbiterRoomAdapter, type TeamRoster, TurnArbiter } from "../game/TurnArbiter.js";
 import { ALLOWED_COLORS, LobbyPlayer, LobbyState } from "../state/LobbyState.js";
-import { TURN_DURATION_MS } from "../state/constants.js";
+import { DISCONNECT_GRACE_MS, TURN_DURATION_MS } from "../state/constants.js";
+
+/**
+ * Seconds passed to `allowReconnection(client, seconds)` on a
+ * non-consented disconnect. Exposed as a mutable module-level binding
+ * so integration tests can shrink the window (e.g. to 1 second) and
+ * exercise the grace-expiry forfeit path without waiting 60 seconds of
+ * real time. Production code never mutates this.
+ */
+export let reconnectionGraceSeconds = DISCONNECT_GRACE_MS / 1000;
+
+/** Test-only: override the reconnection grace window (in seconds). */
+export function __setReconnectionGraceSecondsForTests(seconds: number): void {
+  reconnectionGraceSeconds = seconds;
+}
 
 /**
  * Whitelist of map ids a host may select. Mirrors
@@ -135,25 +149,79 @@ export class GameRoom extends Room<LobbyState> {
     console.log(`${client.sessionId} (${nickname}) joined ${this.roomId} (host=${player.isHost})`);
   }
 
-  onLeave(client: Client, consented: boolean): void {
+  async onLeave(client: Client, consented: boolean): Promise<void> {
     const wasHost = this.state.hostSessionId === client.sessionId;
+    const player = this.state.players.get(client.sessionId);
+
+    // Consented leave = explicit `leave()` call / tab close handshake.
+    // Skip the reconnection grace window and finalise immediately.
+    if (consented) {
+      this.handleFinalLeave(client, player, wasHost);
+      return;
+    }
+
+    // Flag disconnect so other clients can render "(disconnected, Ns)".
+    // If this is the active team owner, tell the arbiter so it can
+    // freeze the turn timer; otherwise the arbiter's advanceTurn skip
+    // predicate handles the case lazily on the next advance.
+    if (player) {
+      player.disconnected = true;
+      player.disconnectGraceEndsAt = Date.now() + DISCONNECT_GRACE_MS;
+      if (this.state.phase === "playing" && this.arbiter) {
+        this.arbiter.onOwnerDisconnected(client.sessionId);
+      }
+    }
+
+    // allowReconnection resolves when the client reconnects; it
+    // rejects when the grace window expires or the room is disposed.
+    // Either way we call it exactly once per onLeave.
+    try {
+      await this.allowReconnection(client, reconnectionGraceSeconds);
+      // Success path: the same client reconnected. Colyseus preserves
+      // state + listeners; no onJoin re-fires. Just clear the flags.
+      if (player) {
+        player.disconnected = false;
+        player.disconnectGraceEndsAt = 0;
+        if (this.state.phase === "playing" && this.arbiter) {
+          this.arbiter.onOwnerReconnected(client.sessionId);
+        }
+      }
+      console.log(`${client.sessionId} reconnected to ${this.roomId}`);
+    } catch {
+      // Grace expired (or room disposed). Finalise the leave now.
+      this.handleFinalLeave(client, player, wasHost);
+    }
+  }
+
+  /**
+   * Final-leave bookkeeping: delete the player row, let the arbiter
+   * forfeit the team if we're mid-game, promote the next host, and
+   * schedule empty-room disposal. Called either on a consented leave
+   * or after the reconnect grace expires.
+   */
+  private handleFinalLeave(
+    client: Client,
+    player: LobbyPlayer | undefined,
+    wasHost: boolean,
+  ): void {
     const wasActiveOwner =
       this.state.phase === "playing" &&
-      this.state.players.get(client.sessionId)?.ownerOfTeamId === this.state.currentTeamId &&
+      player?.ownerOfTeamId === this.state.currentTeamId &&
       this.state.currentTeamId !== "";
 
     this.state.players.delete(client.sessionId);
 
-    // Post-lobby: let the arbiter know so it can force-advance if the
-    // active player just left. Arbiter itself also re-checks connected
-    // sessionIds on advanceTurn, so a non-active departure needs no
-    // explicit handling here.
-    if (this.state.phase === "playing" && this.arbiter && wasActiveOwner) {
-      this.arbiter.onPlayerLeft(client.sessionId);
+    // Post-lobby: forfeit the team and, if this was the active owner,
+    // force an advance so the remaining players keep moving.
+    if (this.state.phase === "playing" && this.arbiter && player?.ownerOfTeamId) {
+      this.arbiter.onTeamForfeit(player.ownerOfTeamId);
+      if (wasActiveOwner) {
+        this.arbiter.forceAdvance();
+      }
     }
 
+    // Host promotion (unchanged from Epic 8 semantics).
     if (wasHost && this.state.players.size > 0) {
-      // Promote the earliest-joined remaining player.
       let nextHostId = "";
       let earliest = Number.POSITIVE_INFINITY;
       for (const [sid, p] of this.state.players) {
@@ -169,13 +237,10 @@ export class GameRoom extends Room<LobbyState> {
       }
     } else if (this.state.players.size === 0) {
       this.state.hostSessionId = "";
-      // Schedule disposal after a grace period so a quick reconnect
-      // flow (Epic 10) can reclaim the room.
       this.scheduleDisposeIfEmpty();
     }
 
-    void consented;
-    console.log(`${client.sessionId} left ${this.roomId} (wasHost=${wasHost})`);
+    console.log(`${client.sessionId} left ${this.roomId} (finalLeave, wasHost=${wasHost})`);
   }
 
   onDispose(): void {
