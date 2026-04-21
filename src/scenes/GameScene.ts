@@ -6,8 +6,14 @@ import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
-import type { LobbyState, TeamInit as NetTeamInit } from "../net/types";
-import { applyRemoteInput } from "./game/networkBridge";
+import type {
+  CircleCut,
+  GameOverMessage,
+  LobbyState,
+  TeamInit as NetTeamInit,
+  TurnResolvedMessage,
+} from "../net/types";
+import { applyRemoteInput, buildTurnSnapshot, setWormFromSnapshot } from "./game/networkBridge";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -357,6 +363,17 @@ export class GameScene extends Phaser.Scene {
         // turnEnding so the settle/snapshot cadence runs on all clients.
         this.turnManager.endTurnByPlayer();
       });
+      this.room.onMessage<TurnResolvedMessage>("turn_resolved", (msg) => {
+        this.applyTurnResolved(msg);
+      });
+      this.room.onMessage<GameOverMessage>("game_over", (msg) => {
+        this.onServerGameOver(msg);
+      });
+
+      // Active client fires turn_snapshot when local settle says the turn is
+      // done. Spectator clients' hook fires too but sendTurnSnapshot()
+      // self-gates on iAmActive(), so only one snapshot lands per turn.
+      this.turnManager.onLocalTurnFinished = () => this.sendTurnSnapshot();
     }
 
     this.debugGfx = this.add.graphics();
@@ -626,6 +643,58 @@ export class GameScene extends Phaser.Scene {
     const target = this.allWorms.find((w) => w.name === currentWormId);
     if (!target) return;
     applyRemoteInput(target, type, payload);
+  }
+
+  /**
+   * Active player only: bundle the current sim into a turn_snapshot and
+   * ship it to the server. The server broadcasts it back as turn_resolved
+   * so all clients (including us) snap to the same authoritative state.
+   *
+   * Terrain cuts are carried as an empty array in this epic: all clients
+   * replay the same input stream through the same weapon + terrain logic,
+   * so locally-computed cuts already match across clients. Drift correction
+   * focuses on worm positions which ARE subject to per-client physics noise.
+   * A future epic can add a proper pending-cut log on Terrain if needed.
+   */
+  protected sendTurnSnapshot(): void {
+    if (!this.isNetworked || !this.room) return;
+    if (!this.iAmActive()) return;
+    const emptyCuts: CircleCut[] = [];
+    const snap = buildTurnSnapshot(this.teams, emptyCuts);
+    this.room.send("turn_snapshot", snap);
+  }
+
+  /**
+   * Apply the server's authoritative turn reconciliation.
+   * - Snap every worm to the server's (x, y, vx, vy, hp, alive).
+   * - Replay terrain cuts (idempotent: the CircleCut.seq guard lives in
+   *   future logic; here we simply queue them via terrain.cutCircle).
+   * - Hand the new team + worm + endsAt to TurnManager.adoptServerTurn.
+   */
+  protected applyTurnResolved(msg: TurnResolvedMessage): void {
+    // 1. Worm snap.
+    for (const snapWorm of msg.worms) {
+      const w = this.allWorms.find((ww) => ww.name === snapWorm.id);
+      if (w) setWormFromSnapshot(w, snapWorm);
+    }
+    // 2. Terrain cuts (deduped via turnSeq idempotency in adoptServerTurn).
+    for (const cut of msg.terrainCuts) {
+      this.terrain.cutCircle(cut.x, cut.y, cut.r);
+    }
+    // 3. Turn rotation.
+    const endsAt = this.room?.state.turnEndsAt ?? 0;
+    this.turnManager.adoptServerTurn(msg.turnSeq, msg.nextTeamId, msg.nextWormId, endsAt);
+  }
+
+  /**
+   * Server has declared the match over. Pipe through the same
+   * game-over HUD path used by offline mode so the UX is unified.
+   */
+  protected onServerGameOver(msg: GameOverMessage): void {
+    this.inputController?.setInputAllowed(false);
+    this.turnHUD?.setEndTurnEnabled(false);
+    const winningTeam = this.teams.find((t) => t.id === msg.winnerTeamId) ?? null;
+    this.turnHUD?.showGameOver(winningTeam?.name ?? null);
   }
 
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
