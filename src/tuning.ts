@@ -58,7 +58,7 @@ export const tuning: Tuning = {
   team: { wormsPerTeam: 2 },
   input: { aimCoalesceFrames: 1 },
   rope: {
-    maxReachM: 15,
+    maxReachM: 40,
     segmentLengthM: 0.5,
     maxSegments: 40,
     minSegments: 3,
