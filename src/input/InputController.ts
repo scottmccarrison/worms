@@ -8,6 +8,7 @@ export interface InputControllerInit {
   onEndTurn: () => void; // called on Enter keydown
   onSelectWeapon: (n: 1 | 2 | 3) => void; // called when 1/2/3 pressed in normal state
   onFire: () => void; // called when F pressed in normal state
+  onCycleMap: () => void; // called when M pressed; dev affordance to cycle maps
 }
 
 export class InputController {
@@ -15,6 +16,7 @@ export class InputController {
   private readonly onEndTurn: () => void;
   private readonly onSelectWeapon: (n: 1 | 2 | 3) => void;
   private readonly onFire: () => void;
+  private readonly onCycleMap: () => void;
   private activeWorm: Worm | null = null;
   private inputAllowed = false;
 
@@ -34,6 +36,7 @@ export class InputController {
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
   private readonly keyEnter: Phaser.Input.Keyboard.Key;
+  private readonly keyMapCycle: Phaser.Input.Keyboard.Key; // M
   // Weapon keys
   private readonly key1: Phaser.Input.Keyboard.Key;
   private readonly key2: Phaser.Input.Keyboard.Key;
@@ -47,6 +50,7 @@ export class InputController {
     this.onEndTurn = init.onEndTurn;
     this.onSelectWeapon = init.onSelectWeapon;
     this.onFire = init.onFire;
+    this.onCycleMap = init.onCycleMap;
 
     const kb = this.scene.input.keyboard;
     if (!kb) throw new Error("InputController: keyboard plugin not available");
@@ -66,6 +70,7 @@ export class InputController {
     this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.keyMapCycle = kb.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     // Weapon keys
     this.key1 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.key2 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
@@ -193,6 +198,12 @@ export class InputController {
       // Aim
       const aimDir = this.readAimAxis();
       worm.aim(aimDir);
+
+      // M cycles maps (dev affordance) - checked BEFORE weapon keys so it takes priority
+      if (Phaser.Input.Keyboard.JustDown(this.keyMapCycle)) {
+        this.onCycleMap();
+        return;
+      }
 
       // Weapon select (1/2/3)
       if (Phaser.Input.Keyboard.JustDown(this.key1)) this.onSelectWeapon(1);
