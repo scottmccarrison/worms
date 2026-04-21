@@ -27,6 +27,8 @@ interface Tuning {
     finalJointFreqHz: number;
     dampingRatio: number;
     intermediateRadiusM: number;
+    /** ms between extend/retract segment changes while key held */
+    adjustCooldownMs: number;
   };
   jetpack: {
     fuelCapacity: number;
@@ -66,6 +68,7 @@ export const tuning: Tuning = {
     finalJointFreqHz: 25,
     dampingRatio: 5,
     intermediateRadiusM: 0.15,
+    adjustCooldownMs: 180,
   },
   jetpack: {
     fuelCapacity: 100,

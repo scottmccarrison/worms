@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { tuning } from "../tuning";
 import type { Worm } from "../worm/Worm";
 
 export interface InputControllerInit {
@@ -26,6 +27,9 @@ export class InputController {
   private readonly keyTab: Phaser.Input.Keyboard.Key;
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
+
+  // Throttle for rope extend/retract while key held
+  private ropeAdjustCooldownMs = 0;
 
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
@@ -89,10 +93,19 @@ export class InputController {
     // ---------------------------------------------------------------------------
 
     if (worm.isRoped()) {
-      // While roped: up/down extend/retract the rope; walk keys are no-ops (worm.walk guards it)
-      // Aim still works normally
-      if (this.keyUp.isDown || this.keyW.isDown) worm.ropeUtility.retract();
-      if (this.keyDown.isDown || this.keyS.isDown) worm.ropeUtility.extend();
+      // While roped: up/down extend/retract the rope, throttled so holding
+      // a key adjusts ~5/sec instead of 60/sec (previous behavior drained
+      // all segments in under a second).
+      this.ropeAdjustCooldownMs = Math.max(0, this.ropeAdjustCooldownMs - dtMs);
+      if (this.ropeAdjustCooldownMs === 0) {
+        if (this.keyUp.isDown || this.keyW.isDown) {
+          worm.ropeUtility.retract();
+          this.ropeAdjustCooldownMs = tuning.rope.adjustCooldownMs;
+        } else if (this.keyDown.isDown || this.keyS.isDown) {
+          worm.ropeUtility.extend();
+          this.ropeAdjustCooldownMs = tuning.rope.adjustCooldownMs;
+        }
+      }
 
       // Aim axis (rope doesn't block aim)
       const aimDir = this.readAimAxis();
