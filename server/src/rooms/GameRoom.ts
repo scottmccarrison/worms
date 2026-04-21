@@ -166,7 +166,11 @@ export class GameRoom extends Room<LobbyState> {
     // predicate handles the case lazily on the next advance.
     if (player) {
       player.disconnected = true;
-      player.disconnectGraceEndsAt = Date.now() + DISCONNECT_GRACE_MS;
+      // Track the ACTUAL grace window so a runtime override of
+      // reconnectionGraceSeconds (e.g. tests) stays in sync with what
+      // clients see counting down. Bugcheck flagged the prior hardcoded
+      // DISCONNECT_GRACE_MS as a potential client/server drift.
+      player.disconnectGraceEndsAt = Date.now() + reconnectionGraceSeconds * 1000;
       if (this.state.phase === "playing" && this.arbiter) {
         this.arbiter.onOwnerDisconnected(client.sessionId);
       }
@@ -204,20 +208,15 @@ export class GameRoom extends Room<LobbyState> {
     player: LobbyPlayer | undefined,
     wasHost: boolean,
   ): void {
-    const wasActiveOwner =
-      this.state.phase === "playing" &&
-      player?.ownerOfTeamId === this.state.currentTeamId &&
-      this.state.currentTeamId !== "";
-
     this.state.players.delete(client.sessionId);
 
-    // Post-lobby: forfeit the team and, if this was the active owner,
-    // force an advance so the remaining players keep moving.
+    // Post-lobby: forfeit the team. onTeamForfeit is responsible for
+    // broadcasting a turn_resolved that rotates off the forfeited team
+    // (or declaring game_over if only one team remains), so there is no
+    // separate forceAdvance call here - that would double-advance past
+    // the next eligible team in 3+ player games. Bugcheck flagged this.
     if (this.state.phase === "playing" && this.arbiter && player?.ownerOfTeamId) {
       this.arbiter.onTeamForfeit(player.ownerOfTeamId);
-      if (wasActiveOwner) {
-        this.arbiter.forceAdvance();
-      }
     }
 
     // Host promotion (unchanged from Epic 8 semantics).
