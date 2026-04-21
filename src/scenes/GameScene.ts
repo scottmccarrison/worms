@@ -1,10 +1,12 @@
 import * as Phaser from "phaser";
+import type { Room } from "colyseus.js";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
+import type { TeamInit as NetTeamInit } from "../net/types";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -50,14 +52,32 @@ export class GameScene extends Phaser.Scene {
 
   // Active map id - set in init() before create() runs
   private mapId: string = firstId();
+  // Authoritative seed from the lobby host. Undefined means local/solo play
+  // and loadMap falls back to its own default.
+  private seedOverride: number | undefined;
+  // Authoritative team roster from the lobby. Undefined falls back to the
+  // hardcoded red/blue defaults that Epic 7 used for single-device play.
+  private teamsInit: NetTeamInit[] | undefined;
+  // Colyseus room reference stashed for Epic 9 (authoritative netcode). Not
+  // used this epic - gameplay remains client-local. `protected` keeps TS's
+  // noUnusedLocals quiet until Epic 9 reads it.
+  protected room: Room | undefined;
 
   constructor() {
     super("GameScene");
   }
 
-  init(data?: { mapId?: string }): void {
+  init(data?: {
+    mapId?: string;
+    seed?: number;
+    teams?: NetTeamInit[];
+    room?: Room;
+  }): void {
     const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
+    this.seedOverride = data?.seed;
+    this.teamsInit = data?.teams;
+    this.room = data?.room;
     // Register scene restart hook for dat.gui Maps panel
     registerMapCycleFn((id: string) => {
       this.scene.restart({ mapId: id });
@@ -70,7 +90,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    const loaded = loadMap(this.mapId, this.scale.width, this.scale.height);
+    const loaded = loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride);
 
     this.physicsSystem = new PhysicsSystem({ gravity: { x: 0, y: tuning.world.gravityY } });
     this.terrain = new Terrain({
@@ -98,29 +118,35 @@ export class GameScene extends Phaser.Scene {
       this.aimHUD.destroy();
     });
 
-    // Spawn worms using map spawn points (predefined or scanned)
-    const totalWorms = tuning.team.wormsPerTeam * 2;
+    // Spawn worms using map spawn points (predefined or scanned).
+    // Team roster comes from the lobby in multiplayer mode, falls back to
+    // the hardcoded red/blue defaults for single-device play.
+    this.teams = this.buildTeams(this.teamsInit);
     const spawnPts = loaded.spawnPoints;
-
-    const red = new Team({ id: "red", name: "Red", color: 0xff4444 });
-    const blue = new Team({ id: "blue", name: "Blue", color: 0x4488ff });
-
-    this.teams = [red, blue];
+    const totalWorms = this.teams.reduce((n, t) => {
+      const goal = this.teamsInit
+        ? this.teamsInit.find((ti) => ti.id === t.id)?.wormNames.length ?? tuning.team.wormsPerTeam
+        : tuning.team.wormsPerTeam;
+      return n + goal;
+    }, 0);
 
     const fallbackYPx = this.scale.height * 0.3;
     for (let i = 0; i < totalWorms; i++) {
-      const team = this.teams[i % 2];
+      const team = this.teams[i % this.teams.length];
       if (!team) continue;
       const pt = spawnPts[i];
       const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
       const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
+      const teamIdx = this.teams.indexOf(team);
+      const fromInit = this.teamsInit?.[teamIdx]?.wormNames[team.worms.length];
+      const wormName = fromInit ?? `${team.id}-${team.worms.length + 1}`;
       const w = new Worm({
         scene: this,
         physics: this.physicsSystem,
         team,
         spawnXPx,
         spawnYPx,
-        wormName: `${team.id}-${team.worms.length + 1}`,
+        wormName,
       });
       team.addWorm(w);
       this.allWorms.push(w);
@@ -345,6 +371,23 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
   // Weapon helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Build the Team list for this match.
+   *
+   * - Lobby path: server sends TeamInit[] in the `game_started` message;
+   *   we instantiate Teams with those id/name/color values.
+   * - Solo path: fall back to the Epic 7 hardcoded red/blue defaults.
+   */
+  private buildTeams(init: NetTeamInit[] | undefined): Team[] {
+    if (init && init.length > 0) {
+      return init.map((t) => new Team({ id: t.id, name: t.name, color: t.color }));
+    }
+    return [
+      new Team({ id: "red", name: "Red", color: 0xff4444 }),
+      new Team({ id: "blue", name: "Blue", color: 0x4488ff }),
+    ];
+  }
 
   private getActiveTeam(): Team | null {
     const worm = this.inputController.getActiveWorm();

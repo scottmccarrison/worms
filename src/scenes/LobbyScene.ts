@@ -2,7 +2,7 @@ import * as Phaser from "phaser";
 import type { Client, Room, RoomAvailable } from "colyseus.js";
 import { allIds, getById } from "../maps/registry";
 import { ALLOWED_COLORS } from "../net/types";
-import type { ErrorMessage, LobbyState } from "../net/types";
+import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
 
@@ -292,6 +292,17 @@ export class LobbyScene extends Phaser.Scene {
       } else {
         this.flashRoomError(`${msg.code}: ${msg.message}`);
       }
+    });
+    room.onMessage<GameStartedMessage>("game_started", (msg) => {
+      // Host clicked Start. Hand off to GameScene with authoritative map +
+      // seed + team roster; pass the room reference through so Epic 9 can
+      // wire server-driven ticks without touching the scene boundary.
+      this.scene.start("GameScene", {
+        mapId: msg.mapId,
+        seed: msg.seed,
+        teams: msg.teams,
+        room,
+      });
     });
     room.onLeave(() => {
       this.room = null;
