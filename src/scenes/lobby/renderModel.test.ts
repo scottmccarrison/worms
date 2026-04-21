@@ -9,6 +9,7 @@ import { toViewModel } from "./renderModel";
  */
 function makeState(players: LobbyPlayer[], selectedMapId = "flat"): LobbyState {
   const map = new Map<string, LobbyPlayer>(players.map((p) => [p.sessionId, p]));
+  const teamOrder: string[] = [];
   return {
     code: "WAVE",
     phase: "lobby",
@@ -24,6 +25,18 @@ function makeState(players: LobbyPlayer[], selectedMapId = "flat"): LobbyState {
       onRemove: () => {},
       onChange: () => {},
     },
+    teamOrder: {
+      get length() {
+        return teamOrder.length;
+      },
+      forEach: (cb) => {
+        for (const id of teamOrder) cb(id);
+      },
+    },
+    currentTeamId: "",
+    currentWormId: "",
+    turnSeq: 0,
+    turnEndsAt: 0,
     listen: () => () => true,
   };
 }
@@ -35,6 +48,7 @@ function makePlayer(overrides: Partial<LobbyPlayer> & { sessionId: string }): Lo
     color: overrides.color ?? ALLOWED_COLORS[0],
     ready: overrides.ready ?? false,
     isHost: overrides.isHost ?? false,
+    ownerOfTeamId: overrides.ownerOfTeamId ?? "",
   };
 }
 
