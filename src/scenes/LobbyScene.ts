@@ -499,18 +499,13 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private wireRoomStateListeners(room: Room<LobbyState>): void {
-    // Colyseus 0.15: attach listeners directly on state. Every mutation path
-    // (add/remove/change/scalar listen) triggers a full re-render.
-    //
-    // Debounced to once per animation frame. Without this, bursts of schema
-    // patches (join/ready/color change during connect) fire renderRoom many
-    // times within a single frame. Each render tears down + recreates the
-    // Ready button; each new button lands in Phaser's input `_pendingInsertion`
-    // queue. The queue only drains at frame tick - so the current Ready
-    // button is never hit-testable. Clicks silently miss.
-    //
-    // rAF coalescing lets Phaser's input plugin run between renders and
-    // promote each new button to the active hit-test list.
+    // Debounce rerenders to once per animation frame. Without this, bursts
+    // of schema patches fire renderRoom many times within a single frame.
+    // Each render tears down + recreates the Ready button; each new button
+    // lands in Phaser's input `_pendingInsertion` queue. The queue only
+    // drains at frame tick, so the current Ready button is never
+    // hit-testable. rAF coalescing lets Phaser's input plugin run between
+    // renders and promote each new button to the active hit-test list.
     let pending = false;
     const rerender = () => {
       if (pending || this.view !== "room") return;
@@ -520,12 +515,36 @@ export class LobbyScene extends Phaser.Scene {
         if (this.view === "room") this.renderRoom();
       });
     };
-    room.state.players.onAdd(rerender);
+
+    // Colyseus 0.15: MapSchema.onChange fires for add/remove/replace of
+    // ENTRIES (whole player objects), NOT for field mutations on existing
+    // players. To catch `ready` / `color` / `nickname` / `disconnected`
+    // flipping, we have to attach a per-player onChange listener on every
+    // join. Without this the clicker's own tab never re-renders when they
+    // toggle Ready - their local Schema state has the new value, but no
+    // listener fires so `renderRoom` isn't called.
+    //
+    // Other tabs happened to rerender on Carol joining (onAdd fires),
+    // which is why it LOOKED like the ready flip propagated to everyone
+    // else but not the sender.
+    const perPlayerListen = (player: unknown) => {
+      // biome-ignore lint/suspicious/noExplicitAny: colyseus.js 0.15 Schema#onChange isn't in our hand-written mirror types
+      (player as any).onChange?.(rerender);
+    };
+
+    room.state.players.onAdd((player, _key) => {
+      rerender();
+      perPlayerListen(player);
+    });
     room.state.players.onRemove(rerender);
     room.state.players.onChange(rerender);
     room.state.listen("selectedMapId", rerender);
     room.state.listen("hostSessionId", rerender);
     room.state.listen("phase", rerender);
+
+    // Players that joined before we attached the onAdd listener (ourselves,
+    // typically) won't fire onAdd retroactively, so hook them up now.
+    room.state.players.forEach((player) => perPlayerListen(player));
   }
 
   private renderRoom(): void {
