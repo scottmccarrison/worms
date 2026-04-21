@@ -356,6 +356,19 @@ export class GameRoom extends Room<LobbyState> {
       }, 50);
     });
 
+    // ---- Epic 9 turn resolution ----
+    //
+    // Active player tells us the authoritative end-of-turn state; we
+    // forward to the arbiter which broadcasts `turn_resolved` (or
+    // `game_over`) on our behalf and advances the turn.
+    this.onMessage("turn_snapshot", (client, payload: unknown) => {
+      if (!this.validateActiveInput(client)) return;
+      if (!this.arbiter) return;
+      const snap = sanitiseTurnSnapshot(payload);
+      if (!snap) return;
+      this.arbiter.onSnapshot(snap);
+    });
+
     // ---- Epic 9 input relay ----
     //
     // Each gameplay input the active player sends is validated and then
@@ -465,6 +478,68 @@ function firstFreeColor(state: LobbyState): string | null {
 
 function isAllowedMap(mapId: string): boolean {
   return (MAP_WHITELIST as readonly string[]).includes(mapId);
+}
+
+/**
+ * Defensive parse of a `turn_snapshot` payload. Returns null for
+ * anything that doesn't match the expected shape so a malformed
+ * message doesn't crash the arbiter or poison the alive-count tally.
+ */
+function sanitiseTurnSnapshot(input: unknown): {
+  worms: Array<{
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    alive: boolean;
+  }>;
+  terrainCuts: Array<{ x: number; y: number; r: number; seq: number }>;
+} | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as { worms?: unknown; terrainCuts?: unknown };
+  if (!Array.isArray(raw.worms)) return null;
+  if (!Array.isArray(raw.terrainCuts)) return null;
+
+  const worms: Array<{
+    id: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    alive: boolean;
+  }> = [];
+  for (const w of raw.worms) {
+    if (!w || typeof w !== "object") continue;
+    const r = w as {
+      id?: unknown;
+      x?: unknown;
+      y?: unknown;
+      vx?: unknown;
+      vy?: unknown;
+      hp?: unknown;
+      alive?: unknown;
+    };
+    if (typeof r.id !== "string") continue;
+    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
+    if (typeof r.vx !== "number" || typeof r.vy !== "number") continue;
+    if (typeof r.hp !== "number") continue;
+    if (typeof r.alive !== "boolean") continue;
+    worms.push({ id: r.id, x: r.x, y: r.y, vx: r.vx, vy: r.vy, hp: r.hp, alive: r.alive });
+  }
+
+  const terrainCuts: Array<{ x: number; y: number; r: number; seq: number }> = [];
+  for (const c of raw.terrainCuts) {
+    if (!c || typeof c !== "object") continue;
+    const r = c as { x?: unknown; y?: unknown; r?: unknown; seq?: unknown };
+    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
+    if (typeof r.r !== "number" || typeof r.seq !== "number") continue;
+    terrainCuts.push({ x: r.x, y: r.y, r: r.r, seq: r.seq });
+  }
+
+  return { worms, terrainCuts };
 }
 
 /**
