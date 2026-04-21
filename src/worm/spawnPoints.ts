@@ -53,11 +53,13 @@ function scanColumnTopDown(
   col: number,
   alphaSolid: number,
 ): SurfacePoint | null {
-  for (let row = 0; row < heightPx; row++) {
-    const idx = (row * widthPx + col) * 4;
-    if (data[idx + 3] >= alphaSolid) {
-      return { xPx: col, yPx: row };
-    }
-  }
+  // Walk top-down through [optional-ceiling][air][ground-top].
+  // Skip any opaque region at the top (a ceiling), then find the next opaque pixel
+  // (the ground surface). If no ceiling, the first loop is a no-op.
+  let row = 0;
+  const isOpaque = (r: number): boolean => data[(r * widthPx + col) * 4 + 3] >= alphaSolid;
+  while (row < heightPx && isOpaque(row)) row++;
+  while (row < heightPx && !isOpaque(row)) row++;
+  if (row < heightPx) return { xPx: col, yPx: row };
   return null;
 }
