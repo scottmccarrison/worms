@@ -544,6 +544,7 @@ export class LobbyScene extends Phaser.Scene {
 
     // Players that joined before we attached the onAdd listener (ourselves,
     // typically) won't fire onAdd retroactively, so hook them up now.
+    // biome-ignore lint/complexity/noForEach: LobbyPlayersMap mirrors the colyseus.js 0.15 surface which only exposes forEach
     room.state.players.forEach((player) => perPlayerListen(player));
   }
 
