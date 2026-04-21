@@ -59,10 +59,7 @@ export class GameRoom extends Room<LobbyState> {
     console.log(`GameRoom ${this.roomId} created with code ${code}`);
   }
 
-  async onJoin(
-    client: Client,
-    options: { nickname?: string; color?: string } = {},
-  ): Promise<void> {
+  async onJoin(client: Client, options: { nickname?: string; color?: string } = {}): Promise<void> {
     const nickname = normaliseNickname(options.nickname);
     const colorInput = typeof options.color === "string" ? options.color : "";
 
@@ -107,9 +104,7 @@ export class GameRoom extends Room<LobbyState> {
     // A new joiner cancels any pending empty-room disposal.
     this.clearDisposeTimer();
 
-    console.log(
-      `${client.sessionId} (${nickname}) joined ${this.roomId} (host=${player.isHost})`,
-    );
+    console.log(`${client.sessionId} (${nickname}) joined ${this.roomId} (host=${player.isHost})`);
   }
 
   onLeave(client: Client, consented: boolean): void {
@@ -120,12 +115,12 @@ export class GameRoom extends Room<LobbyState> {
       // Promote the earliest-joined remaining player.
       let nextHostId = "";
       let earliest = Number.POSITIVE_INFINITY;
-      this.state.players.forEach((p, sid) => {
+      for (const [sid, p] of this.state.players) {
         if (p.joinedAt < earliest) {
           earliest = p.joinedAt;
           nextHostId = sid;
         }
-      });
+      }
       if (nextHostId) {
         this.state.hostSessionId = nextHostId;
         const next = this.state.players.get(nextHostId);
@@ -233,9 +228,12 @@ export class GameRoom extends Room<LobbyState> {
       }
       // All non-host players must be ready.
       let allReady = true;
-      this.state.players.forEach((p) => {
-        if (!p.isHost && !p.ready) allReady = false;
-      });
+      for (const [, p] of this.state.players) {
+        if (!p.isHost && !p.ready) {
+          allReady = false;
+          break;
+        }
+      }
       if (!allReady) {
         client.send("error", {
           code: "not_all_ready",
@@ -301,9 +299,12 @@ function normaliseNickname(input: unknown): string {
   // Strip C0/C1 control chars, zero-width + bidi overrides, and ZWNBSP.
   // Without this a client could send RTL-override characters to spoof
   // display order, or newlines to break the room-view layout.
-  return input
-    .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
-    .trim();
+  return (
+    input
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional; stripping control chars from user input
+      .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "")
+      .trim()
+  );
 }
 
 function isValidNickname(nickname: string): boolean {
@@ -315,11 +316,10 @@ function isAllowedColor(color: string): boolean {
 }
 
 function isColorTaken(state: LobbyState, color: string): boolean {
-  let taken = false;
-  state.players.forEach((p) => {
-    if (p.color === color) taken = true;
-  });
-  return taken;
+  for (const [, p] of state.players) {
+    if (p.color === color) return true;
+  }
+  return false;
 }
 
 function firstFreeColor(state: LobbyState): string | null {

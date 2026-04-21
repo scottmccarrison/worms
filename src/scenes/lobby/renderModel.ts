@@ -47,6 +47,7 @@ export interface ViewModel {
  */
 export function toViewModel(state: LobbyState, mySessionId: string): ViewModel {
   const all: LobbyPlayer[] = [];
+  // biome-ignore lint/complexity/noForEach: LobbyPlayersMap (colyseus.js 0.15) exposes forEach only
   state.players.forEach((p) => all.push(p));
 
   // Host first, then original order for the rest.

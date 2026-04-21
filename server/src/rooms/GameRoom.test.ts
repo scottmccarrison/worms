@@ -1,6 +1,6 @@
 import { Server } from "@colyseus/core";
+import { type ColyseusTestServer, boot } from "@colyseus/testing";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { ALLOWED_COLORS } from "../state/LobbyState.js";
 import { GameRoom } from "./GameRoom.js";

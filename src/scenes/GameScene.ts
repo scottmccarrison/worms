@@ -1,5 +1,5 @@
-import * as Phaser from "phaser";
 import type { Room } from "colyseus.js";
+import * as Phaser from "phaser";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
@@ -125,7 +125,8 @@ export class GameScene extends Phaser.Scene {
     const spawnPts = loaded.spawnPoints;
     const totalWorms = this.teams.reduce((n, t) => {
       const goal = this.teamsInit
-        ? this.teamsInit.find((ti) => ti.id === t.id)?.wormNames.length ?? tuning.team.wormsPerTeam
+        ? (this.teamsInit.find((ti) => ti.id === t.id)?.wormNames.length ??
+          tuning.team.wormsPerTeam)
         : tuning.team.wormsPerTeam;
       return n + goal;
     }, 0);

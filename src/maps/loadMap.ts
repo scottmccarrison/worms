@@ -22,9 +22,7 @@ export function loadMap(
   // config seed > runtime default. Falsy 0 is treated like "unset" to match
   // the original behavior.
   const seed =
-    seedOverride !== undefined
-      ? seedOverride
-      : entry.config.generator.seed || Date.now();
+    seedOverride !== undefined ? seedOverride : entry.config.generator.seed || Date.now();
   entry.generator(ctx, widthPx, heightPx, {
     ...entry.config.generator.options,
     seed,

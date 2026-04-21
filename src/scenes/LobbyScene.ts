@@ -1,5 +1,5 @@
-import * as Phaser from "phaser";
 import type { Client, Room, RoomAvailable } from "colyseus.js";
+import * as Phaser from "phaser";
 import { allIds, getById } from "../maps/registry";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
@@ -114,9 +114,7 @@ export class LobbyScene extends Phaser.Scene {
     const title = this.add.text(cx, 120, "WORMS", TEXT_STYLE_LARGE).setOrigin(0.5);
     this.homeObjects.push(title);
 
-    const nicknameLabel = this.add
-      .text(cx, 240, "Nickname", TEXT_STYLE_BODY)
-      .setOrigin(0.5);
+    const nicknameLabel = this.add.text(cx, 240, "Nickname", TEXT_STYLE_BODY).setOrigin(0.5);
     this.homeObjects.push(nicknameLabel);
 
     // Phaser DOM Element - real <input> so mobile virtual keyboards work.
@@ -155,7 +153,10 @@ export class LobbyScene extends Phaser.Scene {
     joinNode.addEventListener("input", () => {
       // Strip non-letters, uppercase, cap at 4. Runs on every keystroke so
       // the user can never hold an invalid value.
-      joinNode.value = joinNode.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+      joinNode.value = joinNode.value
+        .toUpperCase()
+        .replace(/[^A-Z]/g, "")
+        .slice(0, 4);
     });
     this.joinCodeInput = joinEl;
     this.homeObjects.push(joinEl);
@@ -165,9 +166,7 @@ export class LobbyScene extends Phaser.Scene {
     });
     this.homeObjects.push(...joinBtn);
 
-    this.homeErrorText = this.add
-      .text(cx, 560, "", TEXT_STYLE_ERROR)
-      .setOrigin(0.5);
+    this.homeErrorText = this.add.text(cx, 560, "", TEXT_STYLE_ERROR).setOrigin(0.5);
     this.homeObjects.push(this.homeErrorText);
   }
 
@@ -222,9 +221,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private async handleJoin(): Promise<void> {
-    const codeEl = this.joinCodeInput
-      ? (this.joinCodeInput.node as HTMLInputElement)
-      : null;
+    const codeEl = this.joinCodeInput ? (this.joinCodeInput.node as HTMLInputElement) : null;
     const codeRaw = codeEl?.value ?? "";
     const code = codeRaw.trim().toUpperCase();
 
@@ -254,8 +251,9 @@ export class LobbyScene extends Phaser.Scene {
       // Colyseus matchmaking: room codes live in metadata (server-side
       // .filterBy(["code"])). We query the full list and pick the matching one
       // rather than relying on joinOrCreate's implicit create-on-miss.
-      const rooms: RoomAvailable<{ code?: string }>[] =
-        await this.netClient.getAvailableRooms<{ code?: string }>("game");
+      const rooms: RoomAvailable<{ code?: string }>[] = await this.netClient.getAvailableRooms<{
+        code?: string;
+      }>("game");
       const target = rooms.find((r) => r.metadata?.code === code);
       if (!target) {
         this.setHomeError(`No room with code ${code}`);
@@ -409,9 +407,7 @@ export class LobbyScene extends Phaser.Scene {
       });
       this.roomObjects.push(...next);
     } else {
-      const nameText = this.add
-        .text(cx + 80, y, mapName, TEXT_STYLE_BODY)
-        .setOrigin(0.5);
+      const nameText = this.add.text(cx + 80, y, mapName, TEXT_STYLE_BODY).setOrigin(0.5);
       this.roomObjects.push(nameText);
 
       const hint = this.add
@@ -422,9 +418,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private renderPlayerList(cx: number, y: number, vm: ViewModel): void {
-    const header = this.add
-      .text(cx - 300, y, "Players", TEXT_STYLE_BODY)
-      .setOrigin(0, 0.5);
+    const header = this.add.text(cx - 300, y, "Players", TEXT_STYLE_BODY).setOrigin(0, 0.5);
     this.roomObjects.push(header);
 
     let rowY = y + 40;
@@ -598,7 +592,7 @@ export class LobbyScene extends Phaser.Scene {
     if (ids.length === 0) return;
     const current = this.room.state.selectedMapId;
     const idx = ids.indexOf(current);
-    const nextIdx = (((idx >= 0 ? idx : 0) + dir) % ids.length + ids.length) % ids.length;
+    const nextIdx = ((((idx >= 0 ? idx : 0) + dir) % ids.length) + ids.length) % ids.length;
     const nextId = ids[nextIdx];
     if (!nextId) return;
     this.room.send("select_map", { mapId: nextId });

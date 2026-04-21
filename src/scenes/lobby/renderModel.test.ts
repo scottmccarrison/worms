@@ -137,10 +137,7 @@ describe("toViewModel", () => {
   });
 
   it("mapId passes through from state", () => {
-    const state = makeState(
-      [makePlayer({ sessionId: "a", isHost: true })],
-      "hills",
-    );
+    const state = makeState([makePlayer({ sessionId: "a", isHost: true })], "hills");
     expect(toViewModel(state, "a").mapId).toBe("hills");
   });
 });
