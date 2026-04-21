@@ -1,130 +1,111 @@
-# Adding a weapon
+# Adding a weapon (Epic 6b+ drop-in guide)
 
-Takes ~30-60 minutes once the weapon system lands in Epic 6. Assumes stack per [ADR-001](../decisions/001-framework-pivot.md): Phaser 3, planck.js, Aseprite, dat.gui.
+Adding a new weapon requires exactly two steps: a config file + a registry entry. No engine changes.
+Updated for the Epic 6a data-driven weapon stack (placeholder graphics; real sprites in Epic 11).
 
-## 1. Sprite
+## Step 1: Create `src/weapons/<name>.ts`
 
-Author the weapon's visual in **Aseprite**. Required frames depend on the weapon:
+Export a `WeaponConfig` object. Pick the archetype that matches the behavior:
 
-- **Projectile weapons** (grenade, bazooka, holy grenade, cluster bomb): one static frame OR rotation frames if it spins in flight.
-- **Placeable / walking weapons** (land mine, old woman, sheep, super sheep): walk/idle animations if it moves on its own.
-- **Explosion / hit effect**: most weapons share the same explosion sprite sheet (`fx-explosion.png`); individual weapons only ship unique art for unique visuals.
+| Archetype | Detonates | Example |
+|-----------|-----------|---------|
+| `hitscan` | Immediately at ray hit point | Shotgun, Minigun |
+| `projectile` | On terrain/worm contact | Bazooka |
+| `throwable` | After fuse timer (bounces first) | HandGrenade |
 
-Export from Aseprite: **File -> Export Sprite Sheet** with **Output: Array**, JSON format, one atlas per weapon.
-
-```
-public/assets/weapons/
-  grenade.png       # sprite sheet
-  grenade.json      # Aseprite frame data
-```
-
-## 2. Register the loader
-
-In `src/loaders/weapons.ts` (created in Epic 6), add a line:
-
-```ts
-scene.load.atlas("grenade", "assets/weapons/grenade.png", "assets/weapons/grenade.json");
-```
-
-All weapon atlases get preloaded at game start; no runtime asset loading.
-
-## 3. Write the weapon config
-
-Create `src/weapons/grenade.ts`:
-
-```ts
+```typescript
+// src/weapons/minigun.ts
 import type { WeaponConfig } from "./types";
 
-export const grenade: WeaponConfig = {
-  id: "grenade",
-  name: "Hand Grenade",
-  icon: "grenade-icon",               // atlas key for weapon-select icon
-  sprite: "grenade",                   // atlas key for in-world sprite
-  body: {
-    shape: "circle",
-    radius: 0.2,                       // meters
-    density: 1.0,
-    friction: 0.5,
-    restitution: 0.3,                  // bouncy
-  },
-  launch: {
-    type: "aimed-arc",                 // charge + release, affected by wind
-    maxVelocity: 25,                   // m/s at full charge
-  },
-  fuseMs: 3000,                        // detonates 3s after launch
+export const minigun: WeaponConfig = {
+  id: "minigun",
+  name: "Minigun",
+  archetype: "hitscan",
+  ammoPerMatch: -1,          // -1 = infinite
+  selectKey: 4,              // keyboard slot (1-9); must be unique
+  iconColor: 0x888888,       // placeholder icon fill color (hex)
+  iconLabel: "M",            // placeholder icon letter (1-2 chars)
+  shotsPerActivation: 10,    // hitscan: fires N times before turn ends
   explosion: {
-    radius: 60,                        // px
-    damage: 50,                        // hp
-    knockback: 400,                    // px/s applied to nearby bodies
-  },
-  endsTurn: true,
-  ammoDefault: 4,                      // starting ammo per worm per round
-};
-```
-
-The `WeaponConfig` type (defined in `src/weapons/types.ts`) covers all fields every weapon needs. Unique behaviors (homing missile tracking, rc plane steering, portal gun) add an `onTick(body, context, dt)` function.
-
-### Unique behavior example
-
-```ts
-export const homingMissile: WeaponConfig = {
-  id: "homing-missile",
-  // ... base config ...
-  launch: { type: "direct", maxVelocity: 30 },
-  fuseMs: 4000,
-  onTick(body, ctx, dt) {
-    const target = ctx.paintedTarget;
-    if (!target) return;
-    const toTarget = target.minus(body.getPosition()).normalize();
-    body.applyForceToCenter(toTarget.mul(0.5));
+    terrainRadiusPx: 10,     // crater radius in pixels
+    damageRadiusPx: 20,      // damage falloff radius in pixels
+    maxDamage: 8,            // HP at direct hit (falls off to 0 at radius)
+    impulseMag: 10,          // knockback strength
   },
 };
 ```
 
-Keep unique logic ~10-30 lines. If a weapon needs more, question whether the abstraction is wrong.
+**Throwable example** (fuse + bounce):
 
-## 4. Register in the weapon index
-
-`src/weapons/index.ts`:
-
-```ts
-import { grenade } from "./grenade";
-import { bazooka } from "./bazooka";
-// ...
-
-export const WEAPONS = {
-  grenade,
-  bazooka,
-  // ...
-} as const;
-
-export type WeaponId = keyof typeof WEAPONS;
+```typescript
+export const holyGrenade: WeaponConfig = {
+  id: "holygrenade",
+  name: "Holy Hand Grenade",
+  archetype: "throwable",
+  ammoPerMatch: 1,
+  selectKey: 5,
+  iconColor: 0xffd700,
+  iconLabel: "HG",
+  projectileColor: 0xffd700,  // in-world circle color (placeholder)
+  projectileRadiusPx: 7,
+  fuseMs: 3000,               // detonates 3 seconds after throw
+  restitution: 0.5,           // bounciness (0 = dead stop, 1 = perfect bounce)
+  powerCapMps: 14,            // max muzzle velocity at full drag power
+  explosion: {
+    terrainRadiusPx: 75,
+    damageRadiusPx: 100,
+    maxDamage: 75,
+    impulseMag: 90,
+  },
+};
 ```
 
-The weapon selector UI reads `WEAPONS`, no further wiring.
+**Projectile example** (contact detonation):
 
-## 5. Test + tune in dev
-
-```sh
-npm run dev
+```typescript
+export const bazooka: WeaponConfig = {
+  id: "bazooka",
+  name: "Bazooka",
+  archetype: "projectile",
+  ammoPerMatch: -1,
+  selectKey: 1,
+  iconColor: 0x8b5a2b,
+  iconLabel: "B",
+  projectileColor: 0xcc9966,
+  projectileRadiusPx: 5,
+  powerCapMps: 20,
+  explosion: { terrainRadiusPx: 45, damageRadiusPx: 60, maxDamage: 50, impulseMag: 60 },
+};
 ```
 
-Open localhost:5173, start a local game, press `` ` `` (backtick) to toggle dat.gui. The weapon's tunables (velocity, explosion radius, fuse time) appear under **Weapons -> <name>**. Drag sliders, fire the weapon, feel the change.
+## Step 2: Add it to `src/weapons/registry.ts`
 
-When happy, copy the values back into the config file and commit.
+```typescript
+import { minigun } from "./minigun";  // add import
 
-## 6. Multiplayer
+const REGISTRY: WeaponConfig[] = [bazooka, shotgun, handGrenade, minigun]; // add to array
+```
 
-If the weapon adds new schema state (e.g., placed land mines, thrown ninja ropes attached to terrain), add it to `server/src/state/GameState.ts` and the client-side schema mirror. For normal projectiles, the existing `Projectile` schema covers everything.
+That's all. The registry drives:
+- The weapon drawer (icon slot appears automatically)
+- `getByKey(n)` / `getById(id)` lookups used by InputController
+- `defaultAmmoForMatch()` used by WeaponManager at game start
+
+## Step 3: Tune in dat.gui
+
+Run `npm run dev`, launch a game, press backtick to open dat.gui. Sliders for the weapon's explosion numbers appear under the Weapons folder. Drag until it feels right, then commit the final values back to the config file.
+
+## Unique behavior
+
+For weapons that don't fit the three archetypes (homing missile, drill tunneling), add an optional `behavior?: (ctx: FireContext) => FireResult` hook to `WeaponConfig`. Leave it undefined for standard archetypes - `fire()` ignores it. Keep unique logic under 30 lines; if it needs more, split into a helper module.
 
 ## Checklist
 
-- [ ] Aseprite file + atlas exported to `public/assets/weapons/<name>/`
-- [ ] Added to asset loader in `src/loaders/weapons.ts`
 - [ ] Config file at `src/weapons/<name>.ts`
-- [ ] Added to `WEAPONS` export in `src/weapons/index.ts`
-- [ ] Tested in dev with dat.gui; final constants committed
-- [ ] Icon added to weapon selector atlas
-- [ ] NOTICE.md updated if source is CC-BY (attribution required)
-
-Typical PR: 1 weapon = ~100 lines across 3-4 files + 1 sprite. Agent-executable via /execute when Epic 6 is done.
+- [ ] Imported and added to `REGISTRY` in `src/weapons/registry.ts`
+- [ ] `selectKey` is unique (no conflict with existing slots 1/2/3)
+- [ ] `tsc --noEmit` clean
+- [ ] `vitest run` green
+- [ ] Explosion radius + damage tuned in dat.gui and committed
+- [ ] Reference file deleted if porting from `reference/src/weapons/`
+- [ ] `NOTICE.md` updated if source asset is CC-BY
