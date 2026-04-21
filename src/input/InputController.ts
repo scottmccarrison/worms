@@ -94,8 +94,8 @@ export class InputController {
 
     if (worm.isRoped()) {
       // While roped: up/down extend/retract the rope, throttled so holding
-      // a key adjusts ~5/sec instead of 60/sec (previous behavior drained
-      // all segments in under a second).
+      // a key adjusts a few times per second. Aim is LOCKED (arrow keys
+      // are consumed by rope control; no aim conflict).
       this.ropeAdjustCooldownMs = Math.max(0, this.ropeAdjustCooldownMs - dtMs);
       if (this.ropeAdjustCooldownMs === 0) {
         if (this.keyUp.isDown || this.keyW.isDown) {
@@ -106,19 +106,12 @@ export class InputController {
           this.ropeAdjustCooldownMs = tuning.rope.adjustCooldownMs;
         }
       }
-
-      // Aim axis (rope doesn't block aim)
-      const aimDir = this.readAimAxis();
-      worm.aim(aimDir);
     } else if (worm.isJetPacking()) {
-      // While jetpacking: walk keys steer horizontally via JetPack.setHorizontalInput
+      // While jetpacking: walk keys steer horizontally, up thrusts vertical.
+      // Aim is LOCKED (arrow keys are consumed by thrust controls).
       const hDir = this.readHorizontalAxis();
       worm.jetPackUtility.setHorizontalInput(hDir);
       worm.jetPackUtility.setVerticalInput(this.keyUp.isDown || this.keyW.isDown);
-
-      // Aim still works
-      const aimDir = this.readAimAxis();
-      worm.aim(aimDir);
     } else {
       // Normal movement
       const walkDir = this.readHorizontalAxis();
