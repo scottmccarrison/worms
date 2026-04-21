@@ -228,14 +228,11 @@ export class Worm {
   // ------ Lifecycle ------
 
   update(dtMs: number): void {
-    if (!this.isAlive) return;
-
     const pos = this.body.getPosition();
     const xPx = toPixels(pos.x);
     const yPx = toPixels(pos.y);
 
-    // Step aim angle
-    if (this.aimDir !== 0) {
+    if (this.isAlive && this.aimDir !== 0) {
       this.aimAngle = stepAim(
         this.aimAngle,
         this.aimDir,
@@ -247,11 +244,12 @@ export class Worm {
 
     this.drawWorm(xPx, yPx);
 
-    // Update text positions
     this.nameText.setPosition(xPx, yPx - tuning.worm.radiusPx - 18);
     this.healthText.setPosition(xPx, yPx - tuning.worm.radiusPx - 6);
-    // Show fuel in health text area when jetpacking
-    const fuelStr = this.jetPackActive ? ` fuel:${Math.ceil(this.jetPackUtility?.fuel ?? 0)}` : "";
+    const fuelStr =
+      this.isAlive && this.jetPackActive
+        ? ` fuel:${Math.ceil(this.jetPackUtility?.fuel ?? 0)}`
+        : "";
     this.healthText.setText(`${this.health}${fuelStr}`);
   }
 
