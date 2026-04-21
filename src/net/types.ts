@@ -51,6 +51,7 @@ export interface LobbyPlayersMap {
 
 /**
  * Top-level lobby state received from the server.
+ * `listen()` is Colyseus 0.15's per-field change subscription.
  */
 export interface LobbyState {
   code: string;
@@ -58,6 +59,11 @@ export interface LobbyState {
   hostSessionId: string;
   selectedMapId: string;
   players: LobbyPlayersMap;
+  listen<K extends "code" | "phase" | "hostSessionId" | "selectedMapId">(
+    prop: K,
+    callback: (value: LobbyState[K], previousValue: LobbyState[K]) => void,
+    immediate?: boolean,
+  ): () => boolean;
 }
 
 /**

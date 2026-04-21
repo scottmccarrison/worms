@@ -1,7 +1,10 @@
 import * as Phaser from "phaser";
 import type { Client, Room, RoomAvailable } from "colyseus.js";
+import { allIds, getById } from "../maps/registry";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, LobbyState } from "../net/types";
+import { toViewModel } from "./lobby/renderModel";
+import type { ViewModel } from "./lobby/renderModel";
 
 interface LobbySceneData {
   netClient: Client;
@@ -17,9 +20,20 @@ const TEXT_STYLE_LARGE: Phaser.Types.GameObjects.Text.TextStyle = {
   color: "#e0e0e0",
   fontFamily: "system-ui, sans-serif",
 };
+const TEXT_STYLE_CODE: Phaser.Types.GameObjects.Text.TextStyle = {
+  fontSize: "72px",
+  color: "#88ddff",
+  fontFamily: "system-ui, sans-serif",
+  fontStyle: "bold",
+};
 const TEXT_STYLE_BODY: Phaser.Types.GameObjects.Text.TextStyle = {
   fontSize: "22px",
   color: "#e0e0e0",
+  fontFamily: "system-ui, sans-serif",
+};
+const TEXT_STYLE_SMALL: Phaser.Types.GameObjects.Text.TextStyle = {
+  fontSize: "18px",
+  color: "#aaaaaa",
   fontFamily: "system-ui, sans-serif",
 };
 const TEXT_STYLE_BUTTON: Phaser.Types.GameObjects.Text.TextStyle = {
@@ -38,26 +52,30 @@ const INPUT_CSS =
   "width: 240px; height: 36px; font-size: 20px; padding: 4px 8px; color: #e0e0e0; background: #22222c; border: 1px solid #555; border-radius: 4px; color-scheme: dark;";
 
 /**
- * LobbyScene - two-view Phaser scene.
+ * LobbyScene - two-view Phaser scene (home + room).
  *
- * This commit wires the HOME view: title, nickname input, Create Room and
- * Join Room actions. Follow-up commits add the room view + game_started
- * handoff.
+ * Home: nickname input + Create/Join actions.
+ * Room: code display, map picker (host only), player list, Ready toggle,
+ *       Start Game (host only), Leave. Re-renders on every state change.
  */
 export class LobbyScene extends Phaser.Scene {
   private netClient!: Client;
   private autoJoinCode: string | null = null;
 
-  protected view: View = "home";
+  private view: View = "home";
   private nickname = "";
   private selectedColor: string = ALLOWED_COLORS[0];
-  protected room: Room<LobbyState> | null = null;
+  private room: Room<LobbyState> | null = null;
 
   // Home view GameObjects (destroyed on view switch).
   private homeObjects: Phaser.GameObjects.GameObject[] = [];
+  // Reference kept so we could future-proof focus() calls.
   protected nicknameInput: Phaser.GameObjects.DOMElement | null = null;
   private joinCodeInput: Phaser.GameObjects.DOMElement | null = null;
   private homeErrorText: Phaser.GameObjects.Text | null = null;
+
+  // Room view GameObjects (destroyed + rebuilt on every state change).
+  private roomObjects: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
     super("LobbyScene");
@@ -85,6 +103,7 @@ export class LobbyScene extends Phaser.Scene {
 
   private renderHome(): void {
     this.view = "home";
+    this.clearRoom();
     this.clearHome();
 
     const cx = CANVAS_W / 2;
@@ -156,11 +175,22 @@ export class LobbyScene extends Phaser.Scene {
     h: number,
     label: string,
     onClick: () => void,
+    opts: { enabled?: boolean; fill?: number; stroke?: number } = {},
   ): Phaser.GameObjects.GameObject[] {
-    const bg = this.add.rectangle(x, y, w, h, 0x3344aa).setStrokeStyle(2, 0x7788ff);
-    bg.setInteractive({ useHandCursor: true });
-    bg.on("pointerdown", onClick);
-    const text = this.add.text(x, y, label, TEXT_STYLE_BUTTON).setOrigin(0.5);
+    const enabled = opts.enabled !== false;
+    const fill = opts.fill ?? (enabled ? 0x3344aa : 0x333344);
+    const stroke = opts.stroke ?? (enabled ? 0x7788ff : 0x555566);
+    const bg = this.add.rectangle(x, y, w, h, fill).setStrokeStyle(2, stroke);
+    if (enabled) {
+      bg.setInteractive({ useHandCursor: true });
+      bg.on("pointerdown", onClick);
+    }
+    const text = this.add
+      .text(x, y, label, {
+        ...TEXT_STYLE_BUTTON,
+        color: enabled ? "#ffffff" : "#888888",
+      })
+      .setOrigin(0.5);
     return [bg, text];
   }
 
@@ -174,9 +204,7 @@ export class LobbyScene extends Phaser.Scene {
         nickname: nick,
         color: this.selectedColor,
       });
-      this.room = room;
-      this.wireRoomMessages(room);
-      this.setHomeError("");
+      this.onRoomJoined(room);
     } catch (err) {
       this.setHomeError(`Create failed: ${this.errorMessage(err)}`);
     }
@@ -211,9 +239,7 @@ export class LobbyScene extends Phaser.Scene {
         nickname: nick,
         color: this.selectedColor,
       });
-      this.room = room;
-      this.wireRoomMessages(room);
-      this.setHomeError("");
+      this.onRoomJoined(room);
     } catch (err) {
       this.setHomeError(`Join failed: ${this.errorMessage(err)}`);
     }
@@ -243,19 +269,250 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   // ---------------------------------------------------------------------------
-  // Room view + game_started handoff land in follow-up commits.
+  // Room view
   // ---------------------------------------------------------------------------
 
+  private onRoomJoined(room: Room<LobbyState>): void {
+    this.room = room;
+    this.wireRoomMessages(room);
+    this.wireRoomStateListeners(room);
+    this.view = "room";
+    this.clearHome();
+    // First render can run immediately; state has already arrived by the time
+    // the join promise resolves in Colyseus 0.15.
+    this.renderRoom();
+  }
+
   private wireRoomMessages(room: Room<LobbyState>): void {
-    // Contract is defined; full wiring lands with the room view commit.
-    // For now: log errors + fall back to home on leave so a closed socket
-    // doesn't strand the user on a blank screen.
     room.onMessage<ErrorMessage>("error", (msg) => {
-      this.setHomeError(`${msg.code}: ${msg.message}`);
+      // Show the error in the room's error band; if we're already home it
+      // surfaces there instead.
+      if (this.view === "home") {
+        this.setHomeError(`${msg.code}: ${msg.message}`);
+      } else {
+        this.flashRoomError(`${msg.code}: ${msg.message}`);
+      }
     });
     room.onLeave(() => {
       this.room = null;
       this.renderHome();
     });
+  }
+
+  private wireRoomStateListeners(room: Room<LobbyState>): void {
+    // Colyseus 0.15: attach listeners directly on state. Every mutation path
+    // (add/remove/change/scalar listen) triggers a full re-render. The room
+    // view is small enough that tear-down + rebuild is fine; if perf ever
+    // bites, swap for targeted updates.
+    const rerender = () => {
+      if (this.view === "room") this.renderRoom();
+    };
+    room.state.players.onAdd(rerender);
+    room.state.players.onRemove(rerender);
+    room.state.players.onChange(rerender);
+    room.state.listen("selectedMapId", rerender);
+    room.state.listen("hostSessionId", rerender);
+    room.state.listen("phase", rerender);
+  }
+
+  private renderRoom(): void {
+    this.clearRoom();
+    if (!this.room) return;
+
+    const state = this.room.state;
+    const mySessionId = this.room.sessionId;
+    const vm = toViewModel(state, mySessionId);
+
+    const cx = CANVAS_W / 2;
+
+    // Header: code + leave button.
+    const header = this.add.text(60, 40, `Room: ${state.code}`, TEXT_STYLE_BODY);
+    this.roomObjects.push(header);
+
+    const bigCode = this.add.text(cx, 120, state.code, TEXT_STYLE_CODE).setOrigin(0.5);
+    this.roomObjects.push(bigCode);
+
+    const leaveBtn = this.makeButton(CANVAS_W - 120, 50, 160, 50, "Leave", () => {
+      void this.handleLeave();
+    });
+    this.roomObjects.push(...leaveBtn);
+
+    // Map picker row (host = arrows; guest = read-only name).
+    this.renderMapPicker(cx, 220, vm);
+
+    // Player list.
+    this.renderPlayerList(cx, 310, vm);
+
+    // Ready + Start buttons at the bottom.
+    this.renderActions(cx, 620, vm);
+  }
+
+  private renderMapPicker(cx: number, y: number, vm: ViewModel): void {
+    const entry = getById(vm.mapId);
+    const mapName = entry?.config.name ?? vm.mapId;
+
+    const mapLabel = this.add.text(cx - 220, y, "Map:", TEXT_STYLE_BODY).setOrigin(0, 0.5);
+    this.roomObjects.push(mapLabel);
+
+    if (vm.iAmHost) {
+      const prev = this.makeButton(cx - 40, y, 50, 40, "<", () => {
+        this.cycleMap(-1);
+      });
+      this.roomObjects.push(...prev);
+
+      const nameText = this.add.text(cx + 80, y, mapName, TEXT_STYLE_BODY).setOrigin(0.5);
+      this.roomObjects.push(nameText);
+
+      const next = this.makeButton(cx + 200, y, 50, 40, ">", () => {
+        this.cycleMap(+1);
+      });
+      this.roomObjects.push(...next);
+    } else {
+      const nameText = this.add
+        .text(cx + 80, y, mapName, TEXT_STYLE_BODY)
+        .setOrigin(0.5);
+      this.roomObjects.push(nameText);
+
+      const hint = this.add
+        .text(cx + 80, y + 28, "(host chooses)", TEXT_STYLE_SMALL)
+        .setOrigin(0.5);
+      this.roomObjects.push(hint);
+    }
+  }
+
+  private renderPlayerList(cx: number, y: number, vm: ViewModel): void {
+    const header = this.add
+      .text(cx - 300, y, "Players", TEXT_STYLE_BODY)
+      .setOrigin(0, 0.5);
+    this.roomObjects.push(header);
+
+    let rowY = y + 40;
+    for (const row of vm.players) {
+      // Color swatch.
+      const swatch = this.add.rectangle(
+        cx - 280,
+        rowY,
+        28,
+        28,
+        Number.parseInt(row.color.replace("#", ""), 16),
+      );
+      swatch.setStrokeStyle(2, 0xffffff);
+      this.roomObjects.push(swatch);
+
+      // Name + tags.
+      const tags: string[] = [];
+      if (row.isHost) tags.push("host");
+      if (row.isMe) tags.push("you");
+      const tagStr = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+      const label = this.add.text(cx - 250, rowY, `${row.nickname}${tagStr}`, {
+        ...TEXT_STYLE_BODY,
+        color: row.isMe ? "#ffffaa" : "#e0e0e0",
+      });
+      label.setOrigin(0, 0.5);
+      this.roomObjects.push(label);
+
+      // Ready indicator.
+      const readyLabel = row.isHost ? "-" : row.ready ? "READY" : "not ready";
+      const readyColor = row.ready ? "#44dd44" : "#aaaaaa";
+      const readyText = this.add
+        .text(cx + 200, rowY, readyLabel, {
+          ...TEXT_STYLE_BODY,
+          color: row.isHost ? "#666666" : readyColor,
+        })
+        .setOrigin(0, 0.5);
+      this.roomObjects.push(readyText);
+
+      rowY += 40;
+    }
+  }
+
+  private renderActions(cx: number, y: number, vm: ViewModel): void {
+    if (vm.iAmHost) {
+      // Host sees Start Game, gated by canStart.
+      const startBtn = this.makeButton(
+        cx,
+        y,
+        280,
+        60,
+        "Start Game",
+        () => {
+          this.handleStart();
+        },
+        { enabled: vm.canStart, fill: vm.canStart ? 0x228833 : 0x333344 },
+      );
+      this.roomObjects.push(...startBtn);
+
+      if (!vm.canStart) {
+        const reason = this.add
+          .text(cx, y + 50, "Need 2+ players, all non-host ready", TEXT_STYLE_SMALL)
+          .setOrigin(0.5);
+        this.roomObjects.push(reason);
+      }
+    } else {
+      // Non-host sees Ready toggle.
+      const label = vm.myReady ? "Unready" : "Ready";
+      const fill = vm.myReady ? 0x888844 : 0x228833;
+      const readyBtn = this.makeButton(
+        cx,
+        y,
+        280,
+        60,
+        label,
+        () => {
+          this.handleToggleReady(!vm.myReady);
+        },
+        { fill },
+      );
+      this.roomObjects.push(...readyBtn);
+    }
+  }
+
+  private clearRoom(): void {
+    for (const obj of this.roomObjects) obj.destroy();
+    this.roomObjects = [];
+  }
+
+  private flashRoomError(msg: string): void {
+    const cx = CANVAS_W / 2;
+    const txt = this.add.text(cx, 680, msg, TEXT_STYLE_ERROR).setOrigin(0.5);
+    this.roomObjects.push(txt);
+    this.time.delayedCall(3000, () => {
+      if (!txt.scene) return;
+      txt.destroy();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Room actions -> server messages
+  // ---------------------------------------------------------------------------
+
+  private cycleMap(dir: 1 | -1): void {
+    if (!this.room) return;
+    const ids = allIds();
+    if (ids.length === 0) return;
+    const current = this.room.state.selectedMapId;
+    const idx = ids.indexOf(current);
+    const nextIdx = (((idx >= 0 ? idx : 0) + dir) % ids.length + ids.length) % ids.length;
+    const nextId = ids[nextIdx];
+    if (!nextId) return;
+    this.room.send("select_map", { mapId: nextId });
+  }
+
+  private handleToggleReady(next: boolean): void {
+    this.room?.send("set_ready", { ready: next });
+  }
+
+  private handleStart(): void {
+    this.room?.send("start_game", {});
+  }
+
+  private async handleLeave(): Promise<void> {
+    const room = this.room;
+    if (!room) return;
+    try {
+      await room.leave(true);
+    } catch {
+      // onLeave handler drops us back to home regardless.
+    }
   }
 }
