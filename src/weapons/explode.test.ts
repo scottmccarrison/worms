@@ -30,6 +30,7 @@ function makeWormAt(world: ReturnType<typeof World>, xPx: number, yPx: number) {
   let damage = 0;
   const worm = {
     body,
+    isAlive: true, // required by explode() to process damage
     takeDamage(amount: number) {
       damage += amount;
     },
