@@ -321,17 +321,26 @@ export class TurnManager {
       const team = this.getActiveTeam();
       if (!team) return;
 
-      // Team._currentWormIdx starts at -1, so the very first advanceWorm lands on worm 0.
-      // On subsequent turns for this team, advanceWorm rotates to the next alive worm.
-      // If all worms on this team are dead, advanceWorm returns null - this should be
-      // impossible because the update() win check fires first, but log defensively so
-      // a silent hang is visible if the invariant ever breaks.
-      const worm = team.advanceWorm();
+      // In externally-driven mode the server has already picked the active
+      // worm via adoptServerTurn(); do NOT advanceWorm (that would rotate
+      // past the target). Use the cursor adoptServerTurn left pointing at
+      // the correct worm.
+      let worm: Worm | null;
+      if (this.externallyDriven) {
+        worm = team.getCurrentWorm();
+      } else {
+        // Team._currentWormIdx starts at -1, so the very first advanceWorm lands on worm 0.
+        // On subsequent turns for this team, advanceWorm rotates to the next alive worm.
+        // If all worms on this team are dead, advanceWorm returns null - this should be
+        // impossible because the update() win check fires first, but log defensively so
+        // a silent hang is visible if the invariant ever breaks.
+        worm = team.advanceWorm();
+      }
       if (worm?.isAlive) {
         this.onTurnStart(team, worm);
       } else {
         console.warn(
-          `[TurnManager] turnActive entered for team ${team.id} but advanceWorm returned no alive worm. This indicates the win check missed a same-frame full-team elimination.`,
+          `[TurnManager] turnActive entered for team ${team.id} but no alive worm was available. In externally-driven mode this means the server's currentWormId did not match any alive local worm; otherwise the win check missed a same-frame full-team elimination.`,
         );
       }
     } else if (stateName === "turnEnding") {

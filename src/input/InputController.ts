@@ -131,6 +131,22 @@ export class InputController {
   }
 
   /**
+   * Reset the local walk-direction cache to 0 (stopped). Called when
+   * network ownership flips away from this client so that the NEXT time
+   * we regain control, a fresh press registers as a transition and gets
+   * forwarded over the wire. Without this, a carryover walk press silently
+   * fails to notify spectators.
+   */
+  resetWalkState(): void {
+    this.lastWalkDir = 0;
+  }
+
+  /** Current walk direction (last transition sent). */
+  getLastWalkDir(): -1 | 0 | 1 {
+    return this.lastWalkDir;
+  }
+
+  /**
    * Expose the current input-allowed state. Epic 9 uses this as the
    * authoritative "should I accept local input?" check - networked-mode
    * GameScene flips this false on non-active turns so remote-input replay

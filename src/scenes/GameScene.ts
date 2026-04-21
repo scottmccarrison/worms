@@ -73,6 +73,9 @@ export class GameScene extends Phaser.Scene {
   private room: Room<LobbyState> | undefined;
   // True iff `room` is present. Cached so hot paths don't re-check every frame.
   private isNetworked = false;
+  /** Last turn_resolved turnSeq we applied locally. Guards against duplicate
+   *  messages double-cutting terrain. */
+  private lastAppliedTurnSeq = 0;
   // Our Colyseus sessionId when networked, "" otherwise.
   private mySessionId = "";
   // Team id owned by our sessionId (set in create() after teamsInit maps sessionIds
@@ -506,7 +509,7 @@ export class GameScene extends Phaser.Scene {
    */
   private buildTeams(init: NetTeamInit[] | undefined): Team[] {
     if (init && init.length > 0) {
-      return init.map((t) => new Team({ id: t.id, name: t.name, color: t.color }));
+      return init.map((t) => new Team({ id: t.id, name: t.name, color: parseTeamColor(t.color) }));
     }
     return [
       new Team({ id: "red", name: "Red", color: 0xff4444 }),
@@ -609,6 +612,17 @@ export class GameScene extends Phaser.Scene {
   protected onActiveTeamChanged(_teamId: string): void {
     if (!this.isNetworked) return;
     const active = this.iAmActive();
+    // Flush a pending walk if we were walking when control flipped away.
+    // Otherwise spectators keep seeing the active worm walk forever on our
+    // last known dir. Bugcheck M6.
+    if (!active && this.inputController) {
+      const dir = this.inputController.getLastWalkDir();
+      if (dir !== 0 && this.room) {
+        this.inputSeq++;
+        this.room.send("input_walk", { dir: 0, seq: this.inputSeq });
+      }
+      this.inputController.resetWalkState();
+    }
     this.inputController?.setInputAllowed(active);
     this.turnHUD?.setEndTurnEnabled(active);
     this.refreshSpectatorBanner();
@@ -712,12 +726,18 @@ export class GameScene extends Phaser.Scene {
    * - Hand the new team + worm + endsAt to TurnManager.adoptServerTurn.
    */
   protected applyTurnResolved(msg: TurnResolvedMessage): void {
+    // Idempotent on turnSeq: a duplicate message must not double-cut terrain.
+    // Bugcheck found the previous ordering applied cuts BEFORE the seq check
+    // in adoptServerTurn, so replays double-applied. Guard here.
+    if (msg.turnSeq <= this.lastAppliedTurnSeq) return;
+    this.lastAppliedTurnSeq = msg.turnSeq;
+
     // 1. Worm snap.
     for (const snapWorm of msg.worms) {
       const w = this.allWorms.find((ww) => ww.name === snapWorm.id);
       if (w) setWormFromSnapshot(w, snapWorm);
     }
-    // 2. Terrain cuts (deduped via turnSeq idempotency in adoptServerTurn).
+    // 2. Terrain cuts.
     for (const cut of msg.terrainCuts) {
       this.terrain.cutCircle(cut.x, cut.y, cut.r);
     }
@@ -758,4 +778,20 @@ export class GameScene extends Phaser.Scene {
       }
     }
   };
+}
+
+/**
+ * Convert a `game_started` team color (server sends "#ff4444" as a string)
+ * into the Phaser hex int that `Team.color` expects. Tolerates numeric
+ * inputs for callers that already have an int. Bugcheck found the mismatch
+ * on first Epic 9 integration.
+ */
+function parseTeamColor(input: string | number): number {
+  if (typeof input === "number" && Number.isFinite(input)) return input;
+  if (typeof input === "string") {
+    const hex = input.startsWith("#") ? input.slice(1) : input;
+    const parsed = Number.parseInt(hex, 16);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0xaaaaaa;
 }

@@ -341,10 +341,14 @@ export class GameRoom extends Room<LobbyState> {
 
       // Hand off to the arbiter. Roster shape deliberately mirrors the
       // client-facing TeamInit so the arbiter has wormIds + owner.
+      // Use wormNames verbatim as the arbiter's wormIds; this guarantees
+      // the server's `currentWormId` broadcasts match the client's
+      // `worm.name` field so remote input + snapshot lookups find the
+      // right worm. Caught by bugcheck of the first Epic 9 integration.
       const rosters: TeamRoster[] = teams.map((t) => ({
         id: t.id,
         ownerSessionId: t.ownerSessionId,
-        wormIds: t.wormNames.map((_, idx) => `${t.id}-${idx}`),
+        wormIds: t.wormNames.slice(),
       }));
       this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
       this.arbiter.start(teamOrder, rosters, TURN_DURATION_MS);
@@ -523,20 +527,40 @@ function sanitiseTurnSnapshot(input: unknown): {
       alive?: unknown;
     };
     if (typeof r.id !== "string") continue;
-    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
-    if (typeof r.vx !== "number" || typeof r.vy !== "number") continue;
-    if (typeof r.hp !== "number") continue;
+    if (!Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
+    if (!Number.isFinite(r.vx) || !Number.isFinite(r.vy)) continue;
+    if (!Number.isFinite(r.hp)) continue;
     if (typeof r.alive !== "boolean") continue;
-    worms.push({ id: r.id, x: r.x, y: r.y, vx: r.vx, vy: r.vy, hp: r.hp, alive: r.alive });
+    // Clamp hp to [0, 100] so a buggy / malicious client cannot ship negative
+    // or outsized values. Bugcheck flagged this as a peer-crash vector because
+    // NaN/Infinity in planck setPosition puts bodies into undefined state.
+    const hp = Math.max(0, Math.min(100, r.hp as number));
+    worms.push({
+      id: r.id,
+      x: r.x as number,
+      y: r.y as number,
+      vx: r.vx as number,
+      vy: r.vy as number,
+      hp,
+      alive: r.alive && hp > 0,
+    });
   }
 
   const terrainCuts: Array<{ x: number; y: number; r: number; seq: number }> = [];
   for (const c of raw.terrainCuts) {
     if (!c || typeof c !== "object") continue;
     const r = c as { x?: unknown; y?: unknown; r?: unknown; seq?: unknown };
-    if (typeof r.x !== "number" || typeof r.y !== "number") continue;
-    if (typeof r.r !== "number" || typeof r.seq !== "number") continue;
-    terrainCuts.push({ x: r.x, y: r.y, r: r.r, seq: r.seq });
+    if (!Number.isFinite(r.x) || !Number.isFinite(r.y)) continue;
+    if (!Number.isFinite(r.r) || !Number.isFinite(r.seq)) continue;
+    // Clamp terrain cut radius to a sane range; anything bigger than the
+    // canvas or negative is nonsense.
+    const radius = Math.max(0, Math.min(500, r.r as number));
+    terrainCuts.push({
+      x: r.x as number,
+      y: r.y as number,
+      r: radius,
+      seq: r.seq as number,
+    });
   }
 
   return { worms, terrainCuts };
