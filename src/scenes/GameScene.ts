@@ -1,4 +1,4 @@
-import type { Room } from "colyseus.js";
+import type { Client, Room } from "colyseus.js";
 import * as Phaser from "phaser";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
@@ -6,6 +6,8 @@ import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
+import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
+import { runReconnectLoop } from "../net/reconnectLoop";
 import type {
   CircleCut,
   GameOverMessage,
@@ -19,6 +21,7 @@ import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
+import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
@@ -71,6 +74,9 @@ export class GameScene extends Phaser.Scene {
   // Colyseus room reference stashed in init(). Drives all Epic 9 netcode;
   // undefined means single-device / ?offline=1 play (no network code runs).
   private room: Room<LobbyState> | undefined;
+  // NetClient reference - only present in networked mode. Used by the Epic
+  // 10 reconnect loop to `client.reconnect(token)` after an unexpected drop.
+  private netClient: Client | undefined;
   // True iff `room` is present. Cached so hot paths don't re-check every frame.
   private isNetworked = false;
   /** Last turn_resolved turnSeq we applied locally. Guards against duplicate
@@ -85,6 +91,16 @@ export class GameScene extends Phaser.Scene {
   // ordering (WebSocket is ordered) but logs it for debugging.
   private inputSeq = 0;
 
+  // ----- Epic 10: reconnect + disconnected-owner HUD -----
+  /** Shared ReconnectingOverlay. Lazy-created on first drop. */
+  private reconnectingOverlay: ReconnectingOverlay | null = null;
+  /** Concurrent-loop guard; prevents overlapping reconnect chains. */
+  private reconnectInFlight = false;
+  /** Room code captured at init time (room.state.code may be freed on drop). */
+  private currentRoomCode = "";
+  /** Phaser Time event that refreshes the disconnected-owner countdown. */
+  private disconnectTick: Phaser.Time.TimerEvent | null = null;
+
   constructor() {
     super("GameScene");
   }
@@ -94,12 +110,14 @@ export class GameScene extends Phaser.Scene {
     seed?: number;
     teams?: NetTeamInit[];
     room?: Room<LobbyState>;
+    netClient?: Client;
   }): void {
     const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
     this.seedOverride = data?.seed;
     this.teamsInit = data?.teams;
     this.room = data?.room;
+    this.netClient = data?.netClient;
     // Presence of room is the ONLY source of truth for networked mode.
     // Offline / ?offline=1 paths pass no room and this stays false end-to-end.
     this.isNetworked = !!this.room;
@@ -143,6 +161,10 @@ export class GameScene extends Phaser.Scene {
       this.weaponDrawer.destroy();
       this.aimHUD.destroy();
       this.spectatorHUD?.destroy();
+      this.reconnectingOverlay?.destroy();
+      this.reconnectingOverlay = null;
+      this.disconnectTick?.remove(false);
+      this.disconnectTick = null;
     });
 
     // Spawn worms using map spawn points (predefined or scanned).
@@ -385,6 +407,23 @@ export class GameScene extends Phaser.Scene {
       // done. Spectator clients' hook fires too but sendTurnSnapshot()
       // self-gates on iAmActive(), so only one snapshot lands per turn.
       this.turnManager.onLocalTurnFinished = () => this.sendTurnSnapshot();
+
+      // Epic 10: capture the room code + unexpected-drop handler. Any leave
+      // code other than 1000 / 4200 (consented) triggers the reconnect loop.
+      // Also re-render the disconnected-owner banner on any player change.
+      this.currentRoomCode = this.room.state?.code ?? "";
+      this.room.onLeave((code) => {
+        if (code === 1000 || code === 4200) return;
+        void this.startReconnectionLoop();
+      });
+      this.room.state.players.onChange(() => this.refreshSpectatorBanner());
+      // Countdown tick for "(owner disconnected, Ns)". 250ms is plenty for a
+      // 1-second-precision countdown without burning render budget.
+      this.disconnectTick = this.time.addEvent({
+        delay: 250,
+        loop: true,
+        callback: () => this.refreshSpectatorBanner(),
+      });
     }
 
     this.debugGfx = this.add.graphics();
@@ -638,25 +677,38 @@ export class GameScene extends Phaser.Scene {
    */
   private refreshSpectatorBanner(): void {
     if (!this.spectatorHUD || !this.room) return;
-    if (this.iAmActive()) {
-      this.spectatorHUD.hide();
-      return;
-    }
     const activeTeamId = this.room.state.currentTeamId;
     if (!activeTeamId) {
       this.spectatorHUD.hide();
       return;
     }
-    // Find the owner's sessionId via teamsInit, then their nickname via
-    // state.players. Falls back to the team name if either lookup misses.
+    // Find the owner's sessionId via teamsInit, then look up the live
+    // LobbyPlayer for nickname + disconnected flag. Falls back to the
+    // team name if the lookup misses.
     const team = this.teamsInit?.find((t) => t.id === activeTeamId);
     const ownerSessionId = team?.ownerSessionId ?? "";
-    let label = team?.name ?? activeTeamId;
-    if (ownerSessionId) {
-      const player = this.room.state.players.get(ownerSessionId);
-      if (player?.nickname) label = player.nickname;
+    const ownerPlayer = ownerSessionId ? this.room.state.players.get(ownerSessionId) : undefined;
+    const ownerName = ownerPlayer?.nickname ?? team?.name ?? activeTeamId;
+
+    // Epic 10: if the active team's owner is disconnected, surface it on
+    // the banner with a grace countdown. This takes precedence over the
+    // usual "I'm active - hide banner" rule so the active player also sees
+    // the countdown when... someone else (e.g. the other player in a
+    // 1v1) has dropped. That second case actually can't happen because
+    // only the active owner pauses the turn, but the banner still shows
+    // cleanly for spectators either way.
+    if (ownerPlayer?.disconnected) {
+      const graceEndsAt = ownerPlayer.disconnectGraceEndsAt ?? 0;
+      const remainingSec = Math.max(0, Math.ceil((graceEndsAt - Date.now()) / 1000));
+      this.spectatorHUD.show(`${ownerName} (disconnected, ${remainingSec}s)`);
+      return;
     }
-    this.spectatorHUD.show(`Waiting for ${label}...`);
+
+    if (this.iAmActive()) {
+      this.spectatorHUD.hide();
+      return;
+    }
+    this.spectatorHUD.show(`Waiting for ${ownerName}...`);
   }
 
   /**
@@ -756,6 +808,77 @@ export class GameScene extends Phaser.Scene {
     this.spectatorHUD?.hide();
     const winningTeam = this.teams.find((t) => t.id === msg.winnerTeamId) ?? null;
     this.turnHUD?.showGameOver(winningTeam?.name ?? null);
+  }
+
+  /**
+   * Epic 10: unexpected-drop reconnect loop. Matches the LobbyScene pattern
+   * but operates on the live game Room. On success we swap `this.room`,
+   * re-wire the message + state listeners, and unhide input if it's still
+   * our turn. On failure we clear the cached token and drop back to the
+   * LobbyScene home view so the user can re-join manually.
+   */
+  private async startReconnectionLoop(): Promise<void> {
+    if (this.reconnectInFlight) return;
+    if (!this.netClient) {
+      // Can't reconnect without a client reference; bounce to home.
+      this.scene.start("LobbyScene");
+      return;
+    }
+    this.reconnectInFlight = true;
+
+    const code = this.currentRoomCode;
+    const stored = code ? readRoomToken(code) : null;
+    if (!stored) {
+      this.reconnectInFlight = false;
+      this.scene.start("LobbyScene", { netClient: this.netClient, autoJoinCode: null });
+      return;
+    }
+
+    const overlay = this.ensureOverlay();
+    overlay.show(1);
+
+    const result = await runReconnectLoop<LobbyState>({
+      client: this.netClient,
+      token: stored.token,
+      onAttempt: (n) => overlay.show(n),
+    });
+
+    if (result.ok && result.room) {
+      // Swap to the fresh Room. reconnectionToken rotated; cache the new one.
+      this.room = result.room;
+      this.mySessionId = result.room.sessionId;
+      saveRoomToken(code, result.room.roomId, result.room.reconnectionToken);
+      overlay.hide();
+      this.reconnectInFlight = false;
+      // Full re-wire of listeners on the new Room would be invasive here;
+      // a scene.restart() is simpler and guaranteed consistent. We keep
+      // the same teamsInit + mapId + seed so physics state is rebuilt
+      // from scratch and then catches up via the next turn_resolved.
+      this.scene.restart({
+        mapId: this.mapId,
+        seed: this.seedOverride,
+        teams: this.teamsInit,
+        room: result.room,
+        netClient: this.netClient,
+      });
+      return;
+    }
+
+    // All attempts failed. Token is stale; drop to home.
+    overlay.showFinal("Lost connection. Returning home.");
+    if (code) clearRoomToken(code);
+    this.time.delayedCall(2000, () => {
+      overlay.hide();
+      this.reconnectInFlight = false;
+      this.scene.start("LobbyScene", { netClient: this.netClient, autoJoinCode: null });
+    });
+  }
+
+  private ensureOverlay(): ReconnectingOverlay {
+    if (!this.reconnectingOverlay) {
+      this.reconnectingOverlay = new ReconnectingOverlay({ scene: this });
+    }
+    return this.reconnectingOverlay;
   }
 
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {

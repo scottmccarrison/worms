@@ -78,6 +78,22 @@ Server (`server/`):
 9. Keep alternating until one team has no alive worms. Server broadcasts
    game_over; both tabs show the win banner.
 
+## Reconnection
+
+Epic 10 wraps Colyseus' `allowReconnection(client, 60)` around `onLeave`.
+If a player drops (network hiccup, tab crash), their slot is held for 60
+seconds. Other players see a "(disconnected, Ns)" indicator; if the
+disconnected player is the active turn owner, the turn timer freezes
+until they return. After 60s their team auto-forfeits (all worms die)
+and the remaining players keep playing.
+
+Clients cache `room.reconnectionToken` in localStorage (10-minute TTL)
+keyed by room code. Reloading the tab with `?room=CODE` in the URL uses
+the cached token to rejoin silently. Lobby-phase reloads land you back
+in the room; mid-game reloads currently drop you in a stale lobby view
+([#51](https://github.com/scottmccarrison/worms/issues/51) is tracking
+the proper "rejoin active game" handoff).
+
 Architecture note (Epic 9 Option C): the server arbitrates turn
 ownership + relays the active player's inputs + accepts an authoritative
 snapshot at turn end. Each client still runs its own planck sim locally;

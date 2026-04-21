@@ -49,6 +49,8 @@ function makePlayer(overrides: Partial<LobbyPlayer> & { sessionId: string }): Lo
     ready: overrides.ready ?? false,
     isHost: overrides.isHost ?? false,
     ownerOfTeamId: overrides.ownerOfTeamId ?? "",
+    disconnected: overrides.disconnected ?? false,
+    disconnectGraceEndsAt: overrides.disconnectGraceEndsAt ?? 0,
   };
 }
 
@@ -153,5 +155,49 @@ describe("toViewModel", () => {
   it("mapId passes through from state", () => {
     const state = makeState([makePlayer({ sessionId: "a", isHost: true })], "hills");
     expect(toViewModel(state, "a").mapId).toBe("hills");
+  });
+
+  it("propagates the disconnected flag onto PlayerRow", () => {
+    const state = makeState([
+      makePlayer({ sessionId: "a", isHost: true }),
+      makePlayer({
+        sessionId: "b",
+        color: "#4488ff",
+        disconnected: true,
+        disconnectGraceEndsAt: 1000,
+      }),
+    ]);
+    const vm = toViewModel(state, "a");
+    const rowA = vm.players.find((p) => p.sessionId === "a");
+    const rowB = vm.players.find((p) => p.sessionId === "b");
+    expect(rowA?.disconnected).toBe(false);
+    expect(rowB?.disconnected).toBe(true);
+  });
+
+  it("defaults disconnected to false when the player is connected", () => {
+    const state = makeState([makePlayer({ sessionId: "a", isHost: true })]);
+    const vm = toViewModel(state, "a");
+    expect(vm.players[0]?.disconnected).toBe(false);
+  });
+
+  it("a disconnected player still appears in the players list (slot preserved)", () => {
+    const state = makeState([
+      makePlayer({ sessionId: "a", isHost: true }),
+      makePlayer({ sessionId: "b", color: "#4488ff", disconnected: true }),
+    ]);
+    const vm = toViewModel(state, "a");
+    expect(vm.players).toHaveLength(2);
+    expect(vm.players.map((p) => p.sessionId)).toContain("b");
+  });
+
+  it("host disconnected flag propagates alongside isHost", () => {
+    const state = makeState([
+      makePlayer({ sessionId: "a", isHost: true, disconnected: true }),
+      makePlayer({ sessionId: "b", color: "#4488ff", ready: true }),
+    ]);
+    const vm = toViewModel(state, "b");
+    const hostRow = vm.players.find((p) => p.isHost);
+    expect(hostRow?.disconnected).toBe(true);
+    expect(hostRow?.isHost).toBe(true);
   });
 });

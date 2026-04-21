@@ -39,6 +39,18 @@ export interface LobbyPlayer {
   ready: boolean;
   isHost: boolean;
   ownerOfTeamId: string;
+  /**
+   * Epic 10: true while the player's WebSocket is dropped but still inside
+   * the server's allowReconnection grace window. Clears back to false on
+   * successful reconnect; the slot is deleted if grace expires.
+   */
+  disconnected: boolean;
+  /**
+   * Epic 10: epoch ms at which the reconnection grace window ends.
+   * 0 when the player is connected. Clients can render a countdown via
+   * `Math.ceil((disconnectGraceEndsAt - Date.now()) / 1000)`.
+   */
+  disconnectGraceEndsAt: number;
 }
 
 /**
