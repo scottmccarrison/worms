@@ -41,7 +41,12 @@ export class GameRoom extends Room<LobbyState> {
     state.code = code;
     this.setState(state);
 
-    // Publish code to metadata so clients can filter by it when joining.
+    // Publish code on the room listing so `.filterBy(["code"])` in
+    // index.ts matches clients joining with { code }. Colyseus saves
+    // room.listing after onCreate returns, so in-place assignment is
+    // sufficient; no separate save call required.
+    (this.listing as unknown as { code: string }).code = code;
+    // Also expose on metadata so tooling / debug lookups can find it.
     await this.setMetadata({ code });
 
     this.registerMessageHandlers();
