@@ -487,17 +487,20 @@ export class GameScene extends Phaser.Scene {
       const worm = this.inputController.getActiveWorm();
       if (!worm || !this.turnManager.isInputAllowed()) return;
 
-      const dx = p.x - worm.xPx;
-      const dy = p.y - worm.yPx;
+      // Slingshot convention: the aim vector points FROM the pointer TO
+      // the worm, so dragging DOWN-LEFT of the worm aims UP-RIGHT. Matches
+      // Angry Birds / touch-first Worms clients. Negate both axes.
+      const dx = worm.xPx - p.x;
+      const dy = worm.yPx - p.y;
       const mag = Math.hypot(dx, dy);
       const cap = tuning.weapons.dragMaxLengthPx;
       const power = Math.min(1, mag / cap);
 
-      // Compute raw aim angle; flip facing if drag goes behind worm
+      // Flip facing if the pointer is on the opposite side of the worm
+      // from the current facing direction.
       const rawAngle = Math.atan2(dy, dx);
       const facingDot = Math.cos(rawAngle) * worm.facing;
       if (facingDot < 0) {
-        // Pointer is on the opposite side - flip facing
         worm.setFacing(-worm.facing as -1 | 1);
       }
       // Aim angle is relative to facing; atan2(dy, |dx|) gives correct up/down angle

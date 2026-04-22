@@ -230,6 +230,21 @@ export async function joinRoom(
       // An error event typically precedes a close event; we let the close
       // handler finalize. Don't settleErr here because we'd double-settle.
     });
+
+    // Fail fast if the WebSocket stays stuck in CONNECTING / awaiting-welcome
+    // for too long. On flaky mobile networks a socket can hang indefinitely
+    // in CONNECTING without firing close/error, which would block the
+    // reconnect loop behind a dead attempt. 8s is generous relative to
+    // normal Cloudflare handshake latency (<1s).
+    setTimeout(() => {
+      if (settled) return;
+      try {
+        socket.close(4000, "welcome timeout");
+      } catch {
+        // already closing
+      }
+      settleErr(new Error("WebSocket welcome timeout"));
+    }, 8000);
   });
 
   await ready;
