@@ -25,6 +25,11 @@ export const DEFAULT_WORM_DENSITY = 1.0;
 export const DEFAULT_WORM_LINEAR_DAMPING = 0.1;
 export const DEFAULT_WALK_SPEED_MPS = 2.5;
 
+// Fall damage tuning - mirrors src/tuning.ts worm.fallDamageThresholdImpulse
+// and worm.fallDamageCapHp so server and client agree on the formula.
+const FALL_DAMAGE_THRESHOLD = 8;
+const FALL_DAMAGE_CAP_HP = 25;
+
 export interface WormInit {
   id: string;
   teamId: string;
@@ -86,6 +91,7 @@ export class Worm {
   private readonly footSensor: Fixture;
   private readonly walkSpeedMps: number;
   private walkingDir: -1 | 0 | 1 = 0;
+  private pendingFallImpulse = 0;
   // Jetpack fields are public so serialize/restore can round-trip them
   // without a separate API surface. Writes from outside are rare and
   // happen only on hibernation restore.
@@ -279,6 +285,7 @@ export class Worm {
     this.health = 0;
     this.alive = false;
     this.walkingDir = 0;
+    this.pendingFallImpulse = 0;
     this.jetPackActive = false;
     this.jetPackThrustV = false;
     this.jetPackThrustH = 0;
@@ -301,6 +308,38 @@ export class Worm {
   canJump(): boolean {
     const vel = this.body.getLinearVelocity();
     return this.footContactCount > 0 && Math.abs(vel.y) < 0.5;
+  }
+
+  /**
+   * Accumulate a contact impulse on this worm for this tick. Uses MAX not SUM
+   * so a worm resting on a slope (continuous small impulses from gravity) doesn't
+   * accrue phantom fall damage across ticks.
+   */
+  accumulateFallImpulse(impulse: number): void {
+    if (!this.alive) return;
+    if (!Number.isFinite(impulse) || impulse <= 0) return;
+    if (impulse > this.pendingFallImpulse) {
+      this.pendingFallImpulse = impulse;
+    }
+  }
+
+  /**
+   * Compute + apply any pending fall damage. Returns amount dealt (0 if below
+   * threshold or already dead). Called once per sim tick after world.step.
+   */
+  applyPendingFallDamage(): number {
+    const pending = this.pendingFallImpulse;
+    this.pendingFallImpulse = 0;
+    if (!this.alive || pending <= 0) return 0;
+    const density = DEFAULT_WORM_DENSITY;
+    const threshold = FALL_DAMAGE_THRESHOLD;
+    const maxDmg = FALL_DAMAGE_CAP_HP;
+    if (pending < threshold * density) return 0;
+    const excess = pending - threshold * density;
+    const scaled = excess * (maxDmg / (threshold * density));
+    const dmg = Math.min(maxDmg, Math.max(0, Math.round(scaled)));
+    if (dmg <= 0) return 0;
+    return this.takeDamage(dmg);
   }
 
   // ---- Serialisation ----
