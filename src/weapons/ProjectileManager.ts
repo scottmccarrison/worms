@@ -1,3 +1,9 @@
+/**
+ * Offline-only client sim. Epic 45 moved authoritative projectile physics
+ * (spawn, step, contact, fuse) to the server. Projectile sprites in
+ * networked mode come from sim_state.projectiles; NetworkedSimAdapter
+ * doesn't touch this file. Only OfflineSimAdapter imports it.
+ */
 import * as Phaser from "phaser";
 import { Circle, Vec2 } from "planck";
 import type { Body, World } from "planck";
