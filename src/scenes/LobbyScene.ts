@@ -2,7 +2,13 @@ import * as Phaser from "phaser";
 import { loadMap } from "../maps/loadMap";
 import { allIds, getById } from "../maps/registry";
 import type { NetClient } from "../net/client";
-import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
+import {
+  clearRoomToken,
+  readNickname,
+  readRoomToken,
+  saveNickname,
+  saveRoomToken,
+} from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
@@ -154,6 +160,9 @@ export class LobbyScene extends Phaser.Scene {
       return;
     }
 
+    // Pre-fill nickname from localStorage so returning players don't re-type.
+    this.nickname = readNickname();
+
     this.renderHome();
 
     // If we arrived with ?room=CODE in the URL, surface the code in the Join
@@ -271,6 +280,7 @@ export class LobbyScene extends Phaser.Scene {
   private async handleCreate(): Promise<void> {
     const nick = this.validateNickname();
     if (!nick) return;
+    saveNickname(nick);
 
     try {
       this.setHomeError("Creating room...");
@@ -306,6 +316,7 @@ export class LobbyScene extends Phaser.Scene {
 
     const nick = this.validateNickname();
     if (!nick) return;
+    saveNickname(nick);
 
     try {
       this.setHomeError("Looking up room...");
