@@ -294,7 +294,9 @@ export class Simulation {
   // ---- Main tick ----
 
   tick(dtMs: number): SimTickResult {
-    this.events = [];
+    // Keep any events that applyFire / other pre-tick inputs pushed;
+    // they are logically part of this tick. Reset diedThisTick so
+    // the dedup guard only spans the current tick.
     this.diedThisTick.clear();
     const beforeWormPositions = this.snapshotWormPositions();
 
@@ -355,10 +357,12 @@ export class Simulation {
     const stateChanged = this.events.length > 0 || this.wormsMoved(beforeWormPositions);
 
     this.tickCount += 1;
+    const emittedEvents = this.events;
+    this.events = [];
     return {
       tick: this.tickCount,
       stateChanged,
-      events: this.events,
+      events: emittedEvents,
     };
   }
 
