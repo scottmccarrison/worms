@@ -19,6 +19,7 @@ import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
+import { UtilityDPad } from "../ui/UtilityDPad";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
 import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
 import type { Team } from "../worm/Team";
@@ -68,6 +69,11 @@ export class GameScene extends Phaser.Scene {
   private spectatorHUD: SpectatorHUD | null = null;
   private weaponDrawer!: WeaponDrawer;
   private aimHUD!: AimHUD;
+  /** Rope / jetpack d-pad. Offline-only (networked disables utilities per #65).
+   * Shown when a utility is active, hidden otherwise; visibility + callbacks
+   * are refreshed each frame in `update`. */
+  private utilityDPad: UtilityDPad | null = null;
+  private utilityDPadVisible = false;
 
   // ---- Pointer-gesture state (primary pointer only) ----
   /** Gesture state machine shared across pointer events. Stores last-release
@@ -242,6 +248,8 @@ export class GameScene extends Phaser.Scene {
       this.weaponDrawer?.destroy();
       this.aimHUD?.destroy();
       this.spectatorHUD?.destroy();
+      this.utilityDPad?.destroy();
+      this.utilityDPad = null;
       this.reconnectingOverlay?.destroy();
       this.reconnectingOverlay = null;
       this.disconnectTick?.remove(false);
@@ -303,6 +311,17 @@ export class GameScene extends Phaser.Scene {
       onEndTurnPressed: () => this.sim.endTurn(),
     });
 
+    // Utility d-pad is offline-only. In networked mode rope + jetpack are
+    // disabled per plan #65, so we never mount it.
+    if (this.offlineSim) {
+      this.utilityDPad = new UtilityDPad({
+        scene: this,
+        onLeft: (dir) => this.dispatchUtilityHorizontal(dir),
+        onUp: (active) => this.dispatchUtilityUp(active),
+        onDown: (active) => this.dispatchUtilityDown(active),
+      });
+    }
+
     // Replay the current turn so the HUD + input gates are correctly
     // primed. Offline mode's TurnManager.start() fires its onTurnStart
     // synchronously during adapter construction, before our subscribers
@@ -358,6 +377,7 @@ export class GameScene extends Phaser.Scene {
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
     this.weaponDrawer.update();
     this.aimHUD.update();
+    this.refreshUtilityDPad();
     const selectedId = this.getSelectedWeaponId();
     const weapon = allWeapons().find((w) => w.id === selectedId);
     const bodies = this.offlineSim?.terrain.bodyCount() ?? 0;
@@ -568,6 +588,64 @@ export class GameScene extends Phaser.Scene {
       return adaptRenderableToWormFacade(view);
     }
     return null;
+  }
+
+  /** Offline-only: show the d-pad when the active worm has a utility engaged,
+   *  hide it when idle. Runs every frame from `update`; cheap because all work
+   *  is gated by the visibility flag. */
+  private refreshUtilityDPad(): void {
+    if (!this.utilityDPad || !this.offlineSim) return;
+    const worm = this.offlineSim.turns.getActiveWorm();
+    const active = !!worm && (worm.isRoped() || worm.isJetPacking());
+    if (active && !this.utilityDPadVisible) {
+      this.utilityDPad.show();
+      this.utilityDPadVisible = true;
+    } else if (!active && this.utilityDPadVisible) {
+      this.utilityDPad.hide();
+      this.utilityDPadVisible = false;
+    }
+  }
+
+  /** Route horizontal d-pad input to rope (no-op horizontal) or jetpack.
+   *  Rope doesn't use horizontal directly (swing drives it); we still call
+   *  worm.walk for completeness since the offline Worm.walk guards against
+   *  roped state internally. */
+  private dispatchUtilityHorizontal(dir: -1 | 0 | 1): void {
+    if (!this.offlineSim) return;
+    const worm = this.offlineSim.turns.getActiveWorm();
+    if (!worm) return;
+    if (worm.isJetPacking()) {
+      worm.jetPackUtility.setHorizontalInput(dir);
+    }
+    // Rope: horizontal inputs don't steer the rope swing; the player swings
+    // by timing the up/down length changes. Intentionally a no-op here.
+  }
+
+  /** Up-button: jetpack thrust, or rope retract. */
+  private dispatchUtilityUp(active: boolean): void {
+    if (!this.offlineSim) return;
+    const worm = this.offlineSim.turns.getActiveWorm();
+    if (!worm) return;
+    if (worm.isJetPacking()) {
+      worm.jetPackUtility.setVerticalInput(active);
+    } else if (worm.isRoped() && active) {
+      // One-shot retract tick per frame the button is held. Update loop
+      // would be more precise but rope.adjust is called every pointer tick
+      // from the keyboard path too, so we match that contract.
+      const rate = tuning.rope.adjustRateMps / 60; // approximate per-frame nudge
+      worm.ropeUtility.adjust(-rate);
+    }
+  }
+
+  /** Down-button: rope extend only (jetpack has no "down"). */
+  private dispatchUtilityDown(active: boolean): void {
+    if (!this.offlineSim) return;
+    const worm = this.offlineSim.turns.getActiveWorm();
+    if (!worm) return;
+    if (worm.isRoped() && active) {
+      const rate = tuning.rope.adjustRateMps / 60;
+      worm.ropeUtility.adjust(+rate);
+    }
   }
 
   private getAmmoFor(id: string): number {
