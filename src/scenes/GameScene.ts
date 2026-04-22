@@ -9,7 +9,6 @@ import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
 import type {
-  CircleCut,
   ClientMsg,
   GameOverMessage,
   LobbyState,
@@ -92,6 +91,12 @@ export class GameScene extends Phaser.Scene {
   // Client-monotonic input sequence number. Server does not rely on it for
   // ordering (WebSocket is ordered) but logs it for debugging.
   private inputSeq = 0;
+  // Aim-broadcast throttle: drag-to-aim fires at 60+ Hz but we only send a
+  // max of one input_aim_{angle,power} pair per 50ms (~20 Hz). Tracks wall-
+  // clock time of the last send + the latest pending value so pointerup
+  // can flush the final state.
+  private lastAimSendMs = 0;
+  private pendingAim: { angleRad: number; power: number } | null = null;
 
   // ----- Epic 10: reconnect + disconnected-owner HUD -----
   /** Shared ReconnectingOverlay. Lazy-created on first drop. */
@@ -507,6 +512,12 @@ export class GameScene extends Phaser.Scene {
       const aimRad = Math.atan2(dy, Math.abs(dx));
       worm.setAimAngle(aimRad);
       worm.setAimPower(power);
+      // Drag-to-aim bypasses InputController's per-frame aim hook, so we
+      // forward to the network directly here. Otherwise spectators never
+      // see the arrow move during the active player's turn. Throttled to
+      // ~20 Hz (50ms between messages) so 60+Hz pointermove doesn't flood
+      // the socket; the last value is always flushed at pointerup.
+      this.throttleAimBroadcast(aimRad, power);
     });
 
     // Drag release: if distance >= deadzone, fire current weapon
@@ -515,6 +526,10 @@ export class GameScene extends Phaser.Scene {
       const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
       this.dragStart = null;
       this.dragPointerId = null;
+      // Flush the final aim state before release so spectators see the
+      // exact angle/power the fire was released with. Without this, the
+      // last throttled aim value could be a beat stale vs the fire event.
+      this.flushPendingAim();
       if (dragDist < tuning.weapons.dragDeadZonePx) return; // tap, not a drag
       this.tryFireActiveWeapon();
     });
@@ -797,6 +812,34 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * Throttled aim broadcast from drag-to-aim. Drops intermediate values
+   * that arrive within 50ms of the previous send, stashing the latest so
+   * `flushPendingAim()` can emit it on pointerup. Without throttling, a
+   * single drag gesture sends 30-60+ messages/second over the WebSocket.
+   */
+  private throttleAimBroadcast(angleRad: number, power: number): void {
+    this.pendingAim = { angleRad, power };
+    const now = Date.now();
+    if (now - this.lastAimSendMs < 50) return;
+    this.lastAimSendMs = now;
+    this.sendLocalInput({ type: "input_aim_angle", angleRad });
+    this.sendLocalInput({ type: "input_aim_power", power });
+    this.pendingAim = null;
+  }
+
+  /**
+   * Emit any pending throttled aim value immediately. Called at pointerup
+   * so the fire event is preceded by the exact aim state we're releasing at.
+   */
+  private flushPendingAim(): void {
+    if (!this.pendingAim) return;
+    const { angleRad, power } = this.pendingAim;
+    this.pendingAim = null;
+    this.sendLocalInput({ type: "input_aim_angle", angleRad });
+    this.sendLocalInput({ type: "input_aim_power", power });
+  }
+
+  /**
    * Route a relayed input message onto the currently-active remote worm.
    * Looks up the target worm by the server's `currentWormId` so if the
    * server has already rotated worms within a team, we replay onto the
@@ -816,17 +859,16 @@ export class GameScene extends Phaser.Scene {
    * ship it to the server. The server broadcasts it back as turn_resolved
    * so all clients (including us) snap to the same authoritative state.
    *
-   * Terrain cuts are carried as an empty array in this epic: all clients
-   * replay the same input stream through the same weapon + terrain logic,
-   * so locally-computed cuts already match across clients. Drift correction
-   * focuses on worm positions which ARE subject to per-client physics noise.
-   * A future epic can add a proper pending-cut log on Terrain if needed.
+   * Terrain cuts ARE carried in the snapshot now (Epic 13 playtest
+   * surfaced per-client sim drift producing different craters). The
+   * active client is authoritative; spectators apply the cut log in
+   * `turn_resolved` so everyone lands on the same terrain between turns.
    */
   protected sendTurnSnapshot(): void {
     if (!this.isNetworked || !this.room) return;
     if (!this.iAmActive()) return;
-    const emptyCuts: CircleCut[] = [];
-    const snap = buildTurnSnapshot(this.teams, emptyCuts);
+    const cuts = this.terrain.consumeTurnCuts();
+    const snap = buildTurnSnapshot(this.teams, cuts);
     this.room.send({ type: "turn_snapshot", ...snap });
   }
 

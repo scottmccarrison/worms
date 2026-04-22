@@ -36,6 +36,14 @@ export class Terrain {
   private readonly terrainBodies: Set<Body> = new Set();
   private readonly canvasTexture: Phaser.Textures.CanvasTexture;
   private pending: Array<{ x: number; y: number; r: number }> = [];
+  /**
+   * Turn-scoped cut log. Appended on every `cutCircle`, consumed by
+   * `consumeTurnCuts()` at turn end so the active client can ship the
+   * full list in `turn_snapshot`. Reset on every consume. Entries carry
+   * a monotonic `seq` for idempotent replay on spectator clients.
+   */
+  private turnCuts: Array<{ x: number; y: number; r: number; seq: number }> = [];
+  private turnCutSeq = 0;
 
   constructor(init: TerrainInit) {
     this.scene = init.scene;
@@ -69,6 +77,20 @@ export class Terrain {
   /** Queue a circular cut. Applied in next flushPendingCuts(). */
   cutCircle(xPx: number, yPx: number, rPx: number): void {
     this.pending.push({ x: xPx, y: yPx, r: rPx });
+    this.turnCutSeq += 1;
+    this.turnCuts.push({ x: xPx, y: yPx, r: rPx, seq: this.turnCutSeq });
+  }
+
+  /**
+   * Consume and return the cuts made since the last call. Used by the
+   * active client at turn end to ship the authoritative cut log in
+   * `turn_snapshot`. Spectator clients apply the returned list on
+   * `turn_resolved` to reconcile per-client sim drift.
+   */
+  consumeTurnCuts(): Array<{ x: number; y: number; r: number; seq: number }> {
+    const out = this.turnCuts;
+    this.turnCuts = [];
+    return out;
   }
 
   /**
