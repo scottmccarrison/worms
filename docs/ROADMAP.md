@@ -20,7 +20,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 | 10 | Colyseus integration: reconnection [*]   | Done     | (Epic 10 PR) | [epic-10-reconnect](plans/epic-10-reconnect.md) |
 | 11 | Source original sprite assets (Aseprite) | Todo     | -        | -                                                  |
 | 12 | Source original audio assets             | Todo     | -        | -                                                  |
-| 13 | Deploy pipeline (Cloudflare + Fly.io)    | Todo     | -        | -                                                  |
+| 13 | Deploy pipeline (Cloudflare Workers + DO) | Done    | (Epic 13 PR) | [epic-13-workers](plans/epic-13-workers.md) |
 | 14 | CI/CD                                    | Partial  | #26      | (minimal CI landed in #26; full auto-deploy TBD)   |
 | 15 | Test harness (Vitest)                    | Todo     | -        | -                                                  |
 
