@@ -357,12 +357,81 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private handleSimEvent(ev: SimEvent): void {
-    // Commit 8 fleshes this out (terrain_cut -> TerrainRenderer.cutCircle,
-    // damage_event -> flash + number, worm_died -> death animation, etc.).
-    // Here we wire the minimal terrain_cut path so server cuts show up.
-    if (ev.type === "terrain_cut" && this.terrainRenderer) {
-      this.terrainRenderer.cutCircle(ev.x, ev.y, ev.r, ev.seq);
+    switch (ev.type) {
+      case "terrain_cut":
+        // Visual mask cut (networked mode only; offline mode cuts the
+        // bodies-aware Terrain directly inside OfflineSimAdapter).
+        this.terrainRenderer?.cutCircle(ev.x, ev.y, ev.r, ev.seq);
+        // Small camera shake on large cuts. Radius 20+ counts as "big".
+        if (ev.r >= 20) {
+          this.cameras.main.shake(120, 0.003);
+        }
+        return;
+      case "fire_event":
+        // Brief camera shake for the fire muzzle. Keeps a weight of feedback
+        // since projectile sprites only render after the next sim_state.
+        this.cameras.main.shake(60, 0.0015);
+        return;
+      case "damage_event": {
+        // Floating damage number at the impact point.
+        this.spawnDamageNumber(ev.impact.x, ev.impact.y, ev.amount);
+        // Flash the worm's sprite red if we have one (networked path).
+        const sprite = this.wormSprites.get(ev.wormId);
+        if (sprite) {
+          this.tweens.killTweensOf(sprite.graphics);
+          sprite.graphics.setAlpha(1);
+          this.tweens.add({
+            targets: sprite.graphics,
+            alpha: { from: 1, to: 0.3 },
+            yoyo: true,
+            duration: 150,
+            repeat: 1,
+          });
+        }
+        return;
+      }
+      case "worm_died": {
+        // Fade the worm's sprite down (networked path). Offline path uses
+        // Worm.applyPendingDamage which fades locally.
+        const sprite = this.wormSprites.get(ev.wormId);
+        if (sprite) {
+          this.tweens.killTweensOf(sprite.graphics);
+          this.tweens.add({
+            targets: sprite.graphics,
+            alpha: { from: sprite.graphics.alpha, to: 0.2 },
+            duration: 300,
+          });
+        }
+        this.cameras.main.shake(80, 0.002);
+        return;
+      }
     }
+  }
+
+  /**
+   * Transient damage-number text that floats up and fades. Spawned by
+   * damage_event. Auto-destroys after the tween completes.
+   */
+  private spawnDamageNumber(xPx: number, yPx: number, amount: number): void {
+    if (amount <= 0) return;
+    const txt = this.add
+      .text(xPx, yPx, `-${amount}`, {
+        fontSize: "18px",
+        fontFamily: "monospace",
+        color: "#ff4444",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(50);
+    this.tweens.add({
+      targets: txt,
+      y: yPx - 30,
+      alpha: { from: 1, to: 0 },
+      duration: 800,
+      ease: "Quad.easeOut",
+      onComplete: () => txt.destroy(),
+    });
   }
 
   private handleGameOver(winnerTeamId: string | null): void {
