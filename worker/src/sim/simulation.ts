@@ -327,13 +327,15 @@ export class Simulation {
       this.projectiles.splice(i, 1);
     }
 
-    // 5. Off-map kill floor: any worm pushed below heightPx + margin
-    //    is marked dead. Absorbs issue #53.
-    const killY = (this.heightPx + OFF_MAP_MARGIN_PX) / 30; // meters
+    // 5. Off-map kill: any worm pushed outside the map (in any direction,
+    //    plus a margin) is marked dead. Absorbs issue #53.
+    const killMin = -OFF_MAP_MARGIN_PX / 30; // meters
+    const killMaxX = (this.widthPx + OFF_MAP_MARGIN_PX) / 30;
+    const killMaxY = (this.heightPx + OFF_MAP_MARGIN_PX) / 30;
     for (const worm of this.worms.values()) {
       if (!worm.alive) continue;
       const pos = worm.body.getPosition();
-      if (pos.y > killY) {
+      if (pos.x < killMin || pos.x > killMaxX || pos.y < killMin || pos.y > killMaxY) {
         worm.kill();
         if (!this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);

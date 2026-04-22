@@ -65,8 +65,6 @@ export function createGestureTracker(): {
 } {
   let mode: Mode = "idle";
   let walkSide: -1 | 1 | 0 = 0;
-  let downTimeMs = 0;
-  let longPressMs = 0;
   // Tracked across gestures for double-tap detection.
   let lastWalkReleaseAtMs = Number.NEGATIVE_INFINITY;
   let lastWalkReleaseSide: -1 | 1 | 0 = 0;
@@ -86,9 +84,6 @@ export function createGestureTracker(): {
       if (!input.myTurn || input.wormXPx === null || input.wormYPx === null) {
         return [{ kind: "ignored" }];
       }
-
-      downTimeMs = input.nowMs;
-      longPressMs = input.longPressMs;
 
       // Worm hit test: on-worm touch enters AIM mode even if a utility is
       // active (so the user can re-aim while roped, matching keyboard).
@@ -130,7 +125,6 @@ export function createGestureTracker(): {
 
     processUp(nowMs: number): GestureOutcome[] {
       const currentMode = mode;
-      const heldMs = nowMs - downTimeMs;
       const side = walkSide;
       const wasDoubleTap = pendingDoubleTap;
 
@@ -144,13 +138,6 @@ export function createGestureTracker(): {
       }
 
       if (currentMode === "walk" && (side === -1 || side === 1)) {
-        // Long-press wins over double-tap (user held the finger down for
-        // 400ms+, they didn't mean "jump quickly").
-        if (heldMs >= longPressMs) {
-          lastWalkReleaseAtMs = Number.NEGATIVE_INFINITY;
-          lastWalkReleaseSide = 0;
-          return [{ kind: "walk_release" }, { kind: "backflip" }];
-        }
         if (wasDoubleTap) {
           // Consume the double-tap: reset timestamps so a triple-tap
           // doesn't also fire.
@@ -159,7 +146,8 @@ export function createGestureTracker(): {
           return [{ kind: "walk_release" }, { kind: "jump" }];
         }
         // Plain walk release. Record timestamp + side so the NEXT gesture
-        // can detect a double-tap.
+        // can detect a double-tap. Backflip intentionally has no touch
+        // gesture (tracked in #75); keyboard Backspace still works.
         lastWalkReleaseAtMs = nowMs;
         lastWalkReleaseSide = side;
         return [{ kind: "walk_release" }];
