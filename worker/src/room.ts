@@ -191,6 +191,14 @@ export class Room implements DurableObject {
 
     await this.loadState();
 
+    // Security: reject upgrades against a DO slot that has never been
+    // /init'd. idFromName is deterministic, so without this check an
+    // attacker could hit wss://host/worms/api/room/ZZZZ directly and
+    // create a phantom lobby for a code the Worker never issued.
+    if (!this.code) {
+      return new Response("room not found", { status: 404 });
+    }
+
     // Parse the query string for nickname / color / resumeToken.
     const nickname = normaliseNickname(url.searchParams.get("nickname") ?? "");
     const colorRaw = url.searchParams.get("color") ?? "";

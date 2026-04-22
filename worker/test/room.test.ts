@@ -223,6 +223,27 @@ describe("Room integration", () => {
     alice2.close();
   });
 
+  it("rejects WebSocket upgrade against an uninitialised room code", async () => {
+    // HIGH 3 regression: Room DOs are addressed by idFromName(code), so
+    // any 4-letter code deterministically maps to a DO slot even when
+    // the Worker never /init'd it. Without the guard, an attacker could
+    // open wss://.../api/room/ZZZZ and squat a phantom lobby.
+    const params = new URLSearchParams({ nickname: "Mallory", color: "#ff4444" });
+    const ws = new WebSocket(`${baseWs}/api/room/ZZZZ?${params.toString()}`);
+    let unexpectedResponse: { statusCode: number } | undefined;
+    await new Promise<void>((resolve) => {
+      ws.on("unexpected-response", (_req, res) => {
+        unexpectedResponse = { statusCode: res.statusCode ?? 0 };
+        resolve();
+      });
+      ws.on("error", () => resolve());
+      ws.on("close", () => resolve());
+      ws.on("open", () => resolve());
+    });
+    expect(ws.readyState === ws.OPEN ? "open" : "not-open").toBe("not-open");
+    if (unexpectedResponse) expect(unexpectedResponse.statusCode).toBe(404);
+  });
+
   it("rejects invalid nicknames on join", async () => {
     const code = await createRoom();
     const params = new URLSearchParams({ nickname: "", color: "#ff4444" });
