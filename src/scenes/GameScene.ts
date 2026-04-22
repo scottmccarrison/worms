@@ -6,7 +6,7 @@ import { firstId, getById, nextId } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
-import type { ClientMsg, TeamInit as NetTeamInit } from "../net/types";
+import type { TeamInit as NetTeamInit } from "../net/types";
 import type { RoomHandle } from "../net/wsClient";
 import { NetworkedSimAdapter } from "../sim/NetworkedSimAdapter";
 import { OfflineSimAdapter } from "../sim/OfflineSimAdapter";
@@ -96,9 +96,8 @@ export class GameScene extends Phaser.Scene {
   // This map is only present in offline mode so the weapon drawer UI can
   // read authoritative ammo counts.
 
-  // ---- Drag-to-aim throttle (networked mode only) ----
-  private lastAimSendMs = 0;
-  private pendingAim: { angleRad: number; power: number } | null = null;
+  // Aim throttling lives inside NetworkedSimAdapter now; scene dispatches
+  // every pointermove and the adapter decides when to fire a wire message.
 
   // (Active-worm tracking flows through the adapter's onTurnChanged hook;
   // no field needed at this layer.)
@@ -687,11 +686,11 @@ export class GameScene extends Phaser.Scene {
         this.sim.setFacing(-worm.facing as -1 | 1);
       }
       const aimRad = Math.atan2(dy, Math.abs(dx));
+      // Single path: adapter decides whether to mutate locally (offline)
+      // or forward to the room with throttling (networked). The scene no
+      // longer duplicates the aim send.
       this.sim.setAimAngle(aimRad);
       this.sim.setAimPower(power);
-      if (this.isNetworked) {
-        this.throttleAimBroadcast(aimRad, power);
-      }
     });
 
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
@@ -699,38 +698,11 @@ export class GameScene extends Phaser.Scene {
       const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
       this.dragStart = null;
       this.dragPointerId = null;
-      if (this.isNetworked) this.flushPendingAim();
       if (dragDist < tuning.weapons.dragDeadZonePx) return;
+      // sim.fire() flushes any pending aim before the fire message lands,
+      // so the server sees the exact release angle + power.
       this.sim.fire();
     });
-  }
-
-  /**
-   * Drag-to-aim throttle. Pointermove fires up to 60Hz; we coalesce to
-   * 20Hz on the network side so the socket doesn't flood. The last
-   * pending value is flushed at pointerup so the fire event is preceded
-   * by the exact aim state we released at.
-   */
-  private throttleAimBroadcast(angleRad: number, power: number): void {
-    this.pendingAim = { angleRad, power };
-    const now = Date.now();
-    if (now - this.lastAimSendMs < 50) return;
-    this.lastAimSendMs = now;
-    this.sendInput({ type: "input_aim_angle", angleRad, seq: 0 });
-    this.sendInput({ type: "input_aim_power", power, seq: 0 });
-    this.pendingAim = null;
-  }
-
-  private flushPendingAim(): void {
-    if (!this.pendingAim) return;
-    const { angleRad, power } = this.pendingAim;
-    this.pendingAim = null;
-    this.sendInput({ type: "input_aim_angle", angleRad, seq: 0 });
-    this.sendInput({ type: "input_aim_power", power, seq: 0 });
-  }
-
-  private sendInput(msg: ClientMsg): void {
-    this.room?.send(msg);
   }
 }
 

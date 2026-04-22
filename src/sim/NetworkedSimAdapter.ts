@@ -99,6 +99,16 @@ export class NetworkedSimAdapter implements SimAdapter {
   private lastActiveWormId = "";
   private lastTurnEndsAt = 0;
 
+  // Aim throttling: drag-to-aim fires at 60+Hz but we only send max
+  // one input_aim_{angle,power} pair every 50ms (20Hz). The last value
+  // is remembered so a subsequent flush lands the final state before
+  // the fire message.
+  private lastAimSendMs = 0;
+  private pendingAimAngle: number | null = null;
+  private pendingAimPower: number | null = null;
+  /** Cache last walk dir so a second walk(0) after a walk(1) doesn't re-send. */
+  private lastWalkDir: -1 | 0 | 1 | null = null;
+
   constructor(init: NetworkedSimAdapterInit) {
     this.room = init.room;
     this.frameIntervalMs = init.frameIntervalMs ?? 50;
@@ -178,6 +188,10 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   walk(dir: -1 | 0 | 1): void {
+    // Transition-only send: walk() is called every frame by InputController
+    // while a key is held; the server only needs press/release edges.
+    if (dir === this.lastWalkDir) return;
+    this.lastWalkDir = dir;
     this.send({ type: "input_walk", dir, seq: this.nextSeq() });
   }
 
@@ -190,11 +204,13 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   setAimAngle(rad: number): void {
-    this.send({ type: "input_aim_angle", angleRad: rad, seq: this.nextSeq() });
+    this.pendingAimAngle = rad;
+    this.maybeFlushAim();
   }
 
   setAimPower(p: number): void {
-    this.send({ type: "input_aim_power", power: p, seq: this.nextSeq() });
+    this.pendingAimPower = p;
+    this.maybeFlushAim();
   }
 
   setFacing(_dir: -1 | 1): void {
@@ -208,6 +224,9 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   fire(): void {
+    // Flush any pending aim state so the server sees the exact release
+    // angle + power immediately before the fire message.
+    this.flushPendingAim();
     this.send({ type: "input_fire", seq: this.nextSeq() });
   }
 
@@ -228,6 +247,9 @@ export class NetworkedSimAdapter implements SimAdapter {
 
   update(_dtMs: number): void {
     this.applyInterpolatedFrameToRenderState(Date.now());
+    // If the caller stopped feeding us aim updates but we still have a
+    // pending value (e.g. user released the drag gesture), flush now.
+    this.maybeFlushAim();
   }
 
   destroy(): void {
@@ -314,6 +336,35 @@ export class NetworkedSimAdapter implements SimAdapter {
 
   private send(msg: ClientMsg): void {
     this.room.send(msg);
+  }
+
+  /** Send the pending aim values now if > 50ms since last send. */
+  private maybeFlushAim(): void {
+    const now = Date.now();
+    if (now - this.lastAimSendMs < 50) return;
+    this.flushPendingAim();
+  }
+
+  /** Drain pendingAim* and fire the matching input_aim_{angle,power} messages. */
+  private flushPendingAim(): void {
+    if (this.pendingAimAngle === null && this.pendingAimPower === null) return;
+    this.lastAimSendMs = Date.now();
+    if (this.pendingAimAngle !== null) {
+      this.send({
+        type: "input_aim_angle",
+        angleRad: this.pendingAimAngle,
+        seq: this.nextSeq(),
+      });
+      this.pendingAimAngle = null;
+    }
+    if (this.pendingAimPower !== null) {
+      this.send({
+        type: "input_aim_power",
+        power: this.pendingAimPower,
+        seq: this.nextSeq(),
+      });
+      this.pendingAimPower = null;
+    }
   }
 
   /**
