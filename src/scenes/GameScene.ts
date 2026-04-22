@@ -292,6 +292,7 @@ export class GameScene extends Phaser.Scene {
     this.touchControls = new TouchControls({
       scene: this,
       getActiveWorm: () => this.getActiveWormAdapter(),
+      networked: this.isNetworked,
     });
     this.weaponDrawer = new WeaponDrawer({
       scene: this,
