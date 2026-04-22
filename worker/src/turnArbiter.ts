@@ -27,6 +27,8 @@ export const DISCONNECT_GRACE_MS = 60_000;
 /** Provider of authoritative alive counts (the Simulation). */
 export interface AliveCountsProvider {
   aliveWormsByTeam(): Map<string, number>;
+  /** Per-worm liveness so the arbiter can skip dead worms during rotation. */
+  isWormAlive(wormId: string): boolean;
 }
 
 /**
@@ -338,18 +340,26 @@ export class TurnArbiter {
     const roster = this.teamRosters.get(teamId);
     if (!roster || roster.wormIds.length === 0) return "";
 
-    // Simple cursor rotation. The Simulation provider only exposes
-    // aliveWormsByTeam() aggregate counts, not per-worm liveness, so
-    // we can't skip dead worms at this layer; instead the turn
-    // rotation's alive-count filter in advanceTurn prevents the
-    // team from being selected when its count is 0, and a dead-
-    // but-selected worm just receives no input (its walk / fire
-    // calls are no-ops when alive=false).
+    // Cursor rotation that skips dead worms. advanceTurn pre-filters teams
+    // by teamAliveCount > 0, so at least one alive worm exists here; we
+    // scan forward from the cursor for up to n steps to find them.
+    const provider = this.room.getAliveCountsProvider();
     const startCursor = this.teamWormCursor.get(teamId) ?? 0;
-    const idx = startCursor % roster.wormIds.length;
-    const wormId = roster.wormIds[idx];
-    this.teamWormCursor.set(teamId, (idx + 1) % roster.wormIds.length);
-    return wormId;
+    const n = roster.wormIds.length;
+    for (let step = 0; step < n; step++) {
+      const idx = (startCursor + step) % n;
+      const wormId = roster.wormIds[idx];
+      if (!wormId) continue;
+      // If no provider (shouldn't happen once the sim is bound), fall back
+      // to the historical behavior of just returning the cursor position.
+      if (!provider || provider.isWormAlive(wormId)) {
+        this.teamWormCursor.set(teamId, (idx + 1) % n);
+        return wormId;
+      }
+    }
+    // All worms in this team are dead - unreachable given the caller's
+    // pre-filter, but return empty so a stale pointer is never selected.
+    return "";
   }
 
   private checkGameOver(): void {
