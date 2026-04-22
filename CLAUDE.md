@@ -4,7 +4,7 @@ Project-specific instructions for Claude sessions working in this repo. Override
 
 ## Mission
 
-Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.me/worms`, one hosts a room with a 4-letter code, others join. The shell is done; the current phase is taking the nine-weapon core from "prototype that works" to "playtest-ready product that reads as a finished game". Content expansion (more weapons, modes, rope netcode) waits until that polish lands.
+Browser-based multiplayer turn-based artillery combat in procedurally generated Terraria-style worlds. Friends visit `mccarrison.me/worms`, one hosts a room with a 4-letter code, others join. Classic Worms gameplay (teams, 9 weapons, wind/water/fall-damage, 45s turns, retreat window) set inside a scrolling tile-based world with caves + biomes. See [ADR-003](docs/decisions/003-terraria-world-pivot.md).
 
 ## Target platforms (first-class)
 
@@ -23,14 +23,16 @@ Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.
 
 ## Status
 
-**Phase**: Playtest-ready MVP (M5). Shell complete through Epic 13 (Cloudflare deploy) + Epic 45 (server-auth sim) + Epic 32 (mobile touch) + jetpack netcode. Shipped and live at mccarrison.me/worms.
+**Phase**: M6 Worms-in-Terraria-world. Shell + playtest polish (M1-M5) complete. Classic Worms mechanics live (wind/water/fall-damage/retreat), 8 geometric arena maps shipped as fallback, mobile touch + PWA + reconnect all working. Live at mccarrison.me/worms.
 
 **Next, in order:**
-1. **Classic Worms Feel** epic — bundle of #19 wind + #20 water + #21 fall damage/retreat. Pure code, biggest feel-upgrade per hour.
-2. **Real arena maps** (#41). Replace procgen trig shapes with hand-built pixel-mask arenas.
-3. **Sprites + audio** (#11 + #12). Asset-sourcing epic; inventory filed separately. Can run in parallel with code work.
+1. **Phase 1**: world size + scrolling camera + tile-atlas loader + single-biome tile-texture fill + basic heightmap surface gen.
+2. **Phase 2**: cave carving + decoration stamps + 3-4 biome presets + parallax backdrop.
+3. **Phase 3**: polish (biome ambient, weather, lighting).
 
-**Deferred until MVP lands**: weapon expansion (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23), backflip on mobile (#75).
+See [ADR-003](docs/decisions/003-terraria-world-pivot.md) for the rationale and scope boundaries of the world pivot.
+
+**Deferred until M6 lands**: weapon expansion (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23), backflip on mobile (#75), jetpack radial (#91).
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full state and [docs/decisions/](docs/decisions/) for architecture decision records.
 

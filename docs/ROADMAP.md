@@ -4,19 +4,28 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 
 > **Framework pivot 2026-04-20**: stack is now Phaser 3 + planck + Colyseus + Aseprite. See [ADR-001](decisions/001-framework-pivot.md). Epic descriptions below reflect the new approach; issue bodies were updated with pivot notes.
 
-## Playtest-ready MVP focus (2026-04-22)
+## Worms-in-Terraria-world direction (2026-04-22)
 
-The core shell is playable end-to-end (rooms, reconnect, server-auth sim, 9 weapons, touch controls, PWA, jetpack). Next phase stops adding breadth and deepens the existing feature set so the game reads as a polished product, not a prototype. Once that's done, weapon/mode expansion drops in without friction.
+Playtest feedback on the 1280x720 geometric-arena MVP was "maps are small and boring." After exploring options (see [ADR-003](decisions/003-terraria-world-pivot.md)), the new direction is:
 
-**Three epics to reach playtest-ready MVP, in order:**
+**Keep the turn-based Worms gameplay loop exactly as-is. Drop it inside a procedurally generated Terraria-style side-scrolling world.** The world is the new visual + gen layer; the game that happens inside it (teams, 9 weapons, wind/water/fall damage, 45s turns, retreat window) is unchanged.
 
-1. **Classic Worms Feel** (bundle of #19 wind + #20 water + #21 fall damage/retreat). Pure code, biggest gameplay-feel delta, ships as one integration PR.
-2. **Real arena maps** (#41, with #22 as a stretch). Replace procgen trig shapes with 3-5 hand-built pixel-mask arenas. No art dependency.
-3. **Sprites + audio** (#11 + #12). Asset-sourcing epic (OpenGameArt / Freesound / commission gaps). Concrete inventory will be filed alongside so sourcing is parallelizable.
+The pixel-mask physics model is actually _better_ suited to this than to full Terraria (pixel-perfect crater destruction still works; tile rendering is purely a visual composite over the alpha mask).
 
-Deferred until after MVP lands: weapon expansion (#16/#17/#39), rope in networked mode (#82), game modes (#24), replay/bots (#25), team customization (#23), backflip on mobile (#75).
+**Phased delivery:**
 
-Rationale: 15 more weapons on geometric shapes over trig-shape terrain is still a prototype. One tuned wind + rising water + real arenas + real sprites turns the existing nine weapons into a complete game.
+- **Phase 1** (current epic): world size 2560x1024+ with scrolling camera, tile-atlas loader, single-biome tile-texture fill, basic heightmap surface gen. Proves the pattern; 10x visual upgrade on its own.
+- **Phase 2**: cave carving (cellular automata / noise), decoration stamps (trees, rocks, ore), 3-4 biome presets, parallax backdrop.
+- **Phase 3**: polish - biome-specific ambient (particles, tint), optional weather.
+
+**What stays the same**: turn arbiter, teams, 9 weapons, planck rigid bodies, per-pixel destruction, Cloudflare DO netcode, reconnection, mobile touch, wind/water/fall-damage/retreat. Nothing in the gameplay layer changes.
+
+**Superseded by this direction**:
+- "Real arena maps" (#41, shipped in PR #94) stays as fallback/test content; procgen replaces it for production.
+- "Sprites + audio" (#84 inventory, #11 sprites) narrows - tile art comes from Kenney / OpenGameArt CC0 packs, not commissioning. Worm + weapon + VFX sprites still needed.
+- "Procedural map generation + themes" (#22) is absorbed into this epic.
+
+**Still deferred until Phase 1+ lands**: weapon expansion (#16/#17/#39), rope in networked mode (#82), game modes (#24), replay/bots (#25), team customization (#23), backflip on mobile (#75), jetpack radial (#91).
 
 ## MVP epics
 
@@ -62,10 +71,11 @@ Rationale: 15 more weapons on geometric shapes over trig-shape terrain is still 
 - **M2 Single-player playable** (Phaser + planck): #3 → #4 → #5 → #6 → #7 — **DONE**
 - **M3 Multiplayer** (Colyseus integration, collapsed; ultimately ported to Cloudflare DOs): #8/#9/#10 + #45 — **DONE**
 - **M4 Deployed**: #13 — **DONE** (mccarrison.me/worms)
-- **M5 Playtest-ready MVP** (current phase): Classic Worms Feel (#19/#20/#21) → real arena maps (#41) → sprites + audio (#11/#12)
-- **M6 Content expansion** (post-MVP): weapons (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23)
+- **M5 Playtest polish**: Classic Worms Feel (#19/#20/#21) + real arena maps (#41) — **DONE** (shipped in PRs #86 + #94)
+- **M6 Worms-in-Terraria-world** (current phase): Phase 1 (world + tile rendering + basic gen) → Phase 2 (caves + biomes + backdrop) → Phase 3 (polish). See [ADR-003](decisions/003-terraria-world-pivot.md).
+- **M7 Content expansion** (post-world-pivot): weapons (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23), replay/bots (#25)
 
-Parallelization: asset sourcing (#11, #12) doesn't block code work and can run alongside M5 gameplay epics once an inventory is settled.
+Parallelization: tile-pack sourcing (#84 revised scope) doesn't block code work and can run alongside Phase 1. Worm/weapon/VFX sprite sourcing (#11 narrower scope) can run throughout M6.
 
 ## Session log
 
