@@ -78,15 +78,31 @@ export class UtilityDPad {
 
     for (const b of [this.leftBtn, this.rightBtn, this.upBtn, this.downBtn]) {
       b.setAlpha(tuning.touch.buttonIdleAlpha);
+      // Start non-interactive since the container is hidden; show() re-enables.
+      b.disableInteractive();
     }
   }
 
   show(): void {
     this.container.setVisible(true);
+    // Re-enable hit-testing on each button; setInteractive() is a no-op
+    // if already interactive so this is safe to call repeatedly.
+    for (const b of [this.leftBtn, this.rightBtn, this.upBtn, this.downBtn]) {
+      b.setInteractive({
+        hitArea: new Phaser.Geom.Circle(0, 0, tuning.touch.buttonRadiusPx),
+        hitAreaCallback: Phaser.Geom.Circle.Contains,
+      });
+    }
   }
 
   hide(): void {
     this.container.setVisible(false);
+    // Disable hit-testing on each button. Phaser's setVisible(false) does
+    // NOT disable interactivity, so without this the invisible d-pad would
+    // swallow taps meant for the weapon drawer / HUD underneath.
+    for (const b of [this.leftBtn, this.rightBtn, this.upBtn, this.downBtn]) {
+      b.disableInteractive();
+    }
     // Release any held directions when hiding so the utility doesn't think
     // the user is still pressing.
     if (this.leftHeld || this.rightHeld) {

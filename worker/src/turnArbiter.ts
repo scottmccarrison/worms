@@ -195,9 +195,20 @@ export class TurnArbiter {
    * ignored so the player can't sneak another fire after the timer hits 0).
    */
   canFire(): boolean {
+    if (!this.areInputsAccepted()) return false;
+    if (this.hasFiredThisTurn) return false;
+    return true;
+  }
+
+  /**
+   * Broader gate used by the Room for any action input (walk, jump, aim,
+   * fire, jetpack). Once the turn timer hits 0 we lock the active worm's
+   * inputs so only physics continues during settle grace. Also rejects
+   * during game-over and disconnect pause.
+   */
+  areInputsAccepted(): boolean {
     if (this.gameOver) return false;
     if (this.pausedRemainingMs !== null) return false;
-    if (this.hasFiredThisTurn) return false;
     if (Date.now() > this.room.state.turnEndsAt) return false;
     return true;
   }
