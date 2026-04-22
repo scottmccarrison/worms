@@ -234,14 +234,12 @@ export class Room implements DurableObject {
         // Clear disconnect flags on resume.
         restored.disconnected = false;
         restored.disconnectGraceEndsAt = 0;
-        // Restore nickname + color the client asked for, if valid.
-        if (
-          (ALLOWED_COLORS as readonly string[]).includes(colorRaw) &&
-          !this.isColorTakenBySomeoneElse(colorRaw, entry.sessionId)
-        ) {
-          restored.color = colorRaw;
-        }
-        restored.nickname = nickname;
+        // Preserve the stored nickname / color on resume. The URL params
+        // on a reconnect are whatever the client sends; if the user
+        // changed them mid-lobby, they want the mid-lobby values to
+        // survive, not be clobbered by the defaults the client rebuilt
+        // from local storage. Clients can send set_nickname / set_color
+        // after resuming if they really want to change them.
         player = restored;
 
         const newToken = generateResumeToken();

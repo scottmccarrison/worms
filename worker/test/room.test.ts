@@ -244,6 +244,49 @@ describe("Room integration", () => {
     if (unexpectedResponse) expect(unexpectedResponse.statusCode).toBe(404);
   });
 
+  it("resume preserves stored nickname + color even when URL params differ", async () => {
+    // MEDIUM 5 regression: previously, the resume path unconditionally
+    // wrote URL-supplied nickname (and color when valid) over the
+    // stored values. Mid-lobby edits made via set_nickname / set_color
+    // would be clobbered on reconnect.
+    const code = await createRoom();
+    const alice1 = await joinRoom(code, "Alice", "#ff4444");
+    const welcome1 = (await alice1.waitFor((m) => m.type === "welcome")) as unknown as {
+      sessionId: string;
+      resumeToken: string;
+    };
+
+    // Change nickname + color after joining.
+    alice1.send({ type: "set_nickname", nickname: "Alicia" });
+    await alice1.waitFor((m) => {
+      if (m.type !== "state") return false;
+      const players = (m.state as { players: Record<string, { nickname: string }> }).players;
+      return players[welcome1.sessionId]?.nickname === "Alicia";
+    });
+    alice1.send({ type: "set_color", color: "#44dd44" });
+    await alice1.waitFor((m) => {
+      if (m.type !== "state") return false;
+      const players = (m.state as { players: Record<string, { color: string }> }).players;
+      return players[welcome1.sessionId]?.color === "#44dd44";
+    });
+
+    const token = welcome1.resumeToken;
+    alice1.close();
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Reconnect using OLD defaults in the URL. Server should ignore
+    // them and preserve the lobby-edited values.
+    const alice2 = await joinRoom(code, "Alice", "#ff4444", token);
+    const welcome2 = (await alice2.waitFor((m) => m.type === "welcome")) as unknown as {
+      sessionId: string;
+      state: { players: Record<string, { nickname: string; color: string }> };
+    };
+    const row = welcome2.state.players[welcome1.sessionId];
+    expect(row.nickname).toBe("Alicia");
+    expect(row.color).toBe("#44dd44");
+    alice2.close();
+  });
+
   it("rejects invalid nicknames on join", async () => {
     const code = await createRoom();
     const params = new URLSearchParams({ nickname: "", color: "#ff4444" });
