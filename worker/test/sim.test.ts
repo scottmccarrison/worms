@@ -8,7 +8,6 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { toMeters } from "../src/physics/scale.js";
 import { type SimEvent, type SimTeamInit, Simulation } from "../src/sim/simulation.js";
 
 const WIDTH = 1280;

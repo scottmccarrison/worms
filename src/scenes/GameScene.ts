@@ -81,6 +81,12 @@ export class GameScene extends Phaser.Scene {
   private isNetworked = false;
   private mySessionId = "";
   private myTeamId = "";
+  // Authoritative geometry from server's game_started. Networked mode uses
+  // these instead of calling loadMap() locally so server physics + client
+  // visuals align pixel-perfect.
+  private serverMask: string | null = null;
+  private serverWidthPx: number | null = null;
+  private serverHeightPx: number | null = null;
 
   // ---- Networked-mode: monotonic ids for server-spawned projectiles ----
 
@@ -112,6 +118,14 @@ export class GameScene extends Phaser.Scene {
     teams?: NetTeamInit[];
     room?: RoomHandle;
     netClient?: NetClient;
+    /** Base64 Uint8Array mask from the server's game_started. Networked
+     *  mode uses this as the source of truth for visual terrain; offline
+     *  falls back to loadMap(). */
+    mask?: string;
+    /** Authoritative spawn points from the server (paired with mask). */
+    spawnPoints?: Array<{ xPx: number; yPx: number }>;
+    widthPx?: number;
+    heightPx?: number;
   }): void {
     const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
@@ -121,6 +135,11 @@ export class GameScene extends Phaser.Scene {
     this.netClient = data?.netClient;
     this.isNetworked = !!this.room;
     this.mySessionId = this.room?.sessionId ?? "";
+    this.serverMask = data?.mask ?? null;
+    this.serverWidthPx = data?.widthPx ?? null;
+    this.serverHeightPx = data?.heightPx ?? null;
+    // spawnPoints in game_started are for the server's physics only; the
+    // client doesn't need them since worm positions arrive via sim_state.
     registerMapCycleFn((id: string) => {
       this.scene.restart({ mapId: id });
     });
@@ -132,8 +151,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    const loaded = loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride);
-
     // Build the team roster once; both adapters use the same shape.
     const teamsForAdapter = this.buildAdapterTeams(this.teamsInit);
 
@@ -141,12 +158,20 @@ export class GameScene extends Phaser.Scene {
     // Pick the adapter. Everything sim-related flows through it.
     // ------------------------------------------------------------------
     if (this.isNetworked && this.room) {
-      // Networked path: server owns the sim. Scene owns the visual terrain.
+      // Networked path: the server is authoritative for geometry. Paint
+      // the received mask into a canvas for the visual terrain.
+      const maskCanvas = this.serverMask
+        ? decodeServerMaskToCanvas(
+            this.serverMask,
+            this.serverWidthPx ?? this.scale.width,
+            this.serverHeightPx ?? this.scale.height,
+          )
+        : loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride).mask;
       this.terrainRenderer = new TerrainRenderer({
         scene: this,
-        widthPx: this.scale.width,
-        heightPx: this.scale.height,
-        sourceMask: loaded.mask,
+        widthPx: this.serverWidthPx ?? this.scale.width,
+        heightPx: this.serverHeightPx ?? this.scale.height,
+        sourceMask: maskCanvas,
       });
       this.networkedSim = new NetworkedSimAdapter({
         room: this.room,
@@ -155,6 +180,7 @@ export class GameScene extends Phaser.Scene {
       this.sim = this.networkedSim;
     } else {
       // Offline path: adapter owns everything physics-touching.
+      const loaded = loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride);
       this.offlineSim = new OfflineSimAdapter({
         scene: this,
         loaded,
@@ -832,4 +858,41 @@ function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
     },
   } as unknown as Worm;
   return facade;
+}
+
+/**
+ * Decode the server's base64 Uint8Array mask into an HTMLCanvasElement
+ * painted with the usual terrain color, ready for Terrain / TerrainRenderer
+ * to consume as its `sourceMask`. 1 byte per pixel: solid (1) or air (0).
+ */
+function decodeServerMaskToCanvas(
+  base64: string,
+  widthPx: number,
+  heightPx: number,
+): HTMLCanvasElement {
+  const raw = atob(base64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("decodeServerMaskToCanvas: no 2d context");
+
+  // Paint solid pixels using the default terrain green. Row-major byte
+  // layout matches the server's buildFlatMask / host's mask extraction.
+  const img = ctx.createImageData(widthPx, heightPx);
+  for (let i = 0; i < bytes.length; i++) {
+    const j = i * 4;
+    if (bytes[i]) {
+      img.data[j] = 0x5a;
+      img.data[j + 1] = 0x7a;
+      img.data[j + 2] = 0x3c;
+      img.data[j + 3] = 0xff;
+    }
+    // else: leave transparent (air).
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
 }

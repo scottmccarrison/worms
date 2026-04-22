@@ -400,7 +400,7 @@ export class Room implements DurableObject {
         this.onSelectMap(ws, player, msg);
         break;
       case "start_game":
-        await this.onStartGame(ws, player);
+        await this.onStartGame(ws, player, msg);
         break;
       case "input_walk":
       case "input_jump":
@@ -608,7 +608,7 @@ export class Room implements DurableObject {
     this.broadcastState();
   }
 
-  private async onStartGame(ws: WebSocket, player: LobbyPlayer): Promise<void> {
+  private async onStartGame(ws: WebSocket, player: LobbyPlayer, msg: unknown): Promise<void> {
     const lobby = this.ensureLobby();
     if (!player.isHost) {
       this.sendError(ws, "not_host", "Only the host may start the game.");
@@ -641,8 +641,6 @@ export class Room implements DurableObject {
     }
 
     const teamOrder = shuffle(teams.map((t) => t.id));
-    this.broadcast({ type: "game_started", mapId: lobby.selectedMapId, seed, teams });
-    lobby.phase = "playing";
 
     const rosters: TeamRoster[] = teams.map((t) => ({
       id: t.id,
@@ -652,19 +650,56 @@ export class Room implements DurableObject {
     this.rosters = rosters;
     await this.persistRosters();
 
-    // Instantiate the authoritative Simulation. The server builds a
-    // simple flat map mask (a thick floor strip) + fixed spawn points
-    // derived from team ordering. Clients build their own matching
-    // visual map from the broadcast seed + mapId; geometry consistency
-    // is W2/W3's integration problem.
-    const mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+    // Use the host-provided map mask + spawn points if they came with
+    // start_game. Host's client ran loadMap(selectedMapId, ...) which uses
+    // Canvas2D generators that don't run on the Workers runtime. The host
+    // ships the resulting mask and spawn points so all clients (including
+    // the server's physics sim) operate on pixel-identical geometry.
+    //
+    // Fallback to the flat test map is retained for backcompat / tests.
+    const startMsg = msg as {
+      mask?: string;
+      spawnPoints?: Array<{ xPx: number; yPx: number }>;
+    };
+    const hostMask = typeof startMsg.mask === "string" ? startMsg.mask : null;
+    const hostSpawns = Array.isArray(startMsg.spawnPoints) ? startMsg.spawnPoints : null;
+    let mask: Uint8Array;
+    let mapSpawns: Array<{ xPx: number; yPx: number }>;
+    if (hostMask && hostSpawns && hostSpawns.length > 0) {
+      try {
+        mask = base64ToBytes(hostMask);
+        if (mask.length !== WORLD_WIDTH_PX * WORLD_HEIGHT_PX) {
+          throw new Error(`mask length ${mask.length} != ${WORLD_WIDTH_PX * WORLD_HEIGHT_PX}`);
+        }
+        mapSpawns = hostSpawns;
+      } catch (err) {
+        console.warn("[start_game] bad mask from host, using flat fallback:", err);
+        mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+        mapSpawns = [];
+      }
+    } else {
+      mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+      mapSpawns = [];
+    }
+
+    // Distribute map spawn points round-robin across teams + worms. If we
+    // have fewer spawns than worms, wrap around - worms that share a slot
+    // will pile up then settle.
     const simTeams = rosters.map((r, teamIdx) => {
-      const spawns = r.wormIds.map((_, wormIdx) => ({
-        xPx: 120 + teamIdx * 260 + wormIdx * 80,
-        yPx: WORLD_HEIGHT_PX - 120,
-      }));
+      const spawns = r.wormIds.map((_, wormIdx) => {
+        if (mapSpawns.length > 0) {
+          const slot = mapSpawns[(teamIdx + wormIdx * rosters.length) % mapSpawns.length];
+          if (slot) return { xPx: slot.xPx, yPx: slot.yPx };
+        }
+        // Fallback fixed grid (matches the previous flat-map behavior).
+        return {
+          xPx: 120 + teamIdx * 260 + wormIdx * 80,
+          yPx: WORLD_HEIGHT_PX - 120,
+        };
+      });
       return { id: r.id, wormIds: r.wormIds.slice(), spawns };
     });
+
     this.simBootstrap = {
       widthPx: WORLD_WIDTH_PX,
       heightPx: WORLD_HEIGHT_PX,
@@ -682,6 +717,20 @@ export class Room implements DurableObject {
       seed,
     });
     await this.persistSim();
+
+    // Broadcast the authoritative geometry back to all clients so
+    // non-host tabs render the same terrain the server is simulating.
+    this.broadcast({
+      type: "game_started",
+      mapId: lobby.selectedMapId,
+      seed,
+      teams,
+      widthPx: WORLD_WIDTH_PX,
+      heightPx: WORLD_HEIGHT_PX,
+      mask: bytesToBase64(mask),
+      spawnPoints: mapSpawns,
+    });
+    lobby.phase = "playing";
 
     this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
     this.arbiter.start(teamOrder, rosters, TURN_DURATION_MS);

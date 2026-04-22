@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { loadMap } from "../maps/loadMap";
 import { allIds, getById } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
@@ -408,13 +409,17 @@ export class LobbyScene extends Phaser.Scene {
 
     this.roomUnsubs.push(
       room.onMessage("game_started", (msg: GameStartedMessage) => {
-        // Host clicked Start. Hand off to GameScene with authoritative map +
-        // seed + team roster; forward the RoomHandle + NetClient so Epic 9 +
-        // Epic 10 reconnect flows can drive from GameScene.
+        // Host clicked Start. Server includes the authoritative mask +
+        // spawn points so every client renders pixel-identical terrain
+        // (server's physics and client's visuals match).
         this.scene.start("GameScene", {
           mapId: msg.mapId,
           seed: msg.seed,
           teams: msg.teams,
+          mask: msg.mask,
+          spawnPoints: msg.spawnPoints,
+          widthPx: msg.widthPx,
+          heightPx: msg.heightPx,
           room,
           netClient: this.netClient,
         });
@@ -772,7 +777,30 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private handleStart(): void {
-    this.room?.send({ type: "start_game" });
+    const room = this.room;
+    if (!room) return;
+    const mapId = room.state.selectedMapId || "flat";
+    // The map generators use Canvas2D which doesn't run on the Cloudflare
+    // Workers runtime. Host generates the mask + spawn points locally and
+    // ships them in start_game; server uses for physics + forwards them
+    // in game_started so every client renders pixel-identical terrain.
+    try {
+      const WORLD_W = 1280;
+      const WORLD_H = 720;
+      const loaded = loadMap(mapId, WORLD_W, WORLD_H);
+      const ctx = loaded.mask.getContext("2d");
+      if (!ctx) throw new Error("mask canvas has no 2d context");
+      const img = ctx.getImageData(0, 0, WORLD_W, WORLD_H);
+      const bytes = new Uint8Array(WORLD_W * WORLD_H);
+      // Alpha > 0 means solid terrain.
+      for (let i = 0; i < bytes.length; i++) bytes[i] = img.data[i * 4 + 3] > 0 ? 1 : 0;
+      const mask = bytesToBase64(bytes);
+      const spawnPoints = loaded.spawnPoints.map((s) => ({ xPx: s.xPx, yPx: s.yPx }));
+      room.send({ type: "start_game", mask, spawnPoints });
+    } catch (err) {
+      console.warn("[start_game] host could not generate mask, sending without:", err);
+      room.send({ type: "start_game" });
+    }
   }
 
   private async handleLeave(): Promise<void> {
@@ -802,6 +830,17 @@ export class LobbyScene extends Phaser.Scene {
       // Already closed.
     }
   }
+}
+
+/** Encode a Uint8Array as base64 for transport in a JSON message. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = "";
+  // Chunk to avoid blowing the arg stack on >1MB buffers.
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(s);
 }
 
 // Re-exported types used by other files importing this module.

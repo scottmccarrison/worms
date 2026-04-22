@@ -235,7 +235,21 @@ export interface WormDiedEvent {
 export type ServerMsg =
   | { type: "welcome"; sessionId: string; resumeToken: string; state: LobbyState }
   | { type: "state"; state: LobbyState }
-  | { type: "game_started"; mapId: string; seed: number; teams: TeamInit[] }
+  | {
+      type: "game_started";
+      mapId: string;
+      seed: number;
+      teams: TeamInit[];
+      /** World dimensions (pixels). Clients create their visual terrain
+       *  canvas at this size. */
+      widthPx: number;
+      heightPx: number;
+      /** Authoritative map mask (base64 Uint8Array of solid/air bytes,
+       *  widthPx * heightPx bytes, row-major). Clients decode + render. */
+      mask: string;
+      /** Surface spawn points derived from the mask. */
+      spawnPoints: Array<{ xPx: number; yPx: number }>;
+    }
   | { type: "game_over"; winnerTeamId: string | null }
   | ({ type: "sim_state" } & SimState)
   | ({ type: "terrain_cut" } & TerrainCutEvent)
@@ -257,7 +271,17 @@ export type ClientMsg =
   | { type: "set_color"; color: string }
   | { type: "set_ready"; ready: boolean }
   | { type: "select_map"; mapId: string }
-  | { type: "start_game" }
+  | {
+      type: "start_game";
+      /** Host-generated map geometry (base64 Uint8Array of solid/air bytes,
+       *  WIDTH_PX * HEIGHT_PX bytes, row-major). Server uses this for
+       *  physics and forwards it via game_started so all clients render
+       *  pixel-identical terrain. Omitted for backcompat; server falls
+       *  back to its flat test map. */
+      mask?: string;
+      /** Host-generated surface spawn points derived from the mask. */
+      spawnPoints?: Array<{ xPx: number; yPx: number }>;
+    }
   // Input messages: server-authoritative. Post-Epic-45 these are NOT
   // relayed back to other clients; the server applies them to the
   // authoritative sim and everyone sees the result via sim_state.
