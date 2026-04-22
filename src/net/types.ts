@@ -13,10 +13,17 @@ export {
   type AllowedColor,
   type CircleCut,
   type ClientMsg,
+  type DamageEvent,
+  type FireEvent,
   type LobbyPlayer,
   type LobbyState,
+  type ProjectileRenderState,
   type ServerMsg,
+  type SimState,
   type TeamInit,
+  type TerrainCutEvent,
+  type WormDiedEvent,
+  type WormRenderState,
   type WormSnapshot,
 } from "../../shared/protocol";
 
@@ -34,3 +41,10 @@ export type ErrorMessage = Extract<ServerMsg, { type: "error" }>;
 export type TurnResolvedMessage = Extract<ServerMsg, { type: "turn_resolved" }>;
 export type GameOverMessage = Extract<ServerMsg, { type: "game_over" }>;
 export type TurnSnapshotMessage = Extract<ClientMsg, { type: "turn_snapshot" }>;
+
+// Epic 45 server-authoritative sim messages.
+export type SimStateMessage = Extract<ServerMsg, { type: "sim_state" }>;
+export type TerrainCutMessage = Extract<ServerMsg, { type: "terrain_cut" }>;
+export type FireEventMessage = Extract<ServerMsg, { type: "fire_event" }>;
+export type DamageEventMessage = Extract<ServerMsg, { type: "damage_event" }>;
+export type WormDiedMessage = Extract<ServerMsg, { type: "worm_died" }>;
