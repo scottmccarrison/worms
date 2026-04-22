@@ -4,40 +4,23 @@ import type { LobbyPlayer, LobbyState } from "../../net/types";
 import { toViewModel } from "./renderModel";
 
 /**
- * Minimal LobbyState stub. We only need the shape `toViewModel` reads:
- * selectedMapId + players with the LobbyPlayersMap surface.
+ * Minimal LobbyState stub. Epic 13 full-state broadcast means `players` is
+ * now a plain Record<sessionId, LobbyPlayer>, not a Colyseus MapSchema.
  */
 function makeState(players: LobbyPlayer[], selectedMapId = "flat"): LobbyState {
-  const map = new Map<string, LobbyPlayer>(players.map((p) => [p.sessionId, p]));
-  const teamOrder: string[] = [];
+  const record: Record<string, LobbyPlayer> = {};
+  for (const p of players) record[p.sessionId] = p;
   return {
     code: "WAVE",
     phase: "lobby",
     hostSessionId: players.find((p) => p.isHost)?.sessionId ?? "",
     selectedMapId,
-    players: {
-      get size() {
-        return map.size;
-      },
-      forEach: (cb) => map.forEach((v, k) => cb(v, k)),
-      get: (k) => map.get(k),
-      onAdd: () => {},
-      onRemove: () => {},
-      onChange: () => {},
-    },
-    teamOrder: {
-      get length() {
-        return teamOrder.length;
-      },
-      forEach: (cb) => {
-        for (const id of teamOrder) cb(id);
-      },
-    },
+    players: record,
+    teamOrder: [],
     currentTeamId: "",
     currentWormId: "",
     turnSeq: 0,
     turnEndsAt: 0,
-    listen: () => () => true,
   };
 }
 
@@ -51,6 +34,7 @@ function makePlayer(overrides: Partial<LobbyPlayer> & { sessionId: string }): Lo
     ownerOfTeamId: overrides.ownerOfTeamId ?? "",
     disconnected: overrides.disconnected ?? false,
     disconnectGraceEndsAt: overrides.disconnectGraceEndsAt ?? 0,
+    joinedAt: overrides.joinedAt ?? 0,
   };
 }
 
