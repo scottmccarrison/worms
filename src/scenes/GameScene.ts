@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import { unpackMask } from "../../shared/maskPack";
+import { WORLD_HEIGHT_PX, WORLD_WIDTH_PX } from "../../shared/worldConfig";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { type GestureInput, createGestureTracker } from "../input/touchGestures";
@@ -185,20 +186,23 @@ export class GameScene extends Phaser.Scene {
     // ------------------------------------------------------------------
     // Pick the adapter. Everything sim-related flows through it.
     // ------------------------------------------------------------------
+    // World dimensions: networked games get them from game_started; offline
+    // and fallback paths use the canonical WORLD_*_PX constants so the
+    // scrolling world (2560x1024) still applies. Never use this.scale.width
+    // as a fallback - that's the logical viewport (1280x720 for Scale.FIT),
+    // not the world.
+    const worldW = this.serverWidthPx ?? WORLD_WIDTH_PX;
+    const worldH = this.serverHeightPx ?? WORLD_HEIGHT_PX;
     if (this.isNetworked && this.room) {
       // Networked path: the server is authoritative for geometry. Paint
       // the received mask into a canvas for the visual terrain.
       const maskCanvas = this.serverMask
-        ? decodeServerMaskToCanvas(
-            this.serverMask,
-            this.serverWidthPx ?? this.scale.width,
-            this.serverHeightPx ?? this.scale.height,
-          )
-        : loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride).mask;
+        ? decodeServerMaskToCanvas(this.serverMask, worldW, worldH)
+        : loadMap(this.mapId, worldW, worldH, this.seedOverride).mask;
       this.terrainRenderer = new TerrainRenderer({
         scene: this,
-        widthPx: this.serverWidthPx ?? this.scale.width,
-        heightPx: this.serverHeightPx ?? this.scale.height,
+        widthPx: worldW,
+        heightPx: worldH,
         sourceMask: maskCanvas,
       });
       this.networkedSim = new NetworkedSimAdapter({
@@ -208,12 +212,12 @@ export class GameScene extends Phaser.Scene {
       this.sim = this.networkedSim;
     } else {
       // Offline path: adapter owns everything physics-touching.
-      const loaded = loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride);
+      const loaded = loadMap(this.mapId, worldW, worldH, this.seedOverride);
       this.offlineSim = new OfflineSimAdapter({
         scene: this,
         loaded,
-        widthPx: this.scale.width,
-        heightPx: this.scale.height,
+        widthPx: worldW,
+        heightPx: worldH,
         teams: teamsForAdapter,
       });
       this.sim = this.offlineSim;
@@ -364,9 +368,10 @@ export class GameScene extends Phaser.Scene {
       this.wireNetworkedScene();
     }
 
-    // Wind HUD and water renderer (both modes).
-    const sceneWidthPx = this.serverWidthPx ?? this.scale.width;
-    const sceneHeightPx = this.serverHeightPx ?? this.scale.height;
+    // Wind HUD and water renderer (both modes). Use the canonical world
+    // dims - not this.scale.width, which is the viewport, not the world.
+    const sceneWidthPx = this.serverWidthPx ?? WORLD_WIDTH_PX;
+    const sceneHeightPx = this.serverHeightPx ?? WORLD_HEIGHT_PX;
     this.windHUD = new WindHUD({ scene: this, sim: this.sim });
     this.waterRenderer = new WaterRenderer({
       scene: this,
