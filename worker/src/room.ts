@@ -951,6 +951,11 @@ export class Room implements DurableObject {
     const lobby = this.lobby;
     const inputs = this.pendingInputs;
     this.pendingInputs = [];
+    // If the turn timer has expired OR we're in the game-over / paused
+    // state, drop all action inputs for this tick. The active worm should
+    // stop responding once the clock hits 0 instead of accepting moves
+    // during the settle-grace window.
+    const inputsLocked = !this.arbiter?.areInputsAccepted();
     for (const input of inputs) {
       const player = lobby.players[input.sessionId];
       if (!player) continue;
@@ -959,6 +964,7 @@ export class Room implements DurableObject {
       if (player.ownerOfTeamId !== lobby.currentTeamId) continue;
       const activeWormId = lobby.currentWormId;
       if (!activeWormId) continue;
+      if (inputsLocked) continue;
       switch (input.kind) {
         case "walk":
           this.sim.applyWalkInput(activeWormId, input.dir);
