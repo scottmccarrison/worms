@@ -227,10 +227,7 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   update(_dtMs: number): void {
-    // Interpolation happens in Commit 3; for now we snap render state to
-    // the current frame. This keeps the adapter testable end-to-end while
-    // the buffer logic is layered on.
-    this.applyCurrFrameToRenderState();
+    this.applyInterpolatedFrameToRenderState(Date.now());
   }
 
   destroy(): void {
@@ -276,11 +273,34 @@ export class NetworkedSimAdapter implements SimAdapter {
     };
   }
 
-  /** Latest projectile list for scene rendering, built from currFrame. */
+  /**
+   * Latest projectile list for scene rendering. Uses the same two-frame
+   * lerp as worms so bullets trail smoothly between 50ms frames instead
+   * of teleporting. Projectiles that only exist in curr (newly spawned)
+   * render at curr.x/curr.y.
+   */
   getProjectiles(): RenderableProjectile[] {
-    const state = this.currFrame?.state;
-    if (!state) return [];
-    return state.projectiles.map((p) => ({ id: p.id, xPx: p.x, yPx: p.y, type: p.type }));
+    const curr = this.currFrame;
+    if (!curr) return [];
+    const prev = this.prevFrame;
+    const rawAlpha = (Date.now() - curr.receivedAt) / this.frameIntervalMs;
+    const alpha = rawAlpha < 0 ? 0 : rawAlpha > 1 ? 1 : rawAlpha;
+
+    const prevById = new Map<string, (typeof curr.state.projectiles)[number]>();
+    if (prev) {
+      for (const p of prev.state.projectiles) prevById.set(p.id, p);
+    }
+
+    return curr.state.projectiles.map((p) => {
+      const pPrev = prevById.get(p.id);
+      if (!pPrev) return { id: p.id, xPx: p.x, yPx: p.y, type: p.type };
+      return {
+        id: p.id,
+        xPx: pPrev.x + (p.x - pPrev.x) * alpha,
+        yPx: pPrev.y + (p.y - pPrev.y) * alpha,
+        type: p.type,
+      };
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -322,19 +342,59 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.lastTurnEndsAt = state.turnEndsAt;
   }
 
-  private applyCurrFrameToRenderState(): void {
-    const state = this.currFrame?.state;
-    if (!state) return;
-    for (const w of state.worms) {
-      const slot = this.renderState.get(w.id);
+  /**
+   * Two-frame linear interpolation. For each worm, pick the prev-frame and
+   * curr-frame positions (if both exist), and lerp at
+   * alpha = clamp01((now - curr.receivedAt) / frameIntervalMs).
+   *
+   * alpha = 0 snaps to curr at the moment it arrives; alpha = 1 lands on
+   * curr + (curr - prev) extrapolated. We clamp at 1 to avoid runaway
+   * extrapolation when the server pauses sending (e.g. player reconnect).
+   *
+   * Facing / aimAngle / aimPower snap instantly because angular lerp adds
+   * little visual value and would break the 180deg flip at facing change.
+   * hp / alive likewise snap (discrete steps).
+   *
+   * This handles four cases:
+   *   1. No curr frame: render state untouched (caller saw initial zero
+   *      state; renderer draws worms where they spawn until first frame).
+   *   2. Curr but no prev: snap to curr (first frame since game start).
+   *   3. Prev + curr: lerp.
+   *   4. Worm present in curr but not prev: snap to curr (spawn case).
+   */
+  protected applyInterpolatedFrameToRenderState(nowMs: number): void {
+    const curr = this.currFrame;
+    if (!curr) return;
+
+    const prev = this.prevFrame;
+    // Saturate alpha to [0, 1]. At alpha = 1 we sit on curr exactly.
+    const rawAlpha = (nowMs - curr.receivedAt) / this.frameIntervalMs;
+    const alpha = rawAlpha < 0 ? 0 : rawAlpha > 1 ? 1 : rawAlpha;
+
+    // Build a quick lookup for prev worms so the per-worm lerp is O(1).
+    const prevById = new Map<string, (typeof curr.state.worms)[number]>();
+    if (prev) {
+      for (const w of prev.state.worms) prevById.set(w.id, w);
+    }
+
+    for (const wCurr of curr.state.worms) {
+      const slot = this.renderState.get(wCurr.id);
       if (!slot) continue;
-      slot.xPx = w.x;
-      slot.yPx = w.y;
-      slot.facing = w.facing;
-      slot.aimAngle = w.aimAngle;
-      slot.aimPower = w.aimPower;
-      slot.hp = w.hp;
-      slot.alive = w.alive;
+      const wPrev = prevById.get(wCurr.id);
+      if (!wPrev) {
+        // New (or no prior frame): snap directly to curr.
+        slot.xPx = wCurr.x;
+        slot.yPx = wCurr.y;
+      } else {
+        slot.xPx = wPrev.x + (wCurr.x - wPrev.x) * alpha;
+        slot.yPx = wPrev.y + (wCurr.y - wPrev.y) * alpha;
+      }
+      // Discrete fields snap to curr.
+      slot.facing = wCurr.facing;
+      slot.aimAngle = wCurr.aimAngle;
+      slot.aimPower = wCurr.aimPower;
+      slot.hp = wCurr.hp;
+      slot.alive = wCurr.alive;
     }
   }
 
