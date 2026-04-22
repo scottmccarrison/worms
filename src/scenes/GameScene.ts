@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { unpackMask } from "../../shared/maskPack";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { type GestureInput, createGestureTracker } from "../input/touchGestures";
@@ -374,6 +375,11 @@ export class GameScene extends Phaser.Scene {
       heightPx: sceneHeightPx,
     });
 
+    // Camera: constrain scroll to the world bounds so the camera never shows
+    // blank space outside the terrain. The camera will follow the active worm
+    // once handleTurnChanged fires.
+    this.cameras.main.setBounds(0, 0, sceneWidthPx, sceneHeightPx);
+
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
     this.hud = this.add
@@ -621,6 +627,10 @@ export class GameScene extends Phaser.Scene {
     if (this.offlineSim) {
       const activeWorm = this.offlineSim.wormsInternal.find((w) => w.name === _wormId);
       if (activeWorm) this.inputController?.setActiveWorm(activeWorm);
+      // Follow the offline worm's physics body renderer.
+      if (activeWorm) {
+        this.cameras.main.startFollow(activeWorm.graphicsObject, true, 0.08, 0.08);
+      }
     } else if (this.networkedSim) {
       // Wrap the render view in a facade so InputController has something
       // to read xPx / facing / aimAngle from. The facade's mutator methods
@@ -629,6 +639,12 @@ export class GameScene extends Phaser.Scene {
       this.inputController?.setActiveWorm(
         view ? adaptRenderableToWormFacade(view, () => this.sim.isJetPacking(), this.sim) : null,
       );
+      // Follow the networked worm sprite's graphics object.
+      const sprite = this.wormSprites.get(_wormId);
+      const followTarget = sprite?.graphics ?? null;
+      if (followTarget) {
+        this.cameras.main.startFollow(followTarget, true, 0.08, 0.08);
+      }
     }
   }
 
@@ -1090,9 +1106,13 @@ function adaptRenderableToWormFacade(
 }
 
 /**
- * Decode the server's base64 Uint8Array mask into an HTMLCanvasElement
- * painted with the usual terrain color, ready for Terrain / TerrainRenderer
- * to consume as its `sourceMask`. 1 byte per pixel: solid (1) or air (0).
+ * Decode the server's base64 1-bit-packed mask into an HTMLCanvasElement
+ * with alpha set (solid) or cleared (air). RGB is left as opaque white here;
+ * TerrainRenderer's stratum painter overwrites the RGB in a post-pass.
+ *
+ * Wire format (as of Phase 1): 1-bit-per-pixel packed (LSB-first), base64.
+ * So the decoded Uint8Array is packed bytes; unpackMask expands to one byte
+ * per pixel for canvas painting.
  */
 function decodeServerMaskToCanvas(
   base64: string,
@@ -1100,8 +1120,12 @@ function decodeServerMaskToCanvas(
   heightPx: number,
 ): HTMLCanvasElement {
   const raw = atob(base64);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const packed = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) packed[i] = raw.charCodeAt(i);
+
+  // Expand packed bits back to one-byte-per-pixel.
+  const pixelCount = widthPx * heightPx;
+  const bytes = unpackMask(packed, pixelCount);
 
   const canvas = document.createElement("canvas");
   canvas.width = widthPx;
@@ -1109,15 +1133,15 @@ function decodeServerMaskToCanvas(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("decodeServerMaskToCanvas: no 2d context");
 
-  // Paint solid pixels using the default terrain green. Row-major byte
-  // layout matches the server's buildFlatMask / host's mask extraction.
+  // Paint solid pixels opaque (RGB will be overwritten by stratum pass).
+  // Air pixels stay transparent so destruction (destination-out) works.
   const img = ctx.createImageData(widthPx, heightPx);
-  for (let i = 0; i < bytes.length; i++) {
+  for (let i = 0; i < pixelCount; i++) {
     const j = i * 4;
     if (bytes[i]) {
-      img.data[j] = 0x5a;
-      img.data[j + 1] = 0x7a;
-      img.data[j + 2] = 0x3c;
+      img.data[j] = 0xff;
+      img.data[j + 1] = 0xff;
+      img.data[j + 2] = 0xff;
       img.data[j + 3] = 0xff;
     }
     // else: leave transparent (air).

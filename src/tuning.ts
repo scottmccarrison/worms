@@ -139,7 +139,7 @@ export const tuning: Tuning = {
     longPressMs: 400,
   },
   maps: {
-    defaultId: "hills", // registry lookup; falls back to firstId() if invalid
+    defaultId: "terraworld", // registry lookup; falls back to firstId() if invalid
   },
   wind: { forceNewtonsPerUnit: 2 },
 };

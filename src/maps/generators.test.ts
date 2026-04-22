@@ -9,6 +9,7 @@ import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
 import { plateauGenerator } from "./generators/plateau";
 import { spireGenerator } from "./generators/spire";
+import { terraworldGenerator } from "./generators/terraworld";
 
 const W = 1280;
 const H = 720;
@@ -308,6 +309,50 @@ describe("plateauGenerator", () => {
       // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
       const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
       expect(clearAboveAlpha).toBe(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Terraworld generator (2560x1024 - the Phase 1 world size)
+// ---------------------------------------------------------------------------
+const TW = 2560;
+const TH = 1024;
+
+function renderTerraworldPixels(seed: number): Uint8ClampedArray {
+  const canvas = createCanvas(TW, TH);
+  const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+  terraworldGenerator(ctx, TW, TH, { seed });
+  return canvas.getContext("2d").getImageData(0, 0, TW, TH).data;
+}
+
+describe("terraworldGenerator", () => {
+  it("terraworld generator is deterministic given a seed (2560x1024)", () => {
+    const a = renderTerraworldPixels(42);
+    const b = renderTerraworldPixels(42);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("terraworld has solid ratio between 20% and 60%", () => {
+    const data = renderTerraworldPixels(42);
+    const solid = countSolidPixels(data);
+    const ratio = solid / (TW * TH);
+    expect(ratio).toBeGreaterThan(0.2);
+    expect(ratio).toBeLessThan(0.6);
+  });
+
+  it("terraworld yields 4 valid spawn points on solid surface", () => {
+    const canvas = createCanvas(TW, TH);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    terraworldGenerator(ctx, TW, TH, { seed: 1 });
+    const imgData = canvas.getContext("2d").getImageData(0, 0, TW, TH);
+    const spawnPoints = findSpawnPoints(imgData.data, TW, TH, 4);
+    expect(spawnPoints.length).toBe(4);
+    const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+    expect(ids.size).toBe(4);
+    for (const { xPx, yPx } of spawnPoints) {
+      const selfAlpha = imgData.data[(yPx * TW + xPx) * 4 + 3] ?? 0;
+      expect(selfAlpha).toBeGreaterThan(0);
     }
   });
 });

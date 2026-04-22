@@ -6,6 +6,7 @@ import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
 import { plateauGenerator } from "./generators/plateau";
 import { spireGenerator } from "./generators/spire";
+import { terraworldGenerator } from "./generators/terraworld";
 import type { MapConfig, MapGenerator } from "./types";
 
 type RegistryEntry = { config: MapConfig; generator: MapGenerator };
@@ -97,6 +98,16 @@ export const MAPS: Record<string, RegistryEntry> = {
       generator: { id: "plateau", seed: 0 },
     },
     generator: plateauGenerator,
+  },
+  terraworld: {
+    config: {
+      id: "terraworld",
+      name: "Terraworld",
+      description: "Procedural heightmap surface with grass, dirt, and stone strata.",
+      maxWorms: 4,
+      generator: { id: "terraworld", seed: 0 },
+    },
+    generator: terraworldGenerator,
   },
 };
 

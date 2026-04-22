@@ -20,6 +20,11 @@
  */
 
 import {
+  packMask as packMaskBytes,
+  packedMaskByteLength,
+  unpackMask,
+} from "../../shared/maskPack.js";
+import {
   ALLOWED_COLORS,
   type LobbyPlayer,
   type LobbyState,
@@ -49,6 +54,7 @@ const MAP_WHITELIST = [
   "spire",
   "canyon",
   "plateau",
+  "terraworld",
 ] as const;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_CLIENTS = 8;
@@ -57,8 +63,8 @@ const SIM_TICK_MS = 50;
 const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000;
 
 /** Canonical physics world size. Clients use PX_PER_M=30 to render. */
-const WORLD_WIDTH_PX = 1280;
-const WORLD_HEIGHT_PX = 720;
+const WORLD_WIDTH_PX = 2560;
+const WORLD_HEIGHT_PX = 1024;
 
 const TEAM_PALETTE: Array<{ id: string; name: string; color: string; prefix: string }> = [
   { id: "red", name: "Team Red", color: "#ff4444", prefix: "Red" },
@@ -219,7 +225,14 @@ export class Room implements DurableObject {
       this.simBootstrap = stored;
     }
     const bootstrap = this.simBootstrap;
-    const mask = base64ToBytes(bootstrap.maskBase64);
+    // maskBase64 stores the 1-bit-packed form (for wire transport efficiency).
+    // Unpack to a full 1-byte-per-pixel mask before handing to Simulation.
+    const packedBytes = base64ToBytes(bootstrap.maskBase64);
+    const pixelCount = bootstrap.widthPx * bootstrap.heightPx;
+    const mask =
+      packedBytes.length === pixelCount
+        ? packedBytes // legacy: old bootstrap stored unpacked form directly
+        : unpackMask(packedBytes, pixelCount);
     this.sim = new Simulation({
       widthPx: bootstrap.widthPx,
       heightPx: bootstrap.heightPx,
@@ -768,21 +781,28 @@ export class Room implements DurableObject {
     const hostMask = typeof startMsg.mask === "string" ? startMsg.mask : null;
     const hostSpawns = Array.isArray(startMsg.spawnPoints) ? startMsg.spawnPoints : null;
     let mask: Uint8Array;
+    let packedMaskBase64: string;
     let mapSpawns: Array<{ xPx: number; yPx: number }>;
     if (hostMask && hostSpawns && hostSpawns.length > 0) {
       try {
-        mask = base64ToBytes(hostMask);
-        if (mask.length !== WORLD_WIDTH_PX * WORLD_HEIGHT_PX) {
-          throw new Error(`mask length ${mask.length} != ${WORLD_WIDTH_PX * WORLD_HEIGHT_PX}`);
+        const packed = base64ToBytes(hostMask);
+        const expectedPackedLen = packedMaskByteLength(WORLD_WIDTH_PX * WORLD_HEIGHT_PX);
+        if (packed.length !== expectedPackedLen) {
+          throw new Error(`packed mask length ${packed.length} != ${expectedPackedLen}`);
         }
+        mask = unpackMask(packed, WORLD_WIDTH_PX * WORLD_HEIGHT_PX);
+        // Preserve the original packed base64 so game_started forwards the packed form.
+        packedMaskBase64 = hostMask;
         mapSpawns = hostSpawns;
       } catch (err) {
         console.warn("[start_game] bad mask from host, using flat fallback:", err);
         mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+        packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
         mapSpawns = [];
       }
     } else {
       mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+      packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
       mapSpawns = [];
     }
 
@@ -807,7 +827,8 @@ export class Room implements DurableObject {
     this.simBootstrap = {
       widthPx: WORLD_WIDTH_PX,
       heightPx: WORLD_HEIGHT_PX,
-      maskBase64: bytesToBase64(mask),
+      // Store the packed base64 so game_started forwards the packed wire form to clients.
+      maskBase64: packedMaskBase64,
       teams: simTeams,
       seed,
       mapId: lobby.selectedMapId,
