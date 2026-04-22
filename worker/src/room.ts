@@ -930,8 +930,11 @@ export class Room implements DurableObject {
           this.sim.applySelectWeapon(activeWormId, input.weaponId);
           break;
         case "fire":
+          // Reject if arbiter says no: already fired, paused, past timer, or
+          // game over. Prevents double-fire within a turn and post-timer sneaks.
+          if (!this.arbiter?.canFire()) break;
           this.sim.applyFire(activeWormId);
-          this.arbiter?.onFireCommitted();
+          this.arbiter.onFireCommitted();
           break;
         case "jetpack_toggle":
           this.sim.applyJetPackToggle(activeWormId);

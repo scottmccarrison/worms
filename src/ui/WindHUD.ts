@@ -23,7 +23,9 @@ export class WindHUD {
   constructor(init: WindHUDInit) {
     this.sim = init.sim;
     const sw = init.scene.scale.width;
-    this.container = init.scene.add.container(sw / 2, 90);
+    // y=140 sits below the SpectatorHUD banner (at y=90) so the two don't
+    // overlap when a spectator is watching and wind is non-zero.
+    this.container = init.scene.add.container(sw / 2, 140);
     this.container.setDepth(100);
     this.container.setScrollFactor(0);
     this.arrow = init.scene.add.graphics();
