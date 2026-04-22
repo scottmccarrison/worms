@@ -497,6 +497,11 @@ export class Room implements DurableObject {
       const lobby = this.ensureLobby();
       const now = Date.now();
 
+      // Capture the active worm BEFORE any mutation points in this alarm
+      // cycle (handleFinalLeave / drainInputs / arbiter.onTick can all
+      // advance the turn). Compared at the end to trigger utility reset.
+      const prevWormId = lobby.currentWormId;
+
       // Grace expiry forfeits.
       const expiredSessionIds: string[] = [];
       for (const [sid, player] of Object.entries(lobby.players)) {
@@ -532,10 +537,15 @@ export class Room implements DurableObject {
       }
 
       if (lobby.phase === "playing" && this.arbiter) {
-        const prevWormId = lobby.currentWormId;
         this.arbiter.onTick(SIM_TICK_MS);
+      }
+
+      // Turn-change utility reset: prevWormId was captured at the top of
+      // the alarm, so this catches advances from handleFinalLeave (forfeit),
+      // drainInputs (endTurnByPlayer), and arbiter.onTick (timer / pending).
+      if (lobby.phase === "playing" && this.sim) {
         const nextWormId = lobby.currentWormId;
-        if (nextWormId && nextWormId !== prevWormId && this.sim) {
+        if (nextWormId && nextWormId !== prevWormId) {
           this.sim.resetUtilitiesForTurnStart(nextWormId);
         }
       }

@@ -428,10 +428,10 @@ export class Simulation {
           alive: w.alive,
           activeWeapon: w.activeWeapon,
           ammoLeft: w.ammoLeft,
-          jetPackActive: w.toRenderState().jetPackActive,
-          jetPackFuel: w.toRenderState().jetPackFuel,
-          jetPackThrustV: false,
-          jetPackThrustH: 0 as -1 | 0 | 1,
+          jetPackActive: w.jetPackActive,
+          jetPackFuel: w.jetPackFuel,
+          jetPackThrustV: w.jetPackThrustV,
+          jetPackThrustH: w.jetPackThrustH,
         };
       }),
       projectiles: this.projectiles.map((p) => ({
@@ -468,9 +468,12 @@ export class Simulation {
       worm.alive = ws.alive;
       worm.activeWeapon = ws.activeWeapon;
       worm.ammoLeft = ws.ammoLeft;
-      // Reset jetpack to safe defaults on restore (mid-flight hibernation is
-      // an acceptable edge case; the alternative is serializing thrust state).
-      worm.resetUtilitiesForTurnStart();
+      // Round-trip jetpack state across hibernation. Defaults cover pre-PR
+      // persisted shapes that didn't have these fields.
+      worm.jetPackActive = ws.jetPackActive ?? false;
+      worm.jetPackFuel = ws.jetPackFuel ?? 100;
+      worm.jetPackThrustV = ws.jetPackThrustV ?? false;
+      worm.jetPackThrustH = ws.jetPackThrustH ?? 0;
     }
     // Clear any bodies we pre-created for projectiles (we didn't).
     for (const ps of state.projectiles) {

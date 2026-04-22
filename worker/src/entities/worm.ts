@@ -86,10 +86,13 @@ export class Worm {
   private readonly footSensor: Fixture;
   private readonly walkSpeedMps: number;
   private walkingDir: -1 | 0 | 1 = 0;
-  private jetPackActive = false;
-  private jetPackFuel = 100;
-  private jetPackThrustV = false;
-  private jetPackThrustH: -1 | 0 | 1 = 0;
+  // Jetpack fields are public so serialize/restore can round-trip them
+  // without a separate API surface. Writes from outside are rare and
+  // happen only on hibernation restore.
+  jetPackActive = false;
+  jetPackFuel = 100;
+  jetPackThrustV = false;
+  jetPackThrustH: -1 | 0 | 1 = 0;
 
   constructor(init: WormInit) {
     this.id = init.id;
@@ -228,8 +231,9 @@ export class Worm {
       return;
     }
 
-    const UP_FORCE = 18; // Newtons (planck units)
-    const SIDE_FORCE = 10;
+    // Mirrors src/tuning.ts jetpack section so offline + networked feel the same.
+    const UP_FORCE = 15; // Newtons (planck units)
+    const SIDE_FORCE = 8;
     const FUEL_PER_SECOND = 30; // percent per second
 
     const fx = this.jetPackThrustH * SIDE_FORCE;
