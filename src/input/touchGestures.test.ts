@@ -88,13 +88,13 @@ describe("touchGestures state machine", () => {
     expect(up2).toEqual([{ kind: "walk_release" }]);
   });
 
-  it("long-press emits backflip on release", () => {
+  it("long hold releases as plain walk (no backflip gesture on touch)", () => {
     const t = createGestureTracker();
     const down = t.processDown(mkInput({ downXPx: 200, nowMs: 1000 }));
     expect(down).toEqual([{ kind: "walk", dir: -1 }]);
-    // Hold past longPressMs (400) -> release at 1500
+    // Hold past longPressMs (400) -> just release, no backflip.
     const up = t.processUp(1500);
-    expect(up).toEqual([{ kind: "walk_release" }, { kind: "backflip" }]);
+    expect(up).toEqual([{ kind: "walk_release" }]);
   });
 
   it("spectator (not my turn) returns ignored on down", () => {
@@ -131,14 +131,14 @@ describe("touchGestures state machine", () => {
     expect(t.processUp(1700)).toEqual([{ kind: "walk_release" }]);
   });
 
-  it("long-press on double-tap window prioritizes backflip over jump", () => {
+  it("held double-tap still emits jump (no backflip path on touch)", () => {
     const t = createGestureTracker();
-    // Seed a recent release so a double-tap would otherwise trigger.
+    // Seed a recent release so a double-tap triggers.
     t.processDown(mkInput({ downXPx: 200, nowMs: 1000 }));
     t.processUp(1100);
-    // Hold the second tap past longPressMs.
+    // Hold the second tap; previously this emitted backflip, now it jumps.
     t.processDown(mkInput({ downXPx: 200, nowMs: 1200 }));
     const up = t.processUp(1700);
-    expect(up).toEqual([{ kind: "walk_release" }, { kind: "backflip" }]);
+    expect(up).toEqual([{ kind: "walk_release" }, { kind: "jump" }]);
   });
 });
