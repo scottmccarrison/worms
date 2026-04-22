@@ -5,6 +5,8 @@
  * confusion when friends read codes out loud or over SMS. 23 letters
  * give 23^4 = 279,841 possible codes, which is plenty for our scale
  * (codes are ephemeral: they die with the room).
+ *
+ * Ported verbatim from server/src/codegen.ts. Pure; no Node APIs.
  */
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // 23 letters: excludes I, O

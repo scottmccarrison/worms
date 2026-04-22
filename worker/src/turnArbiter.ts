@@ -1,31 +1,25 @@
-import { ArraySchema } from "@colyseus/schema";
-import type { LobbyState } from "../state/LobbyState.js";
-import { SETTLE_GRACE_MS } from "../state/constants.js";
-
 /**
- * One snapshot entry per worm, as sent by the active client inside a
- * `turn_snapshot` message at the end of its local turn.
+ * Server-side turn arbiter, ported from server/src/game/TurnArbiter.ts.
  *
- * This is the only authoritative physics state the server sees. It
- * keys drift reconciliation on the `turn_resolved` broadcast.
+ * Changes vs the Colyseus version:
+ * - `room.state` is a plain JSON `LobbyState` object (not a Schema), so
+ *   we mutate fields directly and the DO broadcasts the full state
+ *   afterwards via `broadcastState()`.
+ * - The `setInterval`-driven tick loop is gone. The DO's `alarm()`
+ *   handler calls `onTick(dtMs)` every ~500ms while the game is in
+ *   "playing" phase; the DO reschedules the alarm at the end of each
+ *   tick.
+ * - Broadcasts go through `ArbiterRoomAdapter.broadcast` which the DO
+ *   implements as a helper that serialises JSON and fans out to every
+ *   attached hibernatable WebSocket.
  */
-export interface WormSnapshot {
-  id: string; // e.g. "red-0"
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  hp: number;
-  alive: boolean;
-}
 
-/** Circular terrain cut, monotonic `seq` for idempotent reapply. */
-export interface CircleCut {
-  x: number;
-  y: number;
-  r: number;
-  seq: number;
-}
+import type {
+  CircleCut,
+  LobbyState,
+  TeamInit as _TeamInit,
+  WormSnapshot,
+} from "./messages.js";
 
 /** Payload shape of `turn_snapshot` (C->S from the active player). */
 export interface TurnSnapshot {
@@ -33,77 +27,48 @@ export interface TurnSnapshot {
   terrainCuts: CircleCut[];
 }
 
+/** Shared timing constants. */
+export const TURN_DURATION_MS = 45_000;
+export const SETTLE_GRACE_MS = 6_000;
+export const DISCONNECT_GRACE_MS = 60_000;
+
 /**
- * Everything TurnArbiter needs from a GameRoom. Kept narrow so the
- * class is unit-testable with a plain object stub (no Colyseus Room
- * instance required in tests).
+ * Everything TurnArbiter needs from its host. Kept narrow so the class
+ * is unit-testable with a plain object stub.
  */
 export interface ArbiterRoomAdapter {
-  /** Mutable authoritative state; arbiter writes the turn fields directly. */
   readonly state: LobbyState;
-  /** Broadcast a message to every connected client. */
+  /** Broadcast a typed payload to every connected client. */
   broadcast(type: string, payload: unknown): void;
-  /** Snapshot of session ids currently present; used to skip disconnected team owners. */
+  /** Session ids currently present. Disconnected-grace players may still be here. */
   getConnectedSessionIds(): Set<string>;
-  /**
-   * Whether the LobbyPlayer with this sessionId is in the reconnect
-   * grace window. Epic 10 advanceTurn uses this as a skip predicate so
-   * a disconnected non-active owner's upcoming turn is passed over
-   * until they return (or their team is forfeited when grace expires).
-   */
+  /** True if the LobbyPlayer is flagged `disconnected` (grace window). */
   getPlayerDisconnected(sessionId: string): boolean;
 }
 
-/**
- * One roster entry per team. Populated at `start_game` and kept
- * immutable for the lifetime of the game.
- */
+/** One roster entry per team. Populated at start_game, immutable after. */
 export interface TeamRoster {
-  id: string; // "red" | "blue" | "green" | "yellow"
-  ownerSessionId: string; // empty string means unowned / skip
-  wormIds: string[]; // e.g. ["red-0", "red-1"]
+  id: string;
+  ownerSessionId: string;
+  wormIds: string[];
 }
 
-/**
- * Server turn arbiter. Decides whose turn is active, advances on
- * snapshot-from-active-player, force-advances on timeout or active
- * player drop.
- *
- * Option C: does NOT run planck. Tracks alive counts purely from the
- * `turn_snapshot` stream. The per-worm `alive` flag + the per-team
- * wormIds list give us enough to detect game_over and skip dead teams.
- */
 export class TurnArbiter {
   private readonly room: ArbiterRoomAdapter;
   private teamRosters = new Map<string, TeamRoster>();
   private currentTeamIdx = 0;
-  /** Round-robin cursor per team so worms cycle within a team. */
   private teamWormCursor = new Map<string, number>();
-  /** Alive count per team, derived from the most recent snapshot. */
   private aliveByTeam = new Map<string, number>();
-  /** Last `turn_snapshot` we received, used to synthesize a force-advance resolution. */
   private lastSnapshot: TurnSnapshot | null = null;
-  /** True once this turn has received a snapshot; reset each advance. */
   private gotSnapshotThisTurn = false;
-  /** True once game_over has been declared; arbiter becomes a no-op. */
   private gameOver = false;
   private turnDurationMs = 0;
-  /**
-   * Epic 10: when the active-team owner disconnects we freeze the turn
-   * timer. Stores remaining ms at freeze time so we can resume with
-   * the same clock on reconnect. `null` means not paused.
-   */
   private pausedRemainingMs: number | null = null;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
   }
 
-  /**
-   * Initialise the arbiter at the moment of start_game. `teamOrder`
-   * is the canonical cycle; `rosters` supplies worm ids + ownership
-   * for each team. The first team in `teamOrder` becomes active.
-   */
   start(teamOrder: string[], rosters: TeamRoster[], turnDurationMs: number): void {
     this.teamRosters.clear();
     this.teamWormCursor.clear();
@@ -114,10 +79,8 @@ export class TurnArbiter {
       this.aliveByTeam.set(r.id, r.wormIds.length);
     }
 
-    // Mirror teamOrder into replicated state. ArraySchema doesn't
-    // accept a spread constructor in 2.x; push one-by-one.
-    this.room.state.teamOrder = new ArraySchema<string>();
-    for (const id of teamOrder) this.room.state.teamOrder.push(id);
+    // Plain array in the JSON state.
+    this.room.state.teamOrder = [...teamOrder];
 
     this.currentTeamIdx = 0;
     this.turnDurationMs = turnDurationMs;
@@ -133,17 +96,13 @@ export class TurnArbiter {
   }
 
   /**
-   * Called from a plain setInterval in GameRoom (20Hz). If the turn
-   * ran long AND no snapshot arrived, force-advance with last-known
-   * positions. Otherwise a no-op (clients drive turn end via
-   * `turn_snapshot`).
+   * Called from the DO's alarm handler every ~500ms while phase is
+   * "playing". If the turn ran long AND no snapshot arrived, force
+   * -advance with last-known positions. Otherwise a no-op.
    */
   onTick(_dtMs: number): void {
     if (this.gameOver) return;
     if (this.gotSnapshotThisTurn) return;
-    // Epic 10: while paused for a disconnected owner, never force-advance.
-    // The room's reconnect grace owns the deadline; if it expires, the
-    // grace-expiry path calls forceAdvance directly.
     if (this.pausedRemainingMs !== null) return;
     const now = Date.now();
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
@@ -151,16 +110,17 @@ export class TurnArbiter {
     }
   }
 
-  /**
-   * Accept a snapshot from the active player. Updates the alive-count
-   * tally, broadcasts `turn_resolved`, and advances to the next turn.
-   */
+  /** True once the game has ended; DO can stop scheduling alarms. */
+  isGameOver(): boolean {
+    return this.gameOver;
+  }
+
   onSnapshot(snap: TurnSnapshot): void {
     if (this.gameOver) return;
     this.lastSnapshot = snap;
     this.gotSnapshotThisTurn = true;
     this.applySnapshotToAliveTally(snap);
-    const nextResolution = this.advanceTurn(snap);
+    const nextResolution = this.advanceTurn();
     if (nextResolution) {
       this.room.broadcast("turn_resolved", {
         turnSeq: nextResolution.turnSeq,
@@ -172,21 +132,16 @@ export class TurnArbiter {
     }
   }
 
-  /**
-   * Timeout path + active-player-left path. Synthesizes a resolution
-   * from the last known snapshot (empty snapshot if we never got one).
-   */
   forceAdvance(): void {
     if (this.gameOver) return;
     const synth: TurnSnapshot = this.lastSnapshot ?? { worms: [], terrainCuts: [] };
     this.gotSnapshotThisTurn = true;
     this.applySnapshotToAliveTally(synth);
-    const nextResolution = this.advanceTurn(synth);
+    const nextResolution = this.advanceTurn();
     if (nextResolution) {
       this.room.broadcast("turn_resolved", {
         turnSeq: nextResolution.turnSeq,
         worms: synth.worms,
-        // No new cuts on a synthetic advance.
         terrainCuts: [],
         nextTeamId: nextResolution.nextTeamId,
         nextWormId: nextResolution.nextWormId,
@@ -194,12 +149,6 @@ export class TurnArbiter {
     }
   }
 
-  /**
-   * Notify the arbiter that a player left the room mid-game. If they
-   * owned the active team we force-advance so everyone else can keep
-   * playing. Other leaves are handled lazily: `advanceTurn` re-checks
-   * connected session ids each turn.
-   */
   onPlayerLeft(sessionId: string): void {
     if (this.gameOver) return;
     const activeTeamId = this.room.state.currentTeamId;
@@ -209,33 +158,18 @@ export class TurnArbiter {
     }
   }
 
-  /**
-   * Epic 10: an active-team owner has disconnected and the room is
-   * holding their slot inside Colyseus' `allowReconnection` grace
-   * window. If this sessionId owns the current team, freeze the turn
-   * timer by storing the remaining ms and pushing `turnEndsAt` to a
-   * sentinel far in the future so the client HUD stops counting down.
-   * Non-active owner disconnects are a no-op here; advanceTurn's skip
-   * predicate handles them lazily on the next rotation.
-   */
   onOwnerDisconnected(sessionId: string): void {
     if (this.gameOver) return;
     const activeTeamId = this.room.state.currentTeamId;
     if (!activeTeamId) return;
     const activeTeam = this.teamRosters.get(activeTeamId);
     if (!activeTeam || activeTeam.ownerSessionId !== sessionId) return;
-    if (this.pausedRemainingMs !== null) return; // already paused
+    if (this.pausedRemainingMs !== null) return;
     const remaining = Math.max(0, this.room.state.turnEndsAt - Date.now());
     this.pausedRemainingMs = remaining;
     this.room.state.turnEndsAt = Number.MAX_SAFE_INTEGER;
   }
 
-  /**
-   * Epic 10: the disconnected owner reconnected before the grace
-   * window elapsed. If we're currently paused and this sessionId owns
-   * the active team, resume with the previously recorded remaining
-   * time. Everything else is a no-op.
-   */
   onOwnerReconnected(sessionId: string): void {
     if (this.gameOver) return;
     if (this.pausedRemainingMs === null) return;
@@ -247,31 +181,13 @@ export class TurnArbiter {
     this.pausedRemainingMs = null;
   }
 
-  /**
-   * Epic 10: the grace window expired (or a consented leave landed)
-   * while the disconnected player still owned this team. Mark every
-   * worm in the team's roster as dead in the alive tally. If this
-   * leaves only one team with alive worms, declare game_over.
-   * Otherwise emit a synthetic `turn_resolved` with the forfeited
-   * team's worms flagged alive=false+hp=0 so every client renders them
-   * as dead, then advance the turn.
-   *
-   * Intentionally tolerant of being called twice for the same team
-   * (e.g. forfeit + forceAdvance on the same tick): the second call
-   * finds alive=0 already and declareGameOver is idempotent via the
-   * `gameOver` guard.
-   */
   onTeamForfeit(teamId: string): void {
     if (this.gameOver) return;
     const roster = this.teamRosters.get(teamId);
     if (!roster) return;
-    if ((this.aliveByTeam.get(teamId) ?? 0) === 0) return; // already forfeited
+    if ((this.aliveByTeam.get(teamId) ?? 0) === 0) return;
     this.aliveByTeam.set(teamId, 0);
 
-    // Build the forfeit worm snapshot: every worm in the team is dead.
-    // We start from lastSnapshot's positions when we have them so
-    // clients can place bodies at the last-known spot; fall back to
-    // zeros otherwise.
     const forfeitWorms: WormSnapshot[] = [];
     for (const wormId of roster.wormIds) {
       const prior = this.lastSnapshot?.worms.find((w) => w.id === wormId);
@@ -286,8 +202,6 @@ export class TurnArbiter {
       });
     }
 
-    // If only one team still has alive worms (or zero), end the game
-    // here rather than emitting an orphan turn_resolved.
     let aliveTeamCount = 0;
     let lastAliveTeamId: string | null = null;
     for (const [tid, count] of this.aliveByTeam) {
@@ -301,8 +215,7 @@ export class TurnArbiter {
       return;
     }
 
-    // Merge the forfeit worms into lastSnapshot so future
-    // advanceTurn/pickNextWormInTeam calls see them as dead.
+    // Merge forfeit worms into lastSnapshot so future lookups treat them as dead.
     const mergedWorms: WormSnapshot[] = [];
     const forfeitIds = new Set(forfeitWorms.map((w) => w.id));
     if (this.lastSnapshot) {
@@ -313,8 +226,7 @@ export class TurnArbiter {
     for (const w of forfeitWorms) mergedWorms.push(w);
     this.lastSnapshot = { worms: mergedWorms, terrainCuts: [] };
 
-    const synth: TurnSnapshot = { worms: forfeitWorms, terrainCuts: [] };
-    const nextResolution = this.advanceTurn(synth);
+    const nextResolution = this.advanceTurn();
     if (nextResolution) {
       this.room.broadcast("turn_resolved", {
         turnSeq: nextResolution.turnSeq,
@@ -326,21 +238,9 @@ export class TurnArbiter {
     }
   }
 
-  // ---- private helpers ----
+  // ---- private ----
 
-  /**
-   * Pick the next team in `teamOrder` that (a) has an owner still
-   * connected AND (b) still has alive worms. If only one team qualifies
-   * on the "alive worms" axis, emit game_over instead of advancing.
-   *
-   * Returns the next-turn info, or null if the game ended.
-   */
-  private advanceTurn(
-    _snap: TurnSnapshot,
-  ): { turnSeq: number; nextTeamId: string; nextWormId: string } | null {
-    // First: detect game_over purely on alive worms (ignoring ownership;
-    // we want the game to end if only one team has worms left even if
-    // that team's owner is still here).
+  private advanceTurn(): { turnSeq: number; nextTeamId: string; nextWormId: string } | null {
     const teamsWithAliveWorms: string[] = [];
     for (const teamId of this.room.state.teamOrder) {
       if ((this.aliveByTeam.get(teamId) ?? 0) > 0) {
@@ -353,11 +253,6 @@ export class TurnArbiter {
       return null;
     }
 
-    // Find the next team in teamOrder that's eligible: alive worms AND
-    // a connected, non-disconnected owner. Skip ownerless entries,
-    // entries whose owner has physically dropped off the client list,
-    // and entries whose owner is still inside the Epic 10 reconnect
-    // grace window.
     const connected = this.room.getConnectedSessionIds();
     const teamOrderLen = this.room.state.teamOrder.length;
     let nextTeamId = "";
@@ -377,8 +272,6 @@ export class TurnArbiter {
     }
 
     if (!nextTeamId) {
-      // No eligible team to hand off to (everyone who had alive worms
-      // disconnected). Declare game_over with no winner.
       this.declareGameOver(null);
       return null;
     }
@@ -390,7 +283,6 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.gotSnapshotThisTurn = false;
-    // New turn = fresh clock; any prior pause state is stale.
     this.pausedRemainingMs = null;
 
     return {
@@ -400,10 +292,6 @@ export class TurnArbiter {
     };
   }
 
-  /**
-   * Round-robin through a team's worm list, skipping dead worms (per
-   * the latest snapshot). If every worm is dead, returns "".
-   */
   private pickNextWormInTeam(teamId: string): string {
     const roster = this.teamRosters.get(teamId);
     if (!roster || roster.wormIds.length === 0) return "";
@@ -432,12 +320,7 @@ export class TurnArbiter {
   }
 
   private applySnapshotToAliveTally(snap: TurnSnapshot): void {
-    // Re-derive alive counts from scratch so a snapshot that revives a
-    // worm (e.g. hp clamp edge case) is respected. If a worm id from
-    // the roster isn't in the snapshot, assume its last-known alive
-    // state (no change).
     if (snap.worms.length === 0) return;
-    // Build quick lookup of "this snapshot's alive list" per worm id.
     const snapAlive = new Map<string, boolean>();
     for (const w of snap.worms) snapAlive.set(w.id, w.alive);
 
@@ -446,9 +329,6 @@ export class TurnArbiter {
       for (const wormId of roster.wormIds) {
         const explicit = snapAlive.get(wormId);
         if (explicit === undefined) {
-          // Worm not reported this snapshot; keep previous alive tally
-          // for this slot (approximate: assume alive unless we already
-          // recorded it dead via lastSnapshot).
           const priorDead = this.lastSnapshot
             ? this.lastSnapshot.worms.find((w) => w.id === wormId && !w.alive)
             : undefined;
