@@ -87,6 +87,31 @@ Worker (`worker/`):
 9. Keep alternating until one team has no alive worms. Server broadcasts
    game_over; both tabs show the win banner.
 
+## Mobile controls
+
+Touch is the primary control surface (see [`CLAUDE.md`](CLAUDE.md) "Target
+platforms"); desktop keyboard is additive. On any touch device:
+
+- **Walk**: tap-and-hold on the left or right half of the screen. Your
+  worm walks that direction until you release.
+- **Jump**: double-tap the same side within 250ms.
+- **Backflip**: long-press (400ms+) on either side.
+- **Aim + fire**: drag from the active worm (within ~40px of its sprite)
+  in the direction you want to shoot. Distance from the worm sets power.
+  Release to fire.
+- **Rope / Jetpack** (offline mode only, per [#65](https://github.com/scottmccarrison/worms/issues/65)):
+  small buttons in the top-right corner. Activating either shows a
+  4-button d-pad at the bottom-center (left / right / up / down) that
+  replaces half-screen walking while the utility is engaged.
+
+Keyboard shortcuts (desktop): arrow keys / WASD to walk, SPACE to jump,
+SHIFT for backflip, R / J to toggle rope / jetpack, F to fire, 1 / 2 / 3 to
+select weapon, ENTER to end turn.
+
+Gesture thresholds are live-tunable in the dat.gui panel (toggle with the
+`` ` `` key in dev builds) under `touch.wormHitRadiusPx`,
+`touch.doubleTapMaxMs`, `touch.longPressMs`.
+
 ## Reconnection
 
 If a player drops (network hiccup, tab crash), their slot is held for 60

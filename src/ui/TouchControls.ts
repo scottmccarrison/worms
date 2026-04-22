@@ -5,67 +5,81 @@ import type { Worm } from "../worm/Worm";
 export interface TouchControlsInit {
   scene: Phaser.Scene;
   getActiveWorm: () => Worm | null;
+  /** When true, rope + jetpack are no-ops (per plan #65) so we skip rendering
+   * any buttons. When false (offline), buttons render in the top-right corner. */
+  networked?: boolean;
 }
 
 /**
  * On-screen touch overlay with rope + jetpack buttons.
- * Positioned bottom-right, fixed to the viewport (scrollFactor 0).
- * Mobile-first: primary control surface. Keyboard is additive.
  *
- * Button layout (landscape 1280x720):
- *   JetPack btn: (sceneW - 60, sceneH - 60)
- *   Rope btn:    (sceneW - 160, sceneH - 60)
+ * Offline mode: small buttons top-right, out of the walk / aim area. Tap rope
+ * to toggle, hold jet to thrust.
+ *
+ * Networked mode: buttons are hidden entirely. Utilities aren't wired to the
+ * server yet (plan #65), so showing inert buttons would be misleading.
  */
 export class TouchControls {
   private readonly container: Phaser.GameObjects.Container;
-  private readonly ropeBtn: Phaser.GameObjects.Container;
-  private readonly jetBtn: Phaser.GameObjects.Container;
+  private ropeBtn: Phaser.GameObjects.Container | null = null;
+  private jetBtn: Phaser.GameObjects.Container | null = null;
   private readonly scene: Phaser.Scene;
 
   constructor(init: TouchControlsInit) {
     this.scene = init.scene;
+    // Always make an empty container so `destroy()` and `hitsButton()` have
+    // a consistent target regardless of mode.
+    this.container = this.scene.add.container(0, 0);
+    this.container.setDepth(100);
+    this.container.setScrollFactor(0);
+
+    if (init.networked) {
+      // Networked mode: no rope / jet buttons. The container stays empty so
+      // hitsButton() always returns false and the gesture layer sees every
+      // pointerdown.
+      return;
+    }
+
     const { getActiveWorm } = init;
     const radius = tuning.touch.buttonRadiusPx;
     const sw = this.scene.scale.width;
-    const sh = this.scene.scale.height;
 
-    // --- Rope button ---
-    this.ropeBtn = this._makeButton({
+    // --- Rope button (top-right, inboard) ---
+    const ropeBtn = this._makeButton({
       fillColor: 0x2266cc,
       strokeColor: 0x88aaff,
       label: "R",
       radius,
     });
-    this.ropeBtn.setPosition(sw - 160, sh - 60);
+    ropeBtn.setPosition(sw - 60 - (radius * 2 + 10), 60);
+    this.ropeBtn = ropeBtn;
 
-    // --- JetPack button ---
-    this.jetBtn = this._makeButton({
+    // --- JetPack button (top-right corner) ---
+    const jetBtn = this._makeButton({
       fillColor: 0xcc6600,
       strokeColor: 0xff9933,
       label: "J",
       radius,
     });
-    this.jetBtn.setPosition(sw - 60, sh - 60);
+    jetBtn.setPosition(sw - 60, 60);
+    this.jetBtn = jetBtn;
 
-    // --- Container wrapping both ---
-    this.container = this.scene.add.container(0, 0, [this.ropeBtn, this.jetBtn]);
-    this.container.setDepth(100);
-    this.container.setScrollFactor(0);
+    this.container.add([ropeBtn, jetBtn]);
 
     // --- Rope: tap to toggle ---
-    this.ropeBtn.setInteractive({
+    ropeBtn.setInteractive({
       hitArea: new Phaser.Geom.Circle(0, 0, radius),
       hitAreaCallback: Phaser.Geom.Circle.Contains,
     });
-    this.ropeBtn.on("pointerdown", () => {
+    ropeBtn.on("pointerdown", () => {
       const w = getActiveWorm();
       if (!w) return;
       w.ropeUtility.isActive() ? w.ropeUtility.deactivate() : w.ropeUtility.activate();
-      this._flashButton(this.ropeBtn, w.ropeUtility.isActive());
+      this._flashButton(ropeBtn, w.ropeUtility.isActive());
     });
 
     // --- JetPack: hold to thrust (pointerdown = activate, pointerup = deactivate) ---
-    this.jetBtn.setInteractive({
+    jetBtn.setInteractive({
       hitArea: new Phaser.Geom.Circle(0, 0, radius),
       hitAreaCallback: Phaser.Geom.Circle.Contains,
     });
@@ -73,21 +87,21 @@ export class TouchControls {
       const w = getActiveWorm();
       if (!w) return;
       if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-      this._setButtonAlpha(this.jetBtn, false);
+      this._setButtonAlpha(jetBtn, false);
     };
-    this.jetBtn.on("pointerdown", () => {
+    jetBtn.on("pointerdown", () => {
       const w = getActiveWorm();
       if (!w) return;
       if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
-      this._setButtonAlpha(this.jetBtn, true);
+      this._setButtonAlpha(jetBtn, true);
     });
-    this.jetBtn.on("pointerup", jetDeactivate);
-    this.jetBtn.on("pointerupoutside", jetDeactivate);
-    this.jetBtn.on("pointerout", jetDeactivate);
+    jetBtn.on("pointerup", jetDeactivate);
+    jetBtn.on("pointerupoutside", jetDeactivate);
+    jetBtn.on("pointerout", jetDeactivate);
 
     // Set idle alpha on both
-    this.ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
-    this.jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
   }
 
   /**

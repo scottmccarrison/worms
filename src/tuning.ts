@@ -58,6 +58,15 @@ interface Tuning {
     buttonRadiusPx: number;
     buttonIdleAlpha: number;
     buttonPressedAlpha: number;
+    /** Radius around the active worm (in pixels) where a pointerdown is
+     * treated as aim-intent instead of walk-intent. */
+    wormHitRadiusPx: number;
+    /** Max ms between two walk-side taps for the second to count as a
+     * double-tap (-> jump). */
+    doubleTapMaxMs: number;
+    /** Min ms a walk touch must be held (without drag) to count as a
+     * long-press (-> backflip). */
+    longPressMs: number;
   };
   maps: {
     /** Default map id used on first load. Must be a valid registry key. */
@@ -113,6 +122,9 @@ export const tuning: Tuning = {
     buttonRadiusPx: 28,
     buttonIdleAlpha: 0.55,
     buttonPressedAlpha: 1.0,
+    wormHitRadiusPx: 40,
+    doubleTapMaxMs: 250,
+    longPressMs: 400,
   },
   maps: {
     defaultId: "hills", // registry lookup; falls back to firstId() if invalid
