@@ -363,9 +363,30 @@ export class LobbyScene extends Phaser.Scene {
     if (this.currentRoomCode && room.resumeToken) {
       saveRoomToken(this.currentRoomCode, room.resumeToken);
     }
+    // Defensive: if we reconnect into a live game, don't render the lobby UI.
+    // The game_started message (sent by the server on resume into phase=playing)
+    // will transition to GameScene momentarily.
+    if (room.state?.phase === "playing") {
+      this.showReconnectingPlaceholder();
+      return;
+    }
+
     // First render can run immediately; state has already arrived by the time
     // the join promise resolves (welcome message populates the handle).
     this.renderRoom();
+  }
+
+  private showReconnectingPlaceholder(): void {
+    this.clearRoom();
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    const placeholder = this.add
+      .text(cx, cy, "Reconnecting...", {
+        ...TEXT_STYLE_BODY,
+        fontSize: "24px",
+      })
+      .setOrigin(0.5);
+    this.roomObjects.push(placeholder);
   }
 
   /**
@@ -652,10 +673,16 @@ export class LobbyScene extends Phaser.Scene {
       this.roomObjects.push(...startBtn);
 
       if (!vm.canStart) {
-        const reason = this.add
-          .text(cx, y + 50, "Need 2+ players, all non-host ready", TEXT_STYLE_SMALL)
-          .setOrigin(0.5);
-        this.roomObjects.push(reason);
+        const msg =
+          vm.startBlockedReason === "need-players"
+            ? "Waiting for another player to join..."
+            : vm.startBlockedReason === "need-ready"
+              ? "Waiting for players to ready up..."
+              : "";
+        if (msg) {
+          const reason = this.add.text(cx, y + 50, msg, TEXT_STYLE_SMALL).setOrigin(0.5);
+          this.roomObjects.push(reason);
+        }
       }
     } else {
       // Non-host sees Ready toggle.
