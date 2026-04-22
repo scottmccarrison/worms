@@ -41,6 +41,7 @@ class StubRoom implements ArbiterRoomAdapter {
   connected = new Set<string>();
   disconnectedPlayers = new Set<string>();
   provider = new StubAliveCountsProvider();
+  turnStartCount = 0;
 
   broadcast(type: string, payload: unknown): void {
     this.broadcasts.push({ type, payload });
@@ -53,6 +54,9 @@ class StubRoom implements ArbiterRoomAdapter {
   }
   getAliveCountsProvider(): AliveCountsProvider | null {
     return this.provider;
+  }
+  onTurnStart(): void {
+    this.turnStartCount += 1;
   }
 }
 
@@ -235,5 +239,23 @@ describe("TurnArbiter", () => {
     expect(arbiter.isGameOver()).toBe(false);
     arbiter.onTeamForfeit("red");
     expect(arbiter.isGameOver()).toBe(true);
+  });
+
+  it("onTurnStart fires once on start() and once per advanceTurn()", () => {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+    // start() fires onTurnStart once.
+    expect(room.turnStartCount).toBe(1);
+
+    // Force timer elapsed, trigger advance.
+    room.state.turnEndsAt = Date.now() - 10_000;
+    arbiter.onTick(50);
+    // advanceTurn() fires onTurnStart again.
+    expect(room.turnStartCount).toBe(2);
   });
 });

@@ -67,6 +67,10 @@ export interface SimAdapter {
   getActiveTeamId(): string;
   /** Seconds remaining on the active turn. Server-authoritative when networked. */
   getTurnSecondsRemaining(): number;
+  /** Wind strength -1..1; negative = leftward. Zero in offline mode. */
+  getWind(): number;
+  /** Water level in pixels. Number.MAX_SAFE_INTEGER means no water. */
+  getWaterLevelPx(): number;
 
   // ---- Input accepters (caller is whoever holds the local input device) ----
   walk(dir: -1 | 0 | 1): void;

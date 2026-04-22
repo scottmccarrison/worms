@@ -368,6 +368,61 @@ describe("Simulation - fire / cut / damage", () => {
   });
 });
 
+describe("Simulation - wind and water", () => {
+  it("wind pushes a projectile horizontally", () => {
+    const sim = makeSim(twoTeams());
+    // Settle worms.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+
+    // Fire a bazooka aimed sharply upward so it stays in flight long enough
+    // for wind to accumulate horizontal drift. Aim nearly straight up.
+    sim.applyAimAngle("Red-1", -Math.PI / 2 + 0.1); // nearly straight up
+    sim.applyAimPower("Red-1", 0.5);
+    sim.applySelectWeapon("Red-1", "bazooka");
+    sim.applyFire("Red-1");
+
+    // Record x position of the projectile right after spawn.
+    const stateAfterFire = sim.toSimState();
+    const projAfterFire = stateAfterFire.projectiles[0];
+    expect(projAfterFire).toBeDefined();
+    const startX = projAfterFire?.x ?? 0;
+
+    // Apply strong rightward wind and tick 30 frames.
+    sim.setWind(1);
+    for (let i = 0; i < 30; i++) sim.tick(50);
+
+    const stateAfterWind = sim.toSimState();
+    // wind should be reflected in toSimState().
+    expect(stateAfterWind.wind).toBe(1);
+
+    // If projectile is still in flight, it should have drifted right (x increased).
+    const projAfterWind = stateAfterWind.projectiles.find(
+      (p: { id: string }) => p.id === projAfterFire?.id,
+    );
+    if (projAfterWind) {
+      expect((projAfterWind as { x: number }).x).toBeGreaterThan(startX);
+    }
+  });
+
+  it("water drowns a worm below the water level", () => {
+    const sim = makeSim(twoTeams());
+    // Settle.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+
+    // Worms spawn at FLOOR_Y - 40px (FLOOR_Y = 612, so ~572px y coordinate).
+    // Setting waterLevelPx to 200 places the water surface at y=200.
+    // Since worms are at y~572 > 200, they are below the water surface.
+    sim.setWaterLevel(200);
+    const result = sim.tick(50);
+
+    const drowned = result.events.find(
+      (e: { type: string; wormId?: string }) => e.type === "worm_died" && e.wormId === "Red-1",
+    );
+    expect(drowned).toBeDefined();
+    expect(requireWorm(sim, "Red-1").alive).toBe(false);
+  });
+});
+
 describe("Simulation - serialize/restore", () => {
   it("serialize + restore reproduces worm positions + health", () => {
     const sim1 = makeSim(twoTeams());
@@ -392,6 +447,24 @@ describe("Simulation - serialize/restore", () => {
       expect(w2?.y).toBeCloseTo(w.y, 3);
       expect(w2?.hp).toBe(w.hp);
     }
+  });
+
+  it("serialize + restore preserves wind and waterLevelPx", () => {
+    const sim1 = makeSim(twoTeams());
+    for (let i = 0; i < 5; i++) sim1.tick(50);
+
+    sim1.setWind(0.7);
+    sim1.setWaterLevel(500);
+
+    const serialized = sim1.serialize();
+    expect(serialized.wind).toBe(0.7);
+    expect(serialized.waterLevelPx).toBe(500);
+
+    const sim2 = makeSim(twoTeams());
+    sim2.restore(serialized);
+    const state = sim2.toSimState();
+    expect(state.wind).toBe(0.7);
+    expect(state.waterLevelPx).toBe(500);
   });
 });
 

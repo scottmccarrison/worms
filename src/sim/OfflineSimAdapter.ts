@@ -226,6 +226,14 @@ export class OfflineSimAdapter implements SimAdapter {
     return this.turnManager.getTurnSecondsRemaining();
   }
 
+  getWind(): number {
+    return 0;
+  }
+
+  getWaterLevelPx(): number {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
   walk(dir: -1 | 0 | 1): void {
     if (!this.inputAllowed) return;
     this.turnManager.getActiveWorm()?.walk(dir);

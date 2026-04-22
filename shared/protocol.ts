@@ -184,6 +184,10 @@ export interface SimState {
   activeWormId: string;
   /** ms-epoch time at which the active turn ends (client ticks down locally). */
   turnEndsAt: number;
+  /** Wind strength -1..1, negative = leftward. Applied as horizontal force on projectiles. */
+  wind: number;
+  /** Y coordinate (pixels) below which worms drown. Number.MAX_SAFE_INTEGER = no water. */
+  waterLevelPx: number;
 }
 
 /**

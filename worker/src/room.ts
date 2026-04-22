@@ -522,7 +522,10 @@ export class Room implements DurableObject {
       // activeWormId, turnEndsAt are merged in from the lobby at the
       // broadcast site below.
       let simTickEvents: SimEvent[] = [];
-      let simTickState: Pick<SimState, "tick" | "worms" | "projectiles"> | null = null;
+      let simTickState: Pick<
+        SimState,
+        "tick" | "worms" | "projectiles" | "wind" | "waterLevelPx"
+      > | null = null;
       if (lobby.phase === "playing" && this.sim) {
         this.drainInputs();
         const result = this.sim.tick(SIM_TICK_MS, lobby.currentWormId || null);
@@ -1044,7 +1047,28 @@ export class Room implements DurableObject {
       getAliveCountsProvider(): AliveCountsProvider | null {
         return self.sim;
       },
+      onTurnStart(): void {
+        self.onTurnStart();
+      },
     };
+  }
+
+  private onTurnStart(): void {
+    if (!this.sim || !this.lobby) return;
+    const turnSeq = this.lobby.turnSeq;
+
+    // Wind: random per turn, rounded to 0.1 precision.
+    const w = Math.round((Math.random() * 2 - 1) * 10) / 10;
+    this.sim.setWind(w);
+
+    // Sudden-death water: after turnSeq >= threshold, rise linearly.
+    const SUDDEN_DEATH_TURN = 15; // Mirror of tuning.water.suddenDeathTurn.
+    const RISE_PX_PER_TURN = 50; // Mirror of tuning.water.risePxPerTurn.
+    if (turnSeq >= SUDDEN_DEATH_TURN) {
+      const turnsIntoSuddenDeath = turnSeq - SUDDEN_DEATH_TURN;
+      const waterY = WORLD_HEIGHT_PX - turnsIntoSuddenDeath * RISE_PX_PER_TURN;
+      this.sim.setWaterLevel(Math.max(0, waterY));
+    }
   }
 
   private handleFinalLeave(sessionId: string): void {

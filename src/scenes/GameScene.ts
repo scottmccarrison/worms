@@ -13,6 +13,7 @@ import { NetworkedSimAdapter } from "../sim/NetworkedSimAdapter";
 import { OfflineSimAdapter } from "../sim/OfflineSimAdapter";
 import type { RenderableWorm, SimAdapter, SimEvent } from "../sim/SimAdapter";
 import { TerrainRenderer } from "../terrain/TerrainRenderer";
+import { WaterRenderer } from "../terrain/WaterRenderer";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
@@ -21,6 +22,7 @@ import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { UtilityDPad } from "../ui/UtilityDPad";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
+import { WindHUD } from "../ui/WindHUD";
 import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
 import type { Team } from "../worm/Team";
 import type { Worm } from "../worm/Worm";
@@ -59,6 +61,10 @@ export class GameScene extends Phaser.Scene {
   private wormSprites: Map<string, WormSprite> = new Map();
   /** Fallback graphics for server-spawned projectiles (networked mode). */
   private projectileGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
+
+  // ---- Wind + water HUD / rendering ----
+  private windHUD: WindHUD | null = null;
+  private waterRenderer: WaterRenderer | null = null;
 
   // ---- Scene-level UI (same for both modes) ----
   private debugGfx!: Phaser.GameObjects.Graphics;
@@ -250,6 +256,10 @@ export class GameScene extends Phaser.Scene {
       this.spectatorHUD?.destroy();
       this.utilityDPad?.destroy();
       this.utilityDPad = null;
+      this.windHUD?.destroy();
+      this.windHUD = null;
+      this.waterRenderer?.destroy();
+      this.waterRenderer = null;
       this.reconnectingOverlay?.destroy();
       this.reconnectingOverlay = null;
       this.disconnectTick?.remove(false);
@@ -349,6 +359,17 @@ export class GameScene extends Phaser.Scene {
       this.wireNetworkedScene();
     }
 
+    // Wind HUD and water renderer (both modes).
+    const sceneWidthPx = this.serverWidthPx ?? this.scale.width;
+    const sceneHeightPx = this.serverHeightPx ?? this.scale.height;
+    this.windHUD = new WindHUD({ scene: this, sim: this.sim });
+    this.waterRenderer = new WaterRenderer({
+      scene: this,
+      sim: this.sim,
+      widthPx: sceneWidthPx,
+      heightPx: sceneHeightPx,
+    });
+
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
     this.hud = this.add
@@ -380,6 +401,8 @@ export class GameScene extends Phaser.Scene {
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
     this.weaponDrawer.update();
     this.aimHUD.update();
+    this.windHUD?.update();
+    this.waterRenderer?.update();
     this.refreshUtilityDPad();
     const selectedId = this.getSelectedWeaponId();
     const weapon = allWeapons().find((w) => w.id === selectedId);

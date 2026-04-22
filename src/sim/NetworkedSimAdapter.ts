@@ -191,6 +191,14 @@ export class NetworkedSimAdapter implements SimAdapter {
     return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
   }
 
+  getWind(): number {
+    return this.currFrame?.state.wind ?? 0;
+  }
+
+  getWaterLevelPx(): number {
+    return this.currFrame?.state.waterLevelPx ?? Number.MAX_SAFE_INTEGER;
+  }
+
   walk(dir: -1 | 0 | 1): void {
     // Transition-only send: walk() is called every frame by InputController
     // while a key is held; the server only needs press/release edges.
