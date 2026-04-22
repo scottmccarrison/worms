@@ -152,6 +152,8 @@ export interface WormRenderState {
   alive: boolean;
   activeWeapon: string;
   ammoLeft: number;
+  jetPackActive: boolean;
+  jetPackFuel: number; // 0-100
 }
 
 /**
@@ -293,4 +295,7 @@ export type ClientMsg =
   | { type: "input_select_weapon"; weaponId: string; seq: number }
   | { type: "input_fire"; seq: number }
   | { type: "input_end_turn"; seq: number }
+  | { type: "input_jetpack_toggle"; seq: number }
+  | { type: "input_jetpack_thrust"; active: boolean; seq: number }
+  | { type: "input_jetpack_horizontal"; dir: -1 | 0 | 1; seq: number }
   | { type: "leave" };
