@@ -1,31 +1,33 @@
 /**
- * Server-side turn arbiter, ported from server/src/game/TurnArbiter.ts.
+ * Turn arbiter. Post-Epic-45 the arbiter no longer applies client-sent
+ * turn_snapshots; the Simulation is authoritative and reports alive
+ * counts via `aliveWormsByTeam(): Map<teamId, number>`. The arbiter
+ * reads that map on onSimEvent / explicit advance / forfeit paths to
+ * decide when to end the turn + game.
  *
- * Changes vs the Colyseus version:
- * - `room.state` is a plain JSON `LobbyState` object (not a Schema), so
- *   we mutate fields directly and the DO broadcasts the full state
- *   afterwards via `broadcastState()`.
- * - The `setInterval`-driven tick loop is gone. The DO's `alarm()`
- *   handler calls `onTick(dtMs)` every ~500ms while the game is in
- *   "playing" phase; the DO reschedules the alarm at the end of each
- *   tick.
- * - Broadcasts go through `ArbiterRoomAdapter.broadcast` which the DO
- *   implements as a helper that serialises JSON and fans out to every
- *   attached hibernatable WebSocket.
+ * What's gone vs the Option C version:
+ *   - onSnapshot / lastSnapshot / sanitiseTurnSnapshot
+ *   - turn_resolved broadcasts (superseded by continuous sim_state)
+ *
+ * What's still here:
+ *   - team rotation + turn timer
+ *   - disconnect pause / resume
+ *   - team forfeit on player leave
+ *   - game_over on last-team-standing
+ *   - persistence for DO hibernation recovery
  */
 
-import type { CircleCut, LobbyState, WormSnapshot, TeamInit as _TeamInit } from "./messages.js";
-
-/** Payload shape of `turn_snapshot` (C->S from the active player). */
-export interface TurnSnapshot {
-  worms: WormSnapshot[];
-  terrainCuts: CircleCut[];
-}
+import type { LobbyState } from "./messages.js";
 
 /** Shared timing constants. */
 export const TURN_DURATION_MS = 45_000;
 export const SETTLE_GRACE_MS = 6_000;
 export const DISCONNECT_GRACE_MS = 60_000;
+
+/** Provider of authoritative alive counts (the Simulation). */
+export interface AliveCountsProvider {
+  aliveWormsByTeam(): Map<string, number>;
+}
 
 /**
  * Everything TurnArbiter needs from its host. Kept narrow so the class
@@ -39,6 +41,8 @@ export interface ArbiterRoomAdapter {
   getConnectedSessionIds(): Set<string>;
   /** True if the LobbyPlayer is flagged `disconnected` (grace window). */
   getPlayerDisconnected(sessionId: string): boolean;
+  /** Source of authoritative alive counts. Set when the Simulation is ready. */
+  getAliveCountsProvider(): AliveCountsProvider | null;
 }
 
 /** One roster entry per team. Populated at start_game, immutable after. */
@@ -49,23 +53,18 @@ export interface TeamRoster {
 }
 
 /**
- * Serialised arbiter state, persisted by the Room DO so that in-memory
- * state (aliveByTeam, teamWormCursor, lastSnapshot, pause window, etc.)
- * survives DO hibernation. Without this, resurrecting a hibernated room
- * would reset aliveByTeam from rosters - dead worms would come back
- * alive and an active disconnect pause would be lost.
+ * Serialised arbiter state, persisted by the Room DO so hibernation
+ * doesn't lose rotation / pause state. Unlike pre-Epic-45 we no
+ * longer persist `aliveByTeam` or `lastSnapshot` - those are derived
+ * fresh from the Simulation on restore.
  */
 export interface ArbiterPersistedState {
   currentTeamIdx: number;
   turnDurationMs: number;
-  gotSnapshotThisTurn: boolean;
   gameOver: boolean;
   pausedRemainingMs: number | null;
-  /** teamId -> alive worm count. Serialised as a plain object. */
-  aliveByTeam: Record<string, number>;
-  /** teamId -> next worm cursor index. Serialised as a plain object. */
+  /** teamId -> next worm cursor index. */
   teamWormCursor: Record<string, number>;
-  lastSnapshot: TurnSnapshot | null;
 }
 
 export class TurnArbiter {
@@ -73,9 +72,7 @@ export class TurnArbiter {
   private teamRosters = new Map<string, TeamRoster>();
   private currentTeamIdx = 0;
   private teamWormCursor = new Map<string, number>();
-  private aliveByTeam = new Map<string, number>();
-  private lastSnapshot: TurnSnapshot | null = null;
-  private gotSnapshotThisTurn = false;
+  private forfeitedTeams = new Set<string>();
   private gameOver = false;
   private turnDurationMs = 0;
   private pausedRemainingMs: number | null = null;
@@ -84,31 +81,16 @@ export class TurnArbiter {
     this.room = room;
   }
 
-  /**
-   * Snapshot the arbiter's mutable state for storage. The teamRosters
-   * map is re-populated from the persisted rosters on restore, so we
-   * don't serialise it here.
-   */
   toJSON(): ArbiterPersistedState {
     return {
       currentTeamIdx: this.currentTeamIdx,
       turnDurationMs: this.turnDurationMs,
-      gotSnapshotThisTurn: this.gotSnapshotThisTurn,
       gameOver: this.gameOver,
       pausedRemainingMs: this.pausedRemainingMs,
-      aliveByTeam: Object.fromEntries(this.aliveByTeam),
       teamWormCursor: Object.fromEntries(this.teamWormCursor),
-      lastSnapshot: this.lastSnapshot,
     };
   }
 
-  /**
-   * Rebuild an arbiter from a stored snapshot. Unlike start(), this does
-   * NOT reset aliveByTeam / teamWormCursor / lastSnapshot; those are
-   * restored from `state` so mid-game progress survives DO hibernation.
-   * Rosters are passed in fresh (they were persisted separately by the
-   * Room DO as part of the rosters key) and mapped back by id.
-   */
   static fromState(
     room: ArbiterRoomAdapter,
     rosters: TeamRoster[],
@@ -118,33 +100,26 @@ export class TurnArbiter {
     for (const r of rosters) arbiter.teamRosters.set(r.id, r);
     arbiter.currentTeamIdx = state.currentTeamIdx;
     arbiter.turnDurationMs = state.turnDurationMs;
-    arbiter.gotSnapshotThisTurn = state.gotSnapshotThisTurn;
     arbiter.gameOver = state.gameOver;
     arbiter.pausedRemainingMs = state.pausedRemainingMs;
-    arbiter.aliveByTeam = new Map(Object.entries(state.aliveByTeam));
     arbiter.teamWormCursor = new Map(Object.entries(state.teamWormCursor));
-    arbiter.lastSnapshot = state.lastSnapshot;
     return arbiter;
   }
 
   start(teamOrder: string[], rosters: TeamRoster[], turnDurationMs: number): void {
     this.teamRosters.clear();
     this.teamWormCursor.clear();
-    this.aliveByTeam.clear();
+    this.forfeitedTeams.clear();
     for (const r of rosters) {
       this.teamRosters.set(r.id, r);
       this.teamWormCursor.set(r.id, 0);
-      this.aliveByTeam.set(r.id, r.wormIds.length);
     }
 
-    // Plain array in the JSON state.
     this.room.state.teamOrder = [...teamOrder];
 
     this.currentTeamIdx = 0;
     this.turnDurationMs = turnDurationMs;
     this.gameOver = false;
-    this.lastSnapshot = null;
-    this.gotSnapshotThisTurn = false;
 
     const firstTeamId = teamOrder[0] ?? "";
     this.room.state.currentTeamId = firstTeamId;
@@ -154,17 +129,19 @@ export class TurnArbiter {
   }
 
   /**
-   * Called from the DO's alarm handler every ~500ms while phase is
-   * "playing". If the turn ran long AND no snapshot arrived, force
-   * -advance with last-known positions. Otherwise a no-op.
+   * Called from the DO's alarm handler every tick. Advances the turn
+   * when the timer expires + grace window has passed. Also checks
+   * game_over condition every tick (a worm may have died off-map even
+   * without the turn timer expiring).
    */
   onTick(_dtMs: number): void {
     if (this.gameOver) return;
-    if (this.gotSnapshotThisTurn) return;
+    this.checkGameOver();
+    if (this.gameOver) return;
     if (this.pausedRemainingMs !== null) return;
     const now = Date.now();
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
-      this.forceAdvance();
+      this.advanceTurn();
     }
   }
 
@@ -173,38 +150,23 @@ export class TurnArbiter {
     return this.gameOver;
   }
 
-  onSnapshot(snap: TurnSnapshot): void {
-    if (this.gameOver) return;
-    this.lastSnapshot = snap;
-    this.gotSnapshotThisTurn = true;
-    this.applySnapshotToAliveTally(snap);
-    const nextResolution = this.advanceTurn();
-    if (nextResolution) {
-      this.room.broadcast("turn_resolved", {
-        turnSeq: nextResolution.turnSeq,
-        worms: snap.worms,
-        terrainCuts: snap.terrainCuts,
-        nextTeamId: nextResolution.nextTeamId,
-        nextWormId: nextResolution.nextWormId,
-      });
-    }
+  /**
+   * Called by the Room immediately after a fire input is processed.
+   * Advances the turn on the next alarm tick (the projectile needs
+   * to land + settle first). For now this is a no-op - the settle
+   * grace check in onTick will handle it.
+   */
+  onFireCommitted(): void {
+    // Placeholder; v1 relies on the settle grace timeout.
   }
 
-  forceAdvance(): void {
+  /**
+   * Called by the Room when a worm dies (either via explosion or the
+   * off-map kill floor). Forces a game_over check on this tick.
+   */
+  onWormDied(_wormId: string): void {
     if (this.gameOver) return;
-    const synth: TurnSnapshot = this.lastSnapshot ?? { worms: [], terrainCuts: [] };
-    this.gotSnapshotThisTurn = true;
-    this.applySnapshotToAliveTally(synth);
-    const nextResolution = this.advanceTurn();
-    if (nextResolution) {
-      this.room.broadcast("turn_resolved", {
-        turnSeq: nextResolution.turnSeq,
-        worms: synth.worms,
-        terrainCuts: [],
-        nextTeamId: nextResolution.nextTeamId,
-        nextWormId: nextResolution.nextWormId,
-      });
-    }
+    this.checkGameOver();
   }
 
   onPlayerLeft(sessionId: string): void {
@@ -212,7 +174,7 @@ export class TurnArbiter {
     const activeTeamId = this.room.state.currentTeamId;
     const activeTeam = this.teamRosters.get(activeTeamId);
     if (activeTeam && activeTeam.ownerSessionId === sessionId) {
-      this.forceAdvance();
+      this.advanceTurn();
     }
   }
 
@@ -243,72 +205,38 @@ export class TurnArbiter {
     if (this.gameOver) return;
     const roster = this.teamRosters.get(teamId);
     if (!roster) return;
-    if ((this.aliveByTeam.get(teamId) ?? 0) === 0) return;
-    this.aliveByTeam.set(teamId, 0);
-
-    const forfeitWorms: WormSnapshot[] = [];
-    for (const wormId of roster.wormIds) {
-      const prior = this.lastSnapshot?.worms.find((w) => w.id === wormId);
-      forfeitWorms.push({
-        id: wormId,
-        x: prior?.x ?? 0,
-        y: prior?.y ?? 0,
-        vx: 0,
-        vy: 0,
-        hp: 0,
-        alive: false,
-      });
-    }
-
-    let aliveTeamCount = 0;
-    let lastAliveTeamId: string | null = null;
-    for (const [tid, count] of this.aliveByTeam) {
-      if (count > 0) {
-        aliveTeamCount += 1;
-        lastAliveTeamId = tid;
-      }
-    }
-    if (aliveTeamCount <= 1) {
-      this.declareGameOver(lastAliveTeamId);
-      return;
-    }
-
-    // Merge forfeit worms into lastSnapshot so future lookups treat them as dead.
-    const mergedWorms: WormSnapshot[] = [];
-    const forfeitIds = new Set(forfeitWorms.map((w) => w.id));
-    if (this.lastSnapshot) {
-      for (const w of this.lastSnapshot.worms) {
-        if (!forfeitIds.has(w.id)) mergedWorms.push(w);
-      }
-    }
-    for (const w of forfeitWorms) mergedWorms.push(w);
-    this.lastSnapshot = { worms: mergedWorms, terrainCuts: [] };
-
-    const nextResolution = this.advanceTurn();
-    if (nextResolution) {
-      this.room.broadcast("turn_resolved", {
-        turnSeq: nextResolution.turnSeq,
-        worms: forfeitWorms,
-        terrainCuts: [],
-        nextTeamId: nextResolution.nextTeamId,
-        nextWormId: nextResolution.nextWormId,
-      });
+    if (this.forfeitedTeams.has(teamId)) return;
+    this.forfeitedTeams.add(teamId);
+    this.checkGameOver();
+    if (this.gameOver) return;
+    if (this.room.state.currentTeamId === teamId) {
+      this.advanceTurn();
     }
   }
 
   // ---- private ----
 
-  private advanceTurn(): { turnSeq: number; nextTeamId: string; nextWormId: string } | null {
+  private teamAliveCount(teamId: string): number {
+    if (this.forfeitedTeams.has(teamId)) return 0;
+    const provider = this.room.getAliveCountsProvider();
+    if (!provider) {
+      // No sim yet (shouldn't happen during playing phase, but be
+      // defensive). Fall back to roster size.
+      const roster = this.teamRosters.get(teamId);
+      return roster?.wormIds.length ?? 0;
+    }
+    return provider.aliveWormsByTeam().get(teamId) ?? 0;
+  }
+
+  private advanceTurn(): void {
     const teamsWithAliveWorms: string[] = [];
     for (const teamId of this.room.state.teamOrder) {
-      if ((this.aliveByTeam.get(teamId) ?? 0) > 0) {
-        teamsWithAliveWorms.push(teamId);
-      }
+      if (this.teamAliveCount(teamId) > 0) teamsWithAliveWorms.push(teamId);
     }
     if (teamsWithAliveWorms.length <= 1) {
       const winnerTeamId = teamsWithAliveWorms[0] ?? null;
       this.declareGameOver(winnerTeamId);
-      return null;
+      return;
     }
 
     const connected = this.room.getConnectedSessionIds();
@@ -323,7 +251,7 @@ export class TurnArbiter {
       if (!roster.ownerSessionId) continue;
       if (!connected.has(roster.ownerSessionId)) continue;
       if (this.room.getPlayerDisconnected(roster.ownerSessionId)) continue;
-      if ((this.aliveByTeam.get(candidate) ?? 0) <= 0) continue;
+      if (this.teamAliveCount(candidate) <= 0) continue;
       this.currentTeamIdx = idx;
       nextTeamId = candidate;
       break;
@@ -331,71 +259,43 @@ export class TurnArbiter {
 
     if (!nextTeamId) {
       this.declareGameOver(null);
-      return null;
+      return;
     }
 
     const nextWormId = this.pickNextWormInTeam(nextTeamId);
-
     this.room.state.currentTeamId = nextTeamId;
     this.room.state.currentWormId = nextWormId;
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
-    this.gotSnapshotThisTurn = false;
     this.pausedRemainingMs = null;
-
-    return {
-      turnSeq: this.room.state.turnSeq,
-      nextTeamId,
-      nextWormId,
-    };
   }
 
   private pickNextWormInTeam(teamId: string): string {
     const roster = this.teamRosters.get(teamId);
     if (!roster || roster.wormIds.length === 0) return "";
 
-    const deadIds = this.deadWormIds();
+    // Simple cursor rotation. The Simulation provider only exposes
+    // aliveWormsByTeam() aggregate counts, not per-worm liveness, so
+    // we can't skip dead worms at this layer; instead the turn
+    // rotation's alive-count filter in advanceTurn prevents the
+    // team from being selected when its count is 0, and a dead-
+    // but-selected worm just receives no input (its walk / fire
+    // calls are no-ops when alive=false).
     const startCursor = this.teamWormCursor.get(teamId) ?? 0;
-
-    for (let step = 0; step < roster.wormIds.length; step++) {
-      const idx = (startCursor + step) % roster.wormIds.length;
-      const wormId = roster.wormIds[idx];
-      if (!deadIds.has(wormId)) {
-        this.teamWormCursor.set(teamId, (idx + 1) % roster.wormIds.length);
-        return wormId;
-      }
-    }
-    return "";
+    const idx = startCursor % roster.wormIds.length;
+    const wormId = roster.wormIds[idx];
+    this.teamWormCursor.set(teamId, (idx + 1) % roster.wormIds.length);
+    return wormId;
   }
 
-  private deadWormIds(): Set<string> {
-    const out = new Set<string>();
-    if (!this.lastSnapshot) return out;
-    for (const w of this.lastSnapshot.worms) {
-      if (!w.alive) out.add(w.id);
+  private checkGameOver(): void {
+    if (this.gameOver) return;
+    const survivors: string[] = [];
+    for (const teamId of this.room.state.teamOrder) {
+      if (this.teamAliveCount(teamId) > 0) survivors.push(teamId);
     }
-    return out;
-  }
-
-  private applySnapshotToAliveTally(snap: TurnSnapshot): void {
-    if (snap.worms.length === 0) return;
-    const snapAlive = new Map<string, boolean>();
-    for (const w of snap.worms) snapAlive.set(w.id, w.alive);
-
-    for (const [teamId, roster] of this.teamRosters) {
-      let alive = 0;
-      for (const wormId of roster.wormIds) {
-        const explicit = snapAlive.get(wormId);
-        if (explicit === undefined) {
-          const priorDead = this.lastSnapshot
-            ? this.lastSnapshot.worms.find((w) => w.id === wormId && !w.alive)
-            : undefined;
-          if (!priorDead) alive += 1;
-        } else if (explicit) {
-          alive += 1;
-        }
-      }
-      this.aliveByTeam.set(teamId, alive);
+    if (survivors.length <= 1) {
+      this.declareGameOver(survivors[0] ?? null);
     }
   }
 

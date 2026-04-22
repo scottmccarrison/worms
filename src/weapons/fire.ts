@@ -1,3 +1,9 @@
+/**
+ * Offline-only client sim: spawns projectiles + runs hitscan on the local
+ * planck world. Epic 45 moved authoritative fire logic to the server; this
+ * module now runs exclusively under OfflineSimAdapter. No other part of the
+ * client (GameScene, NetworkedSimAdapter) imports from here.
+ */
 import { tuning } from "../tuning";
 import { explode } from "./explode";
 import { raycastFirstHit } from "./hitscan";

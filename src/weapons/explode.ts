@@ -1,3 +1,9 @@
+/**
+ * Offline-only client sim. Epic 45 moved authoritative explosion logic
+ * (AABB query, damage, impulse) to the server. This module is used only
+ * by OfflineSimAdapter via fire.ts + ProjectileManager.ts; no production
+ * code path outside offline imports from here.
+ */
 import type { World } from "planck";
 import { Vec2 } from "planck";
 import { toMeters } from "../physics/scale";

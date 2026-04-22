@@ -13,14 +13,21 @@ export {
   type AllowedColor,
   type CircleCut,
   type ClientMsg,
+  type DamageEvent,
+  type FireEvent,
   type LobbyPlayer,
   type LobbyState,
+  type ProjectileRenderState,
   type ServerMsg,
+  type SimState,
   type TeamInit,
+  type TerrainCutEvent,
+  type WormDiedEvent,
+  type WormRenderState,
   type WormSnapshot,
 } from "../../shared/protocol";
 
-import type { ClientMsg, ServerMsg } from "../../shared/protocol";
+import type { ServerMsg } from "../../shared/protocol";
 
 // ---------------------------------------------------------------------------
 // Convenience aliases: narrow discriminated-union subtypes by the `type` tag
@@ -31,6 +38,14 @@ import type { ClientMsg, ServerMsg } from "../../shared/protocol";
 
 export type GameStartedMessage = Extract<ServerMsg, { type: "game_started" }>;
 export type ErrorMessage = Extract<ServerMsg, { type: "error" }>;
-export type TurnResolvedMessage = Extract<ServerMsg, { type: "turn_resolved" }>;
 export type GameOverMessage = Extract<ServerMsg, { type: "game_over" }>;
-export type TurnSnapshotMessage = Extract<ClientMsg, { type: "turn_snapshot" }>;
+// Note: TurnResolvedMessage + TurnSnapshotMessage were removed with Epic 45.
+// The server now broadcasts authoritative sim_state continuously instead of
+// a per-turn reconciliation. Kept the other aliases for import-site churn.
+
+// Epic 45 server-authoritative sim messages.
+export type SimStateMessage = Extract<ServerMsg, { type: "sim_state" }>;
+export type TerrainCutMessage = Extract<ServerMsg, { type: "terrain_cut" }>;
+export type FireEventMessage = Extract<ServerMsg, { type: "fire_event" }>;
+export type DamageEventMessage = Extract<ServerMsg, { type: "damage_event" }>;
+export type WormDiedMessage = Extract<ServerMsg, { type: "worm_died" }>;

@@ -118,6 +118,117 @@ export interface CircleCut {
 }
 
 // ---------------------------------------------------------------------------
+// Epic 45 - Server-authoritative sim protocol
+// ---------------------------------------------------------------------------
+//
+// The `sim_state` message supersedes `turn_resolved` + per-input relays. At
+// 20Hz the server emits a full snapshot of every worm + projectile plus the
+// currently-active team/worm + authoritative turn timer. Clients keep a
+// two-frame buffer and interpolate positions between them at 60fps.
+//
+// Coordinates are in PIXELS (client's native space). The server converts
+// from planck meters at the broadcast boundary. This keeps the client
+// renderer simple and matches the existing `WormSnapshot` convention.
+//
+// Events (terrain_cut / fire_event / damage_event / worm_died / game_over)
+// are fire-and-forget VFX triggers. Clients emit sound, particles, screen
+// shake etc. on receipt; the authoritative state continues to arrive via
+// sim_state.
+
+/**
+ * Render-ready worm state. One entry per living-or-dead worm; `alive`
+ * differentiates. Positions + velocities are in pixels / pixels-per-second.
+ */
+export interface WormRenderState {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  facing: -1 | 1;
+  aimAngle: number;
+  aimPower: number;
+  hp: number;
+  alive: boolean;
+  activeWeapon: string;
+  ammoLeft: number;
+}
+
+/**
+ * Render-ready projectile state. `fuseRemainingMs` is optional because
+ * bullet / contact-detonation weapons don't have a fuse.
+ */
+export interface ProjectileRenderState {
+  id: string;
+  /** The worm that fired this projectile. */
+  ownerId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  type: string;
+  /** Remaining fuse ms for timed weapons (grenade). `null` for contact-detonation. */
+  fuseRemainingMs: number | null;
+}
+
+/**
+ * Full sim snapshot at a given server tick. Broadcast at 20Hz.
+ */
+export interface SimState {
+  tick: number;
+  worms: WormRenderState[];
+  projectiles: ProjectileRenderState[];
+  activeTeamId: string;
+  activeWormId: string;
+  /** ms-epoch time at which the active turn ends (client ticks down locally). */
+  turnEndsAt: number;
+}
+
+/**
+ * Single terrain cut fired as an event. Visual mask + VFX only; server
+ * owns the authoritative physics-body rebuild. `seq` is monotonic; clients
+ * dedupe in case the transport retries.
+ */
+export interface TerrainCutEvent {
+  x: number;
+  y: number;
+  r: number;
+  seq: number;
+}
+
+/**
+ * Fire event for VFX: muzzle flash, sound, camera shake. Spawn-and-track
+ * is handled by sim_state's projectile list; this is just the trigger.
+ */
+export interface FireEvent {
+  wormId: string;
+  weaponId: string;
+  angleRad: number;
+  power: number;
+  /** Worm facing at fire time. Drives muzzle-flash orientation. */
+  facing: -1 | 1;
+}
+
+/**
+ * Damage applied to a worm during a server tick. Feeds damage numbers +
+ * blood particles.
+ */
+export interface DamageEvent {
+  wormId: string;
+  amount: number;
+  /** Projectile id that caused the damage, or null for collision/fall damage. */
+  fromProjectileId: string | null;
+  impact: { x: number; y: number };
+}
+
+/**
+ * Worm died on the server. Triggers death animation + scoreboard update.
+ */
+export interface WormDiedEvent {
+  wormId: string;
+}
+
+// ---------------------------------------------------------------------------
 // Server -> client messages (discriminated by `type`)
 // ---------------------------------------------------------------------------
 
@@ -126,22 +237,16 @@ export type ServerMsg =
   | { type: "state"; state: LobbyState }
   | { type: "game_started"; mapId: string; seed: number; teams: TeamInit[] }
   | { type: "game_over"; winnerTeamId: string | null }
-  | {
-      type: "turn_resolved";
-      turnSeq: number;
-      worms: WormSnapshot[];
-      terrainCuts: CircleCut[];
-      nextTeamId: string;
-      nextWormId: string;
-    }
-  | { type: "error"; code: string; message: string }
-  | { type: "input_walk"; dir: -1 | 0 | 1; seq: number }
-  | { type: "input_jump"; seq: number }
-  | { type: "input_backflip"; seq: number }
-  | { type: "input_aim_angle"; angleRad: number; seq: number }
-  | { type: "input_aim_power"; power: number; seq: number }
-  | { type: "input_select_weapon"; weaponId: string; seq: number }
-  | { type: "input_fire"; seq: number };
+  | ({ type: "sim_state" } & SimState)
+  | ({ type: "terrain_cut" } & TerrainCutEvent)
+  | ({ type: "fire_event" } & FireEvent)
+  | ({ type: "damage_event" } & DamageEvent)
+  | ({ type: "worm_died" } & WormDiedEvent)
+  | { type: "error"; code: string; message: string };
+
+// Note: Epic 9's per-input relay variants (input_walk/jump/etc as SERVER-SENT
+// messages) + turn_resolved have been removed. Server runs an authoritative
+// sim and emits sim_state + event messages only. Clients render from state.
 
 // ---------------------------------------------------------------------------
 // Client -> server messages
@@ -153,6 +258,9 @@ export type ClientMsg =
   | { type: "set_ready"; ready: boolean }
   | { type: "select_map"; mapId: string }
   | { type: "start_game" }
+  // Input messages: server-authoritative. Post-Epic-45 these are NOT
+  // relayed back to other clients; the server applies them to the
+  // authoritative sim and everyone sees the result via sim_state.
   | { type: "input_walk"; dir: -1 | 0 | 1; seq: number }
   | { type: "input_jump"; seq: number }
   | { type: "input_backflip"; seq: number }
@@ -161,5 +269,4 @@ export type ClientMsg =
   | { type: "input_select_weapon"; weaponId: string; seq: number }
   | { type: "input_fire"; seq: number }
   | { type: "input_end_turn"; seq: number }
-  | { type: "turn_snapshot"; worms: WormSnapshot[]; terrainCuts: CircleCut[] }
   | { type: "leave" };

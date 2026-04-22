@@ -1,19 +1,22 @@
 /**
  * Room - per-game Durable Object.
  *
- * Responsibilities:
- * - Accept hibernatable WebSockets (`state.acceptWebSocket`).
- * - Maintain the full LobbyState in memory (cached) + DO storage.
- * - Validate + dispatch client messages (lobby edits, start_game,
- *   input relay, turn_snapshot).
- * - Broadcast the full LobbyState on any mutation.
- * - Run the TurnArbiter alarm tick during the "playing" phase.
- * - Handle disconnect grace windows: on close, mark player
- *   disconnected + schedule an alarm to forfeit if they never come
- *   back. Resume-token reconnection swaps in the old sessionId +
- *   player data.
- * - Persist the room code (from the Worker's /init call) so reconnects
- *   can verify.
+ * Post-Epic-45 the DO owns an authoritative planck Simulation. While
+ * the game is in "playing" phase an alarm fires every 50ms (20Hz) and:
+ *   1. Drains the input queue (walk/jump/aim/fire messages from the
+ *      active player).
+ *   2. Steps the Simulation (world.step(50ms) + fuse ticks + off-map
+ *      kill floor).
+ *   3. Collects SimEvents + SimState.
+ *   4. Broadcasts sim_state + terrain_cut / fire_event / damage_event
+ *      / worm_died events to every attached socket.
+ *   5. Persists the sim + arbiter so DO hibernation is recoverable.
+ *   6. Schedules the next alarm.
+ *
+ * Input relays (`input_walk`, `input_jump`, ...) are GONE: the server
+ * is authoritative and clients see the result via sim_state. The
+ * `turn_snapshot` handler is also removed - alive counts come from
+ * the Simulation directly.
  */
 
 import {
@@ -21,10 +24,13 @@ import {
   type LobbyPlayer,
   type LobbyState,
   type ServerMsg,
+  type SimState,
   type TeamInit,
 } from "./messages.js";
-import { isValidNickname, normaliseNickname, sanitiseTurnSnapshot } from "./sanitize.js";
+import { isValidNickname, normaliseNickname } from "./sanitize.js";
+import { type SerializedSim, type SimEvent, Simulation } from "./sim/simulation.js";
 import {
+  type AliveCountsProvider,
   type ArbiterPersistedState,
   type ArbiterRoomAdapter,
   DISCONNECT_GRACE_MS,
@@ -36,8 +42,13 @@ import {
 const MAP_WHITELIST = ["flat", "hills", "island", "cave"] as const;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_CLIENTS = 8;
-const TICK_INTERVAL_MS = 500;
+/** Sim tick cadence. 50ms = 20Hz. */
+const SIM_TICK_MS = 50;
 const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000;
+
+/** Canonical physics world size. Clients use PX_PER_M=30 to render. */
+const WORLD_WIDTH_PX = 1280;
+const WORLD_HEIGHT_PX = 720;
 
 const TEAM_PALETTE: Array<{ id: string; name: string; color: string; prefix: string }> = [
   { id: "red", name: "Team Red", color: "#ff4444", prefix: "Red" },
@@ -52,32 +63,50 @@ interface WsAttachment {
   sessionId: string;
   resumeToken: string;
   joinedAt: number;
-  /** Team ownership; empty string for a lobby-only session. */
   ownerOfTeamId: string;
 }
 
-/**
- * Resume-token entry, stored in DO storage keyed by the token. The
- * token maps to a sessionId; the player row is always looked up fresh
- * from LobbyState so nickname / color / ready-state changes don't need
- * to chase the token entry.
- */
 interface ResumeEntry {
   sessionId: string;
+}
+
+/** Pending input queued during a tick window. */
+type PendingInput =
+  | { kind: "walk"; sessionId: string; dir: -1 | 0 | 1 }
+  | { kind: "jump"; sessionId: string }
+  | { kind: "backflip"; sessionId: string }
+  | { kind: "aim_angle"; sessionId: string; angleRad: number }
+  | { kind: "aim_power"; sessionId: string; power: number }
+  | { kind: "select_weapon"; sessionId: string; weaponId: string }
+  | { kind: "fire"; sessionId: string };
+
+/** Sim-kickoff metadata persisted so hibernation can rebuild. */
+interface SimBootstrap {
+  widthPx: number;
+  heightPx: number;
+  /** Base64-encoded initial terrain mask. */
+  maskBase64: string;
+  teams: Array<{
+    id: string;
+    wormIds: string[];
+    spawns: Array<{ xPx: number; yPx: number }>;
+  }>;
+  seed: number;
 }
 
 export class Room implements DurableObject {
   private readonly state: DurableObjectState;
   private readonly env: unknown;
 
-  /** In-memory cache of the LobbyState. Hydrated on first message after hibernation. */
   private lobby: LobbyState | null = null;
-  /** In-memory cache of the room code. Set by the Worker's /init call. */
   private code: string | null = null;
-  /** Arbiter is instantiated when phase transitions to "playing". */
   private arbiter: TurnArbiter | null = null;
-  /** Team rosters (ownership + worm ids), mirrored for the arbiter. */
   private rosters: TeamRoster[] = [];
+
+  private sim: Simulation | null = null;
+  private simBootstrap: SimBootstrap | null = null;
+  private pendingInputs: PendingInput[] = [];
+  private tickInProgress = false;
 
   constructor(state: DurableObjectState, env: unknown) {
     this.state = state;
@@ -111,7 +140,6 @@ export class Room implements DurableObject {
       const stored = await this.state.storage.get<LobbyState>("lobby");
       if (stored) {
         this.lobby = stored;
-        // Code is authoritative from storage.
         if (this.code && !this.lobby.code) this.lobby.code = this.code;
       } else {
         this.lobby = this.freshLobby();
@@ -121,12 +149,11 @@ export class Room implements DurableObject {
       const stored = await this.state.storage.get<TeamRoster[]>("rosters");
       if (stored) this.rosters = stored;
     }
-    // Rebuild arbiter if we come out of hibernation mid-game. Prefer
-    // the persisted arbiter state (aliveByTeam, teamWormCursor,
-    // lastSnapshot, pause window) so dead worms stay dead and an active
-    // disconnect pause carries over. Falls back to start() only if no
-    // persisted state exists (e.g. upgrade from a pre-persistence
-    // deployment).
+
+    if (this.lobby?.phase === "playing" && this.sim === null) {
+      await this.reloadSimFromStorage();
+    }
+
     if (this.lobby?.phase === "playing" && this.arbiter === null && this.rosters.length > 0) {
       const persisted = await this.state.storage.get<ArbiterPersistedState>("arbiterState");
       if (persisted) {
@@ -134,7 +161,6 @@ export class Room implements DurableObject {
       } else {
         this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
         this.arbiter.start(this.lobby.teamOrder, this.rosters, TURN_DURATION_MS);
-        // start() wrote fresh turn fields; put the stored ones back.
         const lobbyRef = this.lobby;
         this.lobby.turnSeq = lobbyRef.turnSeq;
         this.lobby.turnEndsAt = lobbyRef.turnEndsAt;
@@ -157,12 +183,40 @@ export class Room implements DurableObject {
     await this.state.storage.put("rosters", this.rosters);
   }
 
+  private async persistSim(): Promise<void> {
+    if (!this.sim) return;
+    await this.state.storage.put("simState", this.sim.serialize());
+  }
+
+  private async persistSimBootstrap(): Promise<void> {
+    if (!this.simBootstrap) return;
+    await this.state.storage.put("simBootstrap", this.simBootstrap);
+  }
+
+  private async reloadSimFromStorage(): Promise<void> {
+    if (!this.simBootstrap) {
+      const stored = await this.state.storage.get<SimBootstrap>("simBootstrap");
+      if (!stored) return;
+      this.simBootstrap = stored;
+    }
+    const bootstrap = this.simBootstrap;
+    const mask = base64ToBytes(bootstrap.maskBase64);
+    this.sim = new Simulation({
+      widthPx: bootstrap.widthPx,
+      heightPx: bootstrap.heightPx,
+      mask,
+      teams: bootstrap.teams,
+      seed: bootstrap.seed,
+    });
+    const persisted = await this.state.storage.get<SerializedSim>("simState");
+    if (persisted) this.sim.restore(persisted);
+  }
+
   // ---- HTTP fetch ----
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    // Worker -> DO init call. Stores the room code.
     if (url.pathname.endsWith("/init") && request.method === "POST") {
       await this.loadState();
       const body = (await request.json()) as { code?: string; claim?: boolean };
@@ -170,10 +224,6 @@ export class Room implements DurableObject {
       if (!code) return json({ error: "missing_code" }, 400);
       const existing = await this.state.storage.get<string>("code");
       if (body.claim && existing && existing !== code) {
-        // Another code claimed this DO slot already. Should be rare -
-        // idFromName is deterministic, so a collision means two rooms
-        // tried to claim the same code at once. Reject so the Worker
-        // can retry with a fresh code.
         return json({ error: "code_collision", existing }, 409);
       }
       if (!existing) {
@@ -191,15 +241,10 @@ export class Room implements DurableObject {
 
     await this.loadState();
 
-    // Security: reject upgrades against a DO slot that has never been
-    // /init'd. idFromName is deterministic, so without this check an
-    // attacker could hit wss://host/worms/api/room/ZZZZ directly and
-    // create a phantom lobby for a code the Worker never issued.
     if (!this.code) {
       return new Response("room not found", { status: 404 });
     }
 
-    // Parse the query string for nickname / color / resumeToken.
     const nickname = normaliseNickname(url.searchParams.get("nickname") ?? "");
     const colorRaw = url.searchParams.get("color") ?? "";
     const resumeTokenParam = url.searchParams.get("resumeToken") ?? "";
@@ -220,26 +265,14 @@ export class Room implements DurableObject {
     let player: LobbyPlayer | null = null;
     let isResume = false;
 
-    // Resume path: if the token matches a stored session, restore the
-    // old sessionId + player row and rotate the token so a replayed
-    // URL can't be reused. The ResumeEntry only stores sessionId; the
-    // player row is always read fresh from LobbyState.players so
-    // mid-lobby field edits don't need to chase the token entry.
     if (resumeTokenParam) {
       const entry = await this.state.storage.get<ResumeEntry>(`resumeToken:${resumeTokenParam}`);
       const lobby = this.ensureLobby();
       const restored = entry ? lobby.players[entry.sessionId] : undefined;
       if (entry && restored) {
         isResume = true;
-        // Clear disconnect flags on resume.
         restored.disconnected = false;
         restored.disconnectGraceEndsAt = 0;
-        // Preserve the stored nickname / color on resume. The URL params
-        // on a reconnect are whatever the client sends; if the user
-        // changed them mid-lobby, they want the mid-lobby values to
-        // survive, not be clobbered by the defaults the client rebuilt
-        // from local storage. Clients can send set_nickname / set_color
-        // after resuming if they really want to change them.
         player = restored;
 
         const newToken = generateResumeToken();
@@ -249,16 +282,10 @@ export class Room implements DurableObject {
           joinedAt: restored.joinedAt,
           ownerOfTeamId: restored.ownerOfTeamId,
         };
-        // Rotate: delete old token, write new.
         await this.state.storage.delete(`resumeToken:${resumeTokenParam}`);
         await this.state.storage.put(`resumeToken:${newToken}`, {
           sessionId: entry.sessionId,
         } satisfies ResumeEntry);
-
-        // If we were holding an alarm for this player's grace expiry,
-        // the alarm() handler is idempotent (rechecks every player on
-        // fire) so leaving it scheduled is fine - it will see the
-        // cleared flags and skip.
 
         if (this.lobby?.phase === "playing" && this.arbiter) {
           this.arbiter.onOwnerReconnected(entry.sessionId);
@@ -268,8 +295,6 @@ export class Room implements DurableObject {
     }
 
     if (!isResume) {
-      // Fresh join: auto-assign a color if the requested one is invalid
-      // or taken.
       const color =
         (ALLOWED_COLORS as readonly string[]).includes(colorRaw) &&
         !this.isColorTakenBySomeoneElse(colorRaw, null)
@@ -309,7 +334,6 @@ export class Room implements DurableObject {
     }
 
     if (!attachment || !player) {
-      // Impossible per the branching above, but keeps TS happy.
       return new Response("join failed", { status: 500 });
     }
 
@@ -318,8 +342,6 @@ export class Room implements DurableObject {
 
     await this.persistLobby();
 
-    // Send the welcome message to the new socket, then broadcast the
-    // updated state to everyone else.
     const welcome: ServerMsg = {
       type: "welcome",
       sessionId: attachment.sessionId,
@@ -329,15 +351,14 @@ export class Room implements DurableObject {
     try {
       server.send(JSON.stringify(welcome));
     } catch {
-      // swallow; client may have disconnected mid-upgrade
+      // swallow
     }
     this.broadcastState();
 
-    // On reconnect, kick the arbiter timer back to life via an alarm.
     if (this.lobby?.phase === "playing" && !this.arbiter) {
       this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
     }
-    await this.maybeScheduleTickAlarm();
+    await this.ensureRunning();
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -381,9 +402,6 @@ export class Room implements DurableObject {
       case "start_game":
         await this.onStartGame(ws, player);
         break;
-      case "turn_snapshot":
-        await this.onTurnSnapshot(attachment.sessionId, msg);
-        break;
       case "input_walk":
       case "input_jump":
       case "input_backflip":
@@ -392,7 +410,7 @@ export class Room implements DurableObject {
       case "input_select_weapon":
       case "input_fire":
       case "input_end_turn":
-        this.onInputRelay(attachment.sessionId, type, msg);
+        this.queueInput(attachment.sessionId, type, msg);
         break;
       case "leave":
         try {
@@ -422,10 +440,6 @@ export class Room implements DurableObject {
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
 
-    // Race: a late close event can arrive for the OLD socket AFTER the
-    // client already reconnected on a NEW socket. Without this guard we
-    // would flip the (now-live) player back to disconnected and kick
-    // off a grace alarm, eventually forfeiting a connected player.
     const liveForSession = this.state.getWebSockets().some((other) => {
       if (other === ws) return false;
       const a = other.deserializeAttachment() as WsAttachment | undefined;
@@ -433,7 +447,6 @@ export class Room implements DurableObject {
     });
     if (liveForSession) return;
 
-    // Mark disconnected + kick off a grace alarm.
     player.disconnected = true;
     player.disconnectGraceEndsAt = Date.now() + DISCONNECT_GRACE_MS;
     if (lobby.phase === "playing" && this.arbiter) {
@@ -455,47 +468,90 @@ export class Room implements DurableObject {
   }
 
   async alarm(): Promise<void> {
-    await this.loadState();
-    const lobby = this.ensureLobby();
-    const now = Date.now();
+    if (this.tickInProgress) return;
+    this.tickInProgress = true;
+    try {
+      await this.loadState();
+      const lobby = this.ensureLobby();
+      const now = Date.now();
 
-    // Grace expiry: any player whose grace window has elapsed forfeits.
-    const expiredSessionIds: string[] = [];
-    for (const [sid, player] of Object.entries(lobby.players)) {
-      if (
-        player.disconnected &&
-        player.disconnectGraceEndsAt > 0 &&
-        now >= player.disconnectGraceEndsAt
-      ) {
-        expiredSessionIds.push(sid);
+      // Grace expiry forfeits.
+      const expiredSessionIds: string[] = [];
+      for (const [sid, player] of Object.entries(lobby.players)) {
+        if (
+          player.disconnected &&
+          player.disconnectGraceEndsAt > 0 &&
+          now >= player.disconnectGraceEndsAt
+        ) {
+          expiredSessionIds.push(sid);
+        }
       }
+      for (const sid of expiredSessionIds) {
+        this.handleFinalLeave(sid);
+      }
+
+      // Sim tick while in playing phase. simTickState holds just the
+      // physics-owned fields (tick + worms + projectiles); activeTeamId,
+      // activeWormId, turnEndsAt are merged in from the lobby at the
+      // broadcast site below.
+      let simTickEvents: SimEvent[] = [];
+      let simTickState: Pick<SimState, "tick" | "worms" | "projectiles"> | null = null;
+      if (lobby.phase === "playing" && this.sim) {
+        this.drainInputs();
+        const result = this.sim.tick(SIM_TICK_MS);
+        simTickEvents = result.events;
+        simTickState = this.sim.toSimState();
+
+        // Forward sim-side worm-died events to the arbiter so it can
+        // re-check game_over immediately (not just on turn expiry).
+        for (const ev of simTickEvents) {
+          if (ev.type === "worm_died") this.arbiter?.onWormDied(ev.wormId);
+        }
+      }
+
+      if (lobby.phase === "playing" && this.arbiter) {
+        this.arbiter.onTick(SIM_TICK_MS);
+      }
+
+      if (this.arbiter) await this.persistArbiter();
+      if (this.sim) await this.persistSim();
+
+      // Broadcast sim_state + events, then lobby state.
+      // Order: sim_state first so clients have the updated positions
+      // in hand when the event messages (which reference worm ids +
+      // impact points) arrive. The lobby state goes last so the
+      // client's lobby view reflects any turn / game_over change
+      // triggered by the tick.
+      if (simTickState) {
+        // Merge sim (positions + projectiles) with turn state from the
+        // lobby/arbiter so clients have a single place to read "who's
+        // active right now". Epic 45 protocol requires these fields on
+        // every sim_state broadcast.
+        this.broadcast({
+          type: "sim_state",
+          ...simTickState,
+          activeTeamId: lobby.currentTeamId,
+          activeWormId: lobby.currentWormId,
+          turnEndsAt: lobby.turnEndsAt,
+        });
+      }
+      for (const ev of simTickEvents) {
+        this.broadcastSimEvent(ev);
+      }
+      this.broadcastState();
+      await this.persistLobby();
+
+      // Empty-room cleanup.
+      const sockets = this.state.getWebSockets();
+      if (sockets.length === 0 && Object.keys(lobby.players).length === 0) {
+        await this.state.storage.setAlarm(Date.now() + EMPTY_ROOM_GRACE_MS);
+        return;
+      }
+
+      await this.ensureRunning();
+    } finally {
+      this.tickInProgress = false;
     }
-    for (const sid of expiredSessionIds) {
-      this.handleFinalLeave(sid);
-    }
-
-    // Arbiter tick while in playing phase.
-    if (lobby.phase === "playing" && this.arbiter) {
-      this.arbiter.onTick(TICK_INTERVAL_MS);
-    }
-
-    // Arbiter state may have mutated via handleFinalLeave (forfeit) or
-    // onTick (force-advance), so persist it before broadcasting.
-    if (this.arbiter) await this.persistArbiter();
-
-    // Broadcast any state changes made above.
-    this.broadcastState();
-    await this.persistLobby();
-
-    // Empty-room cleanup. If there are no attached sockets AND the
-    // room has been sitting empty for a while, blow away storage.
-    const sockets = this.state.getWebSockets();
-    if (sockets.length === 0 && Object.keys(lobby.players).length === 0) {
-      await this.state.storage.setAlarm(Date.now() + EMPTY_ROOM_GRACE_MS);
-      return;
-    }
-
-    await this.maybeScheduleTickAlarm();
   }
 
   // ---- message handlers ----
@@ -596,51 +652,138 @@ export class Room implements DurableObject {
     this.rosters = rosters;
     await this.persistRosters();
 
+    // Instantiate the authoritative Simulation. The server builds a
+    // simple flat map mask (a thick floor strip) + fixed spawn points
+    // derived from team ordering. Clients build their own matching
+    // visual map from the broadcast seed + mapId; geometry consistency
+    // is W2/W3's integration problem.
+    const mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+    const simTeams = rosters.map((r, teamIdx) => {
+      const spawns = r.wormIds.map((_, wormIdx) => ({
+        xPx: 120 + teamIdx * 260 + wormIdx * 80,
+        yPx: WORLD_HEIGHT_PX - 120,
+      }));
+      return { id: r.id, wormIds: r.wormIds.slice(), spawns };
+    });
+    this.simBootstrap = {
+      widthPx: WORLD_WIDTH_PX,
+      heightPx: WORLD_HEIGHT_PX,
+      maskBase64: bytesToBase64(mask),
+      teams: simTeams,
+      seed,
+    };
+    await this.persistSimBootstrap();
+
+    this.sim = new Simulation({
+      widthPx: WORLD_WIDTH_PX,
+      heightPx: WORLD_HEIGHT_PX,
+      mask,
+      teams: simTeams,
+      seed,
+    });
+    await this.persistSim();
+
     this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
     this.arbiter.start(teamOrder, rosters, TURN_DURATION_MS);
     await this.persistArbiter();
 
     this.broadcastState();
-    await this.maybeScheduleTickAlarm();
+    await this.ensureRunning();
   }
 
-  private async onTurnSnapshot(senderSessionId: string, msg: unknown): Promise<void> {
+  private queueInput(senderSessionId: string, type: string, msg: unknown): void {
     if (!this.validateActiveInput(senderSessionId)) return;
-    if (!this.arbiter) return;
-    const snap = sanitiseTurnSnapshot(msg);
-    if (!snap) return;
-    // Security: the active player is authoritative ONLY over their own
-    // team's worms. Without this filter a malicious active player could
-    // send `alive: false` entries for opponent worms and force an
-    // instant win. Opponent worm state comes exclusively from earlier
-    // snapshots sent when those teams were active.
-    const lobby = this.ensureLobby();
-    const myTeamId = lobby.players[senderSessionId]?.ownerOfTeamId ?? "";
-    const myRoster = this.rosters.find((r) => r.id === myTeamId);
-    const myWormIds = new Set(myRoster?.wormIds ?? []);
-    const filtered = {
-      worms: snap.worms.filter((w) => myWormIds.has(w.id)),
-      terrainCuts: snap.terrainCuts,
-    };
-    this.arbiter.onSnapshot(filtered);
-    await this.persistArbiter();
-    this.broadcastState();
+    const raw = msg as Record<string, unknown>;
+    switch (type) {
+      case "input_walk": {
+        const dir = raw.dir;
+        if (dir !== -1 && dir !== 0 && dir !== 1) return;
+        this.pendingInputs.push({ kind: "walk", sessionId: senderSessionId, dir });
+        return;
+      }
+      case "input_jump":
+        this.pendingInputs.push({ kind: "jump", sessionId: senderSessionId });
+        return;
+      case "input_backflip":
+        this.pendingInputs.push({ kind: "backflip", sessionId: senderSessionId });
+        return;
+      case "input_aim_angle": {
+        const angleRad = raw.angleRad;
+        if (typeof angleRad !== "number" || !Number.isFinite(angleRad)) return;
+        this.pendingInputs.push({
+          kind: "aim_angle",
+          sessionId: senderSessionId,
+          angleRad,
+        });
+        return;
+      }
+      case "input_aim_power": {
+        const power = raw.power;
+        if (typeof power !== "number" || !Number.isFinite(power)) return;
+        this.pendingInputs.push({
+          kind: "aim_power",
+          sessionId: senderSessionId,
+          power,
+        });
+        return;
+      }
+      case "input_select_weapon": {
+        const weaponId = raw.weaponId;
+        if (typeof weaponId !== "string") return;
+        this.pendingInputs.push({
+          kind: "select_weapon",
+          sessionId: senderSessionId,
+          weaponId,
+        });
+        return;
+      }
+      case "input_fire":
+        this.pendingInputs.push({ kind: "fire", sessionId: senderSessionId });
+        return;
+      case "input_end_turn":
+        // No sim effect; the arbiter's settle-grace timeout handles it.
+        return;
+      default:
+        return;
+    }
   }
 
-  private onInputRelay(senderSessionId: string, type: string, msg: unknown): void {
-    if (!this.validateActiveInput(senderSessionId)) return;
-    // Relay to everyone except the sender. Attach `from` so the client
-    // can route to the right worm without trusting an external id.
-    const payload = { ...(msg as Record<string, unknown>), from: senderSessionId, type };
-    const serialised = JSON.stringify(payload);
-    for (const ws of this.state.getWebSockets()) {
-      const att = ws.deserializeAttachment() as WsAttachment | undefined;
-      if (!att) continue;
-      if (att.sessionId === senderSessionId) continue;
-      try {
-        ws.send(serialised);
-      } catch {
-        // ignore
+  private drainInputs(): void {
+    if (!this.sim || !this.lobby) return;
+    const lobby = this.lobby;
+    const inputs = this.pendingInputs;
+    this.pendingInputs = [];
+    for (const input of inputs) {
+      const player = lobby.players[input.sessionId];
+      if (!player) continue;
+      // Re-check at drain time: the active worm might have changed
+      // since enqueue. Apply only if player still owns current team.
+      if (player.ownerOfTeamId !== lobby.currentTeamId) continue;
+      const activeWormId = lobby.currentWormId;
+      if (!activeWormId) continue;
+      switch (input.kind) {
+        case "walk":
+          this.sim.applyWalkInput(activeWormId, input.dir);
+          break;
+        case "jump":
+          this.sim.applyJumpInput(activeWormId);
+          break;
+        case "backflip":
+          this.sim.applyBackflipInput(activeWormId);
+          break;
+        case "aim_angle":
+          this.sim.applyAimAngle(activeWormId, input.angleRad);
+          break;
+        case "aim_power":
+          this.sim.applyAimPower(activeWormId, input.power);
+          break;
+        case "select_weapon":
+          this.sim.applySelectWeapon(activeWormId, input.weaponId);
+          break;
+        case "fire":
+          this.sim.applyFire(activeWormId);
+          this.arbiter?.onFireCommitted();
+          break;
       }
     }
   }
@@ -702,6 +845,42 @@ export class Room implements DurableObject {
     this.broadcast({ type: "state", state: lobby });
   }
 
+  private broadcastSimEvent(ev: SimEvent): void {
+    switch (ev.type) {
+      case "terrain_cut":
+        this.broadcast({
+          type: "terrain_cut",
+          x: ev.x,
+          y: ev.y,
+          r: ev.r,
+          seq: ev.seq,
+        });
+        return;
+      case "fire_event":
+        this.broadcast({
+          type: "fire_event",
+          wormId: ev.wormId,
+          weaponId: ev.weaponId,
+          angleRad: ev.angleRad,
+          power: ev.power,
+          facing: ev.facing,
+        });
+        return;
+      case "damage_event":
+        this.broadcast({
+          type: "damage_event",
+          wormId: ev.wormId,
+          amount: ev.amount,
+          fromProjectileId: ev.fromProjectileId,
+          impact: ev.impact,
+        });
+        return;
+      case "worm_died":
+        this.broadcast({ type: "worm_died", wormId: ev.wormId });
+        return;
+    }
+  }
+
   private makeArbiterAdapter(): ArbiterRoomAdapter {
     const self = this;
     return {
@@ -722,6 +901,9 @@ export class Room implements DurableObject {
       getPlayerDisconnected(sessionId: string): boolean {
         return self.ensureLobby().players[sessionId]?.disconnected === true;
       },
+      getAliveCountsProvider(): AliveCountsProvider | null {
+        return self.sim;
+      },
     };
   }
 
@@ -734,19 +916,12 @@ export class Room implements DurableObject {
 
     delete lobby.players[sessionId];
 
-    // Best-effort purge of any resume tokens pointing at this session.
-    // Fire-and-forget is fine here: tokens only match a live player
-    // row, and we just deleted that row, so even if deletion lags any
-    // resume attempt with the old token will fall through to the
-    // fresh-join path.
     void this.purgeResumeTokensFor(sessionId);
 
-    // Forfeit if mid-game.
     if (lobby.phase === "playing" && this.arbiter && player.ownerOfTeamId) {
       this.arbiter.onTeamForfeit(player.ownerOfTeamId);
     }
 
-    // Promote next host if this player was the host.
     if (wasHost) {
       let nextHostId = "";
       let earliest = Number.POSITIVE_INFINITY;
@@ -784,18 +959,23 @@ export class Room implements DurableObject {
     }
   }
 
-  private async maybeScheduleTickAlarm(): Promise<void> {
+  /**
+   * While the game is in "playing" phase and not game_over, make sure
+   * there's a pending alarm. DOs hibernate between alarms, so we
+   * reschedule explicitly at the end of each alarm rather than using
+   * setInterval (which wouldn't survive hibernation).
+   */
+  private async ensureRunning(): Promise<void> {
     const lobby = this.ensureLobby();
     if (lobby.phase !== "playing") return;
     if (this.arbiter?.isGameOver()) return;
-    await this.scheduleAlarmIfEarlier(Date.now() + TICK_INTERVAL_MS);
+    await this.scheduleAlarmIfEarlier(Date.now() + SIM_TICK_MS);
   }
 }
 
 // ---- module-local pure helpers ----
 
 function generateSessionId(): string {
-  // 9-char base36 for continuity with Colyseus' session id length.
   const buf = crypto.getRandomValues(new Uint8Array(6));
   let n = 0n;
   for (const b of buf) n = (n << 8n) | BigInt(b);
@@ -803,11 +983,9 @@ function generateSessionId(): string {
 }
 
 function generateResumeToken(): string {
-  // 32 bytes of entropy, base64url-encoded. Strictly unguessable.
   const buf = crypto.getRandomValues(new Uint8Array(32));
   let s = "";
   for (const b of buf) s += String.fromCharCode(b);
-  // btoa is available in the Workers runtime.
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
@@ -851,4 +1029,35 @@ function json(obj: unknown, status = 200): Response {
       "cache-control": "no-store",
     },
   });
+}
+
+/**
+ * Build a simple flat-map mask: a solid horizontal slab at the bottom
+ * ~15% of the world. Sufficient for the W1 sim tests; the client
+ * builds its own matching visual map (same seed + mapId). Geometry
+ * sharing is W2/W3 scope.
+ */
+function buildFlatMask(widthPx: number, heightPx: number): Uint8Array {
+  const mask = new Uint8Array(widthPx * heightPx);
+  const floorY = Math.floor(heightPx * 0.85);
+  for (let y = floorY; y < heightPx; y++) {
+    const row = y * widthPx;
+    for (let x = 0; x < widthPx; x++) {
+      mask[row + x] = 1;
+    }
+  }
+  return mask;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
 }
