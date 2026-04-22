@@ -1,0 +1,24 @@
+name = "worms-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+routes = [
+  { pattern = "mccarrison.me/worms", zone_name = "mccarrison.me" },
+  { pattern = "mccarrison.me/worms/*", zone_name = "mccarrison.me" },
+]
+
+[vars]
+PATH_PREFIX = "/worms"
+
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

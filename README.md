@@ -11,22 +11,31 @@ into `src/`.
 ## Quick start
 
 Requires Node 20+. The game has a client (Phaser 3 + planck.js) and a
-Colyseus multiplayer server; run both for the lobby flow, or just the
-client for single-device dev (`?offline=1`).
+Cloudflare Worker + Durable Object backend; run both locally for the
+lobby flow, or just the client for single-device dev (`?offline=1`).
 
 Client (terminal 1):
 
     npm install
-    npm run dev          # Vite on http://localhost:5173
+    npm run dev          # Vite on http://localhost:5173/worms/
 
-Multiplayer server (terminal 2):
+Worker (terminal 2):
 
-    cd server
+    cd worker
     npm install
-    npm run dev          # Colyseus on ws://localhost:2567
+    npx wrangler dev --local   # Worker + DO on :8787
 
-Then open http://localhost:5173. For single-device dev that skips the
-lobby entirely, use http://localhost:5173/?offline=1.
+Then open http://localhost:5173/worms/. For single-device dev that skips
+the lobby entirely, use http://localhost:5173/worms/?offline=1.
+
+## Deploy
+
+Production deploy to `mccarrison.me/worms`:
+
+    ./scripts/deploy.sh
+
+Builds client + runs `wrangler deploy` from `worker/`. Refuses to deploy
+from non-master branches or with uncommitted changes.
 
 ## Scripts
 
@@ -42,32 +51,32 @@ Client (root):
 | `npm run format`    | Biome format (writes changes).          |
 | `npm test`          | Vitest run.                             |
 
-Server (`server/`):
+Worker (`worker/`):
 
-| Command             | What it does                            |
-| ------------------- | --------------------------------------- |
-| `npm run dev`       | Colyseus server via `tsx watch`.        |
-| `npm run build`     | `tsc` to `dist/`.                       |
-| `npm start`         | Run built server from `dist/`.          |
-| `npm run typecheck` | `tsc --noEmit`.                         |
-| `npm test`          | Vitest + `@colyseus/testing`.           |
+| Command                      | What it does                              |
+| ---------------------------- | ----------------------------------------- |
+| `npx wrangler dev --local`   | Local worker + DO on :8787.               |
+| `npx wrangler deploy`        | Deploy to `mccarrison.me/worms`.          |
+| `npx wrangler deploy --dry-run` | Validate config without deploying.     |
+| `npx tsc --noEmit`           | Typecheck.                                |
+| `npm test`                   | Vitest with `unstable_dev` harness.       |
 
 ## Stack
 
 - TypeScript 5 (strict, bundler resolution)
 - Vite 6 (dev server + bundler)
 - Phaser 3 + planck.js (game + physics)
-- Colyseus 0.15 (multiplayer rooms, schema, reconnection)
+- Cloudflare Workers + Durable Objects (multiplayer rooms + state + reconnection)
 - xstate 5 (turn state machine)
 - Biome 1.9 (lint + format)
 - Vitest (unit + integration tests)
 
 ## Multiplayer smoke test
 
-1. Start server: `cd server && npm run dev`
+1. Start worker: `cd worker && npx wrangler dev --local`
 2. Start client: `npm run dev`
-3. Tab A: http://localhost:5173/, nickname "Alice", Create Room, note the 4-letter code.
-4. Tab B (incognito): http://localhost:5173/?room=CODE, nickname "Bob", Join.
+3. Tab A: http://localhost:5173/worms/, nickname "Alice", Create Room, note the 4-letter code.
+4. Tab B (incognito): http://localhost:5173/worms/?room=CODE, nickname "Bob", Join.
 5. Alice picks a map, both hit Ready, Alice clicks Start Game.
 6. Both tabs transition to the same map with the same seed. Teams are
    assigned by join order (Alice = team red, Bob = team blue).
@@ -80,12 +89,12 @@ Server (`server/`):
 
 ## Reconnection
 
-Epic 10 wraps Colyseus' `allowReconnection(client, 60)` around `onLeave`.
 If a player drops (network hiccup, tab crash), their slot is held for 60
-seconds. Other players see a "(disconnected, Ns)" indicator; if the
-disconnected player is the active turn owner, the turn timer freezes
-until they return. After 60s their team auto-forfeits (all worms die)
-and the remaining players keep playing.
+seconds via a resume token stored in DO storage. Other players see a
+"(disconnected, Ns)" indicator; if the disconnected player is the active
+turn owner, the turn timer freezes until they return. After 60s their
+team auto-forfeits (all worms die) and the remaining players keep
+playing.
 
 Clients cache `room.reconnectionToken` in localStorage (10-minute TTL)
 keyed by room code. Reloading the tab with `?room=CODE` in the URL uses

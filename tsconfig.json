@@ -17,6 +17,6 @@
     "noEmit": true,
     "useDefineForClassFields": true
   },
-  "include": ["src/**/*.ts", "vite.config.ts"],
+  "include": ["src/**/*.ts", "shared/**/*.ts", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "reference"]
 }

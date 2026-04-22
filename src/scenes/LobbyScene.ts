@@ -1,10 +1,11 @@
-import type { Client, Room, RoomAvailable } from "colyseus.js";
 import * as Phaser from "phaser";
 import { allIds, getById } from "../maps/registry";
+import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
 import { ALLOWED_COLORS } from "../net/types";
 import type { ErrorMessage, GameStartedMessage, LobbyState } from "../net/types";
+import type { RoomHandle } from "../net/wsClient";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
@@ -15,18 +16,18 @@ import { buildInviteUrl, shareInvite } from "./lobby/shareInvite";
  *
  * 1. `{ netClient, autoJoinCode }` - the normal BootScene flow. We render
  *    the home view; user picks Create or Join.
- * 2. `{ netClient, room }` - Epic 10 reconnect flow. BootScene successfully
- *    called `client.reconnect(token)` with a cached reconnectionToken and
- *    is handing us the live Room. We skip the home view and jump straight
- *    to the room view.
+ * 2. `{ netClient, room }` - Epic 10/13 reconnect flow. BootScene successfully
+ *    called `joinRoom(wsBase, code, nick, color, resumeToken)` and is handing
+ *    us the live RoomHandle. We skip the home view and jump straight to the
+ *    room view.
  */
 interface LobbySceneDataHome {
-  netClient: Client;
+  netClient: NetClient;
   autoJoinCode: string | null;
 }
 interface LobbySceneDataReconnect {
-  netClient: Client;
-  room: Room<LobbyState>;
+  netClient: NetClient;
+  room: RoomHandle;
 }
 type LobbySceneData = LobbySceneDataHome | LobbySceneDataReconnect;
 
@@ -76,15 +77,26 @@ const INPUT_CSS =
  * Home: nickname input + Create/Join actions.
  * Room: code display, map picker (host only), player list, Ready toggle,
  *       Start Game (host only), Leave. Re-renders on every state change.
+ *
+ * Epic 13 net surface: RoomHandle (native-WS wrapper) instead of Colyseus
+ * Room. State replication is full-snapshot every `state` message; no
+ * per-field listeners or MapSchema.onAdd/Remove/onChange. We still debounce
+ * renders via rAF to let Phaser's input plugin settle between tear-down
+ * and rebuild (original fix for #56 - Ready button click-through).
  */
 export class LobbyScene extends Phaser.Scene {
-  private netClient!: Client;
+  private netClient!: NetClient;
   private autoJoinCode: string | null = null;
 
   private view: View = "home";
   private nickname = "";
   private selectedColor: string = ALLOWED_COLORS[0];
-  private room: Room<LobbyState> | null = null;
+  private room: RoomHandle | null = null;
+
+  // Active subscriptions on the current RoomHandle. Cleared on leave +
+  // re-populated on every (re)join. Unsub functions returned by
+  // RoomHandle.onStateChange / onMessage / onClose.
+  private roomUnsubs: Array<() => void> = [];
 
   // Home view GameObjects (destroyed on view switch).
   private homeObjects: Phaser.GameObjects.GameObject[] = [];
@@ -102,10 +114,10 @@ export class LobbyScene extends Phaser.Scene {
     super("LobbyScene");
   }
 
-  // When BootScene hands us a live Room (Epic 10 reconnect path), we stash
-  // it here during init() and consume it in create() to jump straight to the
-  // room view. Cleared after consumption.
-  private pendingReconnectedRoom: Room<LobbyState> | null = null;
+  // When BootScene hands us a live RoomHandle (Epic 13 reconnect path), we
+  // stash it here during init() and consume it in create() to jump straight
+  // to the room view. Cleared after consumption.
+  private pendingReconnectedRoom: RoomHandle | null = null;
 
   // Epic 10: shared reconnect UI. Lazy-created on first use so a cleanly
   // exited lobby never mounts it. Destroyed on scene shutdown.
@@ -113,12 +125,12 @@ export class LobbyScene extends Phaser.Scene {
 
   // Epic 10: guard against overlapping reconnect loops. If the network
   // flaps twice in quick succession we must not kick off two parallel
-  // client.reconnect chains (they'd race and one would leave a ghost Room).
+  // joinRoom chains (they'd race and one would leave a ghost Room).
   private reconnectInFlight = false;
 
-  // The code for the current room, cached at join time so the onLeave
-  // handler can look up the reconnection token without reading stale
-  // room state (state may have been freed by the time onLeave fires).
+  // The code for the current room, cached at join time so the close
+  // handler can look up the resume token without reading stale
+  // room state (state may have been freed by the time the close fires).
   private currentRoomCode = "";
 
   init(data: LobbySceneData): void {
@@ -133,8 +145,8 @@ export class LobbyScene extends Phaser.Scene {
 
   create(): void {
     if (this.pendingReconnectedRoom) {
-      // Epic 10: BootScene already did the hard work. Slide straight into
-      // the room view with the live Room.
+      // Epic 13: BootScene already did the hard work. Slide straight into
+      // the room view with the live RoomHandle.
       const room = this.pendingReconnectedRoom;
       this.pendingReconnectedRoom = null;
       this.onRoomJoined(room);
@@ -261,10 +273,7 @@ export class LobbyScene extends Phaser.Scene {
 
     try {
       this.setHomeError("Creating room...");
-      const room = await this.netClient.create<LobbyState>("game", {
-        nickname: nick,
-        color: this.selectedColor,
-      });
+      const room = await this.netClient.createRoom(nick, this.selectedColor);
       this.onRoomJoined(room);
     } catch (err) {
       this.setHomeError(`Create failed: ${this.errorMessage(err)}`);
@@ -299,21 +308,11 @@ export class LobbyScene extends Phaser.Scene {
 
     try {
       this.setHomeError("Looking up room...");
-      // Colyseus matchmaking: room codes live in metadata (server-side
-      // .filterBy(["code"])). We query the full list and pick the matching one
-      // rather than relying on joinOrCreate's implicit create-on-miss.
-      const rooms: RoomAvailable<{ code?: string }>[] = await this.netClient.getAvailableRooms<{
-        code?: string;
-      }>("game");
-      const target = rooms.find((r) => r.metadata?.code === code);
-      if (!target) {
-        this.setHomeError(`No room with code ${code}`);
-        return;
-      }
-      const room = await this.netClient.joinById<LobbyState>(target.roomId, {
-        nickname: nick,
-        color: this.selectedColor,
-      });
+      // Epic 13: joinRoom opens a WebSocket directly to the worker, which
+      // routes to the Durable Object by `idFromName(code)`. No matchmaking
+      // round-trip needed - if the code is unknown the server rejects the
+      // upgrade with an application-layer `error` message.
+      const room = await this.netClient.joinRoom(code, nick, this.selectedColor);
       this.onRoomJoined(room);
     } catch (err) {
       this.setHomeError(`Join failed: ${this.errorMessage(err)}`);
@@ -347,101 +346,113 @@ export class LobbyScene extends Phaser.Scene {
   // Room view
   // ---------------------------------------------------------------------------
 
-  private onRoomJoined(room: Room<LobbyState>): void {
+  private onRoomJoined(room: RoomHandle): void {
+    this.tearDownRoomListeners();
     this.room = room;
-    this.currentRoomCode = room.state?.code ?? "";
-    this.wireRoomMessages(room);
-    this.wireRoomStateListeners(room);
+    this.currentRoomCode = room.state?.code ?? room.code ?? "";
+    this.wireRoomListeners(room);
     this.view = "room";
     this.clearHome();
     // Hide any overlay left behind from a previous reconnect attempt.
     this.reconnectingOverlay?.hide();
-    // Epic 10: cache the reconnectionToken keyed by the room code so a page
+    // Epic 13: cache the resume token keyed by the room code so a page
     // reload within the grace window can slide back in via BootScene's
-    // reconnect path. Colyseus 0.15 fills state.code synchronously for the
-    // creator but may arrive a beat later for joiners, hence the code-ready
-    // guard + a belt-and-braces listener below.
-    this.saveRoomTokenIfReady(room);
+    // reconnect path. The code is on the welcome state so we can save
+    // immediately without a listener dance.
+    if (this.currentRoomCode && room.resumeToken) {
+      saveRoomToken(this.currentRoomCode, room.resumeToken);
+    }
     // First render can run immediately; state has already arrived by the time
-    // the join promise resolves in Colyseus 0.15.
+    // the join promise resolves (welcome message populates the handle).
     this.renderRoom();
   }
 
   /**
-   * Save the reconnection token as soon as we know the room's code. The code
-   * is the only thing we can't derive on reload (roomId + token are in the
-   * Room instance already), so we key storage by code and wait for it.
+   * Wire all RoomHandle listeners. Debounces re-renders to once per animation
+   * frame so bursts of `state` messages don't tear down + rebuild Phaser
+   * hit-test lists faster than the input plugin can settle (original fix
+   * for #56 - Ready button click-through under patch bursts).
    *
-   * Idempotent: calling with an already-saved (code, token) pair just
-   * refreshes the timestamp, which is fine.
+   * Epic 13 simplification: MapSchema.onAdd/Remove/Change + per-player
+   * onChange + state.listen() are all replaced by a single
+   * `onStateChange(newState => rerender())`. The full LobbyState arrives on
+   * every change, so the callback sees the new value and renderRoom picks
+   * it up via this.room.state.
    */
-  private saveRoomTokenIfReady(room: Room<LobbyState>): void {
-    const code = room.state?.code ?? "";
-    const token = room.reconnectionToken;
-    if (code && token) {
-      this.currentRoomCode = code;
-      saveRoomToken(code, room.roomId, token);
-      return;
-    }
-    // Code not yet populated. Colyseus 0.15 lets us subscribe to a single
-    // field; fire once when code lands, then unhook.
-    if (!token) return; // token missing is terminal; never save
-    const unlisten = room.state.listen("code", (value) => {
-      if (value) {
-        this.currentRoomCode = value;
-        saveRoomToken(value, room.roomId, token);
-        unlisten();
-      }
-    });
+  private wireRoomListeners(room: RoomHandle): void {
+    let pending = false;
+    const rerender = () => {
+      if (pending || this.view !== "room") return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        if (this.view === "room") this.renderRoom();
+      });
+    };
+
+    this.roomUnsubs.push(
+      room.onStateChange(() => {
+        rerender();
+      }),
+    );
+
+    this.roomUnsubs.push(
+      room.onMessage("error", (msg: ErrorMessage) => {
+        if (this.view === "home") {
+          this.setHomeError(`${msg.code}: ${msg.message}`);
+        } else {
+          this.flashRoomError(`${msg.code}: ${msg.message}`);
+        }
+      }),
+    );
+
+    this.roomUnsubs.push(
+      room.onMessage("game_started", (msg: GameStartedMessage) => {
+        // Host clicked Start. Hand off to GameScene with authoritative map +
+        // seed + team roster; forward the RoomHandle + NetClient so Epic 9 +
+        // Epic 10 reconnect flows can drive from GameScene.
+        this.scene.start("GameScene", {
+          mapId: msg.mapId,
+          seed: msg.seed,
+          teams: msg.teams,
+          room,
+          netClient: this.netClient,
+        });
+      }),
+    );
+
+    this.roomUnsubs.push(
+      room.onClose((code: number) => {
+        // Native WebSocket close codes:
+        // - 1000 (CLOSE_NORMAL) = consented leave (tab close / room.leave()).
+        // - anything else (1001, 1006, 1011, ...) = unexpected drop.
+        // We only kick off a reconnect loop on unexpected drops.
+        if (code === 1000) {
+          this.room = null;
+          this.renderHome();
+          return;
+        }
+        // Unexpected drop: the server is holding our slot for up to 60s.
+        void this.startReconnectionLoop();
+      }),
+    );
   }
 
-  private wireRoomMessages(room: Room<LobbyState>): void {
-    room.onMessage<ErrorMessage>("error", (msg) => {
-      // Show the error in the room's error band; if we're already home it
-      // surfaces there instead.
-      if (this.view === "home") {
-        this.setHomeError(`${msg.code}: ${msg.message}`);
-      } else {
-        this.flashRoomError(`${msg.code}: ${msg.message}`);
+  private tearDownRoomListeners(): void {
+    for (const unsub of this.roomUnsubs) {
+      try {
+        unsub();
+      } catch {
+        // Already torn down - drop.
       }
-    });
-    room.onMessage<GameStartedMessage>("game_started", (msg) => {
-      // Host clicked Start. Hand off to GameScene with authoritative map +
-      // seed + team roster; pass the room reference through so Epic 9 can
-      // wire server-driven ticks without touching the scene boundary.
-      // Epic 10: also forward the NetClient so GameScene's reconnect loop
-      // has something to call reconnect() on.
-      this.scene.start("GameScene", {
-        mapId: msg.mapId,
-        seed: msg.seed,
-        teams: msg.teams,
-        room,
-        netClient: this.netClient,
-      });
-    });
-    room.onLeave((code) => {
-      // Colyseus close codes:
-      // - 1000 (CLOSE_NORMAL) = consented leave (tab close / room.leave()).
-      // - 4200 = Colyseus "consented" via room.leave(true).
-      // - anything else (1006, 1011, ...) = unexpected drop (wifi, crash).
-      // Treat 1000 + 4200 as "user meant this" and do NOT kick off a
-      // reconnect loop; any other code triggers the Epic 10 retry flow.
-      if (code === 1000 || code === 4200) {
-        this.room = null;
-        this.renderHome();
-        return;
-      }
-      // Unexpected drop: the server is holding our slot for up to 60s.
-      // Keep `this.room` pinned until the loop resolves; if it succeeds
-      // we'll swap it, if it fails we renderHome() in the final handler.
-      void this.startReconnectionLoop();
-    });
+    }
+    this.roomUnsubs = [];
   }
 
   /**
-   * Epic 10: unexpected-drop reconnect loop. Shows the shared
+   * Epic 10/13: unexpected-drop reconnect loop. Shows the shared
    * ReconnectingOverlay and walks the default backoff schedule. On success
-   * we rewire the new Room in place; on failure we drop the cached token
+   * we wire the new Room in place; on failure we drop the cached token
    * and fall back to the home view.
    */
   private async startReconnectionLoop(): Promise<void> {
@@ -460,15 +471,19 @@ export class LobbyScene extends Phaser.Scene {
     const overlay = this.ensureOverlay();
     overlay.show(1);
 
-    const result = await runReconnectLoop<LobbyState>({
-      client: this.netClient,
-      token: stored.token,
+    const result = await runReconnectLoop({
+      netClient: this.netClient,
+      code,
+      nickname: this.nickname || "player",
+      color: this.selectedColor,
+      resumeToken: stored.resumeToken,
       onAttempt: (n) => overlay.show(n),
     });
 
     if (result.ok && result.room) {
-      // Swap to the fresh Room instance. onRoomJoined rewires all listeners
-      // on the new room, caches the rotated token, and hides the overlay.
+      // Swap to the fresh RoomHandle. onRoomJoined rewires all listeners
+      // on the new room, caches the rotated resume token, and hides the
+      // overlay.
       this.onRoomJoined(result.room);
       this.reconnectInFlight = false;
       return;
@@ -493,59 +508,10 @@ export class LobbyScene extends Phaser.Scene {
       this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
         this.reconnectingOverlay?.destroy();
         this.reconnectingOverlay = null;
+        this.tearDownRoomListeners();
       });
     }
     return this.reconnectingOverlay;
-  }
-
-  private wireRoomStateListeners(room: Room<LobbyState>): void {
-    // Debounce rerenders to once per animation frame. Without this, bursts
-    // of schema patches fire renderRoom many times within a single frame.
-    // Each render tears down + recreates the Ready button; each new button
-    // lands in Phaser's input `_pendingInsertion` queue. The queue only
-    // drains at frame tick, so the current Ready button is never
-    // hit-testable. rAF coalescing lets Phaser's input plugin run between
-    // renders and promote each new button to the active hit-test list.
-    let pending = false;
-    const rerender = () => {
-      if (pending || this.view !== "room") return;
-      pending = true;
-      requestAnimationFrame(() => {
-        pending = false;
-        if (this.view === "room") this.renderRoom();
-      });
-    };
-
-    // Colyseus 0.15: MapSchema.onChange fires for add/remove/replace of
-    // ENTRIES (whole player objects), NOT for field mutations on existing
-    // players. To catch `ready` / `color` / `nickname` / `disconnected`
-    // flipping, we have to attach a per-player onChange listener on every
-    // join. Without this the clicker's own tab never re-renders when they
-    // toggle Ready - their local Schema state has the new value, but no
-    // listener fires so `renderRoom` isn't called.
-    //
-    // Other tabs happened to rerender on Carol joining (onAdd fires),
-    // which is why it LOOKED like the ready flip propagated to everyone
-    // else but not the sender.
-    const perPlayerListen = (player: unknown) => {
-      // biome-ignore lint/suspicious/noExplicitAny: colyseus.js 0.15 Schema#onChange isn't in our hand-written mirror types
-      (player as any).onChange?.(rerender);
-    };
-
-    room.state.players.onAdd((player, _key) => {
-      rerender();
-      perPlayerListen(player);
-    });
-    room.state.players.onRemove(rerender);
-    room.state.players.onChange(rerender);
-    room.state.listen("selectedMapId", rerender);
-    room.state.listen("hostSessionId", rerender);
-    room.state.listen("phase", rerender);
-
-    // Players that joined before we attached the onAdd listener (ourselves,
-    // typically) won't fire onAdd retroactively, so hook them up now.
-    // biome-ignore lint/complexity/noForEach: LobbyPlayersMap mirrors the colyseus.js 0.15 surface which only exposes forEach
-    room.state.players.forEach((player) => perPlayerListen(player));
   }
 
   private renderRoom(): void {
@@ -798,24 +764,29 @@ export class LobbyScene extends Phaser.Scene {
     const nextIdx = ((((idx >= 0 ? idx : 0) + dir) % ids.length) + ids.length) % ids.length;
     const nextId = ids[nextIdx];
     if (!nextId) return;
-    this.room.send("select_map", { mapId: nextId });
+    this.room.send({ type: "select_map", mapId: nextId });
   }
 
   private handleToggleReady(next: boolean): void {
-    this.room?.send("set_ready", { ready: next });
+    this.room?.send({ type: "set_ready", ready: next });
   }
 
   private handleStart(): void {
-    this.room?.send("start_game", {});
+    this.room?.send({ type: "start_game" });
   }
 
   private async handleLeave(): Promise<void> {
     const room = this.room;
     if (!room) return;
     try {
-      await room.leave(true);
+      room.leave();
     } catch {
-      // onLeave handler drops us back to home regardless.
+      // onClose handler drops us back to home regardless.
     }
+    // Provide a micro-delay so onClose (code 1000) fires on the same tick.
+    await Promise.resolve();
   }
 }
+
+// Re-exported types used by other files importing this module.
+export type { LobbyState };

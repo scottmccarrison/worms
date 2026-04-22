@@ -2,12 +2,14 @@
  * Room-code generator for the lobby.
  *
  * Alphabet deliberately excludes I and O to avoid "is this a 1 / 0?"
- * confusion when friends read codes out loud or over SMS. 23 letters
- * give 23^4 = 279,841 possible codes, which is plenty for our scale
+ * confusion when friends read codes out loud or over SMS. 24 letters
+ * give 24^4 = 331,776 possible codes, which is plenty for our scale
  * (codes are ephemeral: they die with the room).
+ *
+ * Ported verbatim from server/src/codegen.ts. Pure; no Node APIs.
  */
 
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // 23 letters: excludes I, O
+const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // 24 letters: excludes I, O
 
 /** Generate a single 4-letter code from ALPHABET. Not guaranteed unique. */
 export function generateCode(): string {
