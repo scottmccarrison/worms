@@ -1,23 +1,36 @@
 import * as Phaser from "phaser";
+import type { SimAdapter } from "../sim/SimAdapter";
 import { tuning } from "../tuning";
 import type { Worm } from "../worm/Worm";
 
 export interface TouchControlsInit {
   scene: Phaser.Scene;
   getActiveWorm: () => Worm | null;
-  /** When true, rope + jetpack are no-ops (per plan #65) so we skip rendering
-   * any buttons. When false (offline), buttons render in the top-right corner. */
+  /**
+   * When false (default true), the rope button is not rendered.
+   * Use this to disable rope in networked mode until the rope port ships.
+   */
+  ropeEnabled?: boolean;
+  /**
+   * When false (default true), the jetpack button is not rendered.
+   */
+  jetPackEnabled?: boolean;
+  /** @deprecated Use ropeEnabled/jetPackEnabled instead. */
   networked?: boolean;
+  /** Sim adapter used for jetpack toggle in networked mode. */
+  sim?: SimAdapter;
 }
 
 /**
  * On-screen touch overlay with rope + jetpack buttons.
  *
- * Offline mode: small buttons top-right, out of the walk / aim area. Tap rope
- * to toggle, hold jet to thrust.
+ * Button visibility is controlled per-utility via `ropeEnabled` and
+ * `jetPackEnabled` (both default true). In networked mode, pass
+ * `ropeEnabled: false` to hide rope (not yet ported) while keeping
+ * the jetpack button active.
  *
- * Networked mode: buttons are hidden entirely. Utilities aren't wired to the
- * server yet (plan #65), so showing inert buttons would be misleading.
+ * The container is always constructed so `destroy()` and `hitsButton()`
+ * work regardless of which buttons were created.
  */
 export class TouchControls {
   private readonly container: Phaser.GameObjects.Container;
@@ -33,75 +46,73 @@ export class TouchControls {
     this.container.setDepth(100);
     this.container.setScrollFactor(0);
 
-    if (init.networked) {
-      // Networked mode: no rope / jet buttons. The container stays empty so
-      // hitsButton() always returns false and the gesture layer sees every
-      // pointerdown.
-      return;
-    }
+    // Resolve flags: new per-utility flags take precedence; legacy `networked`
+    // flag maps to ropeEnabled=false, jetPackEnabled=true for backward compat.
+    const ropeEnabled = init.ropeEnabled ?? !init.networked;
+    const jetPackEnabled = init.jetPackEnabled ?? true;
 
     const { getActiveWorm } = init;
     const radius = tuning.touch.buttonRadiusPx;
     const sw = this.scene.scale.width;
 
-    // --- Rope button (top-right, inboard) ---
-    const ropeBtn = this._makeButton({
-      fillColor: 0x2266cc,
-      strokeColor: 0x88aaff,
-      label: "R",
-      radius,
-    });
-    ropeBtn.setPosition(sw - 60 - (radius * 2 + 10), 60);
-    this.ropeBtn = ropeBtn;
+    if (ropeEnabled) {
+      // --- Rope button (top-right, inboard) ---
+      const ropeBtn = this._makeButton({
+        fillColor: 0x2266cc,
+        strokeColor: 0x88aaff,
+        label: "R",
+        radius,
+      });
+      ropeBtn.setPosition(sw - 60 - (radius * 2 + 10), 60);
+      this.ropeBtn = ropeBtn;
+      this.container.add(ropeBtn);
 
-    // --- JetPack button (top-right corner) ---
-    const jetBtn = this._makeButton({
-      fillColor: 0xcc6600,
-      strokeColor: 0xff9933,
-      label: "J",
-      radius,
-    });
-    jetBtn.setPosition(sw - 60, 60);
-    this.jetBtn = jetBtn;
+      ropeBtn.setInteractive({
+        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitAreaCallback: Phaser.Geom.Circle.Contains,
+      });
+      ropeBtn.on("pointerdown", () => {
+        const w = getActiveWorm();
+        if (!w) return;
+        w.ropeUtility.isActive() ? w.ropeUtility.deactivate() : w.ropeUtility.activate();
+        this._flashButton(ropeBtn, w.ropeUtility.isActive());
+      });
+      ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    }
 
-    this.container.add([ropeBtn, jetBtn]);
+    if (jetPackEnabled) {
+      // --- JetPack button (top-right corner) ---
+      const jetBtn = this._makeButton({
+        fillColor: 0xcc6600,
+        strokeColor: 0xff9933,
+        label: "J",
+        radius,
+      });
+      jetBtn.setPosition(sw - 60, 60);
+      this.jetBtn = jetBtn;
+      this.container.add(jetBtn);
 
-    // --- Rope: tap to toggle ---
-    ropeBtn.setInteractive({
-      hitArea: new Phaser.Geom.Circle(0, 0, radius),
-      hitAreaCallback: Phaser.Geom.Circle.Contains,
-    });
-    ropeBtn.on("pointerdown", () => {
-      const w = getActiveWorm();
-      if (!w) return;
-      w.ropeUtility.isActive() ? w.ropeUtility.deactivate() : w.ropeUtility.activate();
-      this._flashButton(ropeBtn, w.ropeUtility.isActive());
-    });
-
-    // --- JetPack: hold to thrust (pointerdown = activate, pointerup = deactivate) ---
-    jetBtn.setInteractive({
-      hitArea: new Phaser.Geom.Circle(0, 0, radius),
-      hitAreaCallback: Phaser.Geom.Circle.Contains,
-    });
-    const jetDeactivate = (): void => {
-      const w = getActiveWorm();
-      if (!w) return;
-      if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-      this._setButtonAlpha(jetBtn, false);
-    };
-    jetBtn.on("pointerdown", () => {
-      const w = getActiveWorm();
-      if (!w) return;
-      if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
-      this._setButtonAlpha(jetBtn, true);
-    });
-    jetBtn.on("pointerup", jetDeactivate);
-    jetBtn.on("pointerupoutside", jetDeactivate);
-    jetBtn.on("pointerout", jetDeactivate);
-
-    // Set idle alpha on both
-    ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
-    jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+      jetBtn.setInteractive({
+        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitAreaCallback: Phaser.Geom.Circle.Contains,
+      });
+      const jetDeactivate = (): void => {
+        const w = getActiveWorm();
+        if (!w) return;
+        if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
+        this._setButtonAlpha(jetBtn, false);
+      };
+      jetBtn.on("pointerdown", () => {
+        const w = getActiveWorm();
+        if (!w) return;
+        if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
+        this._setButtonAlpha(jetBtn, true);
+      });
+      jetBtn.on("pointerup", jetDeactivate);
+      jetBtn.on("pointerupoutside", jetDeactivate);
+      jetBtn.on("pointerout", jetDeactivate);
+      jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    }
   }
 
   /**

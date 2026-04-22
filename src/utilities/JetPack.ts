@@ -35,6 +35,14 @@ export class JetPack implements Utility {
   }
 
   /**
+   * Returns the current fuel level as a 0-100 percentage.
+   * Used by SimAdapter to expose a normalized value.
+   */
+  getFuel(): number {
+    return this._fuel;
+  }
+
+  /**
    * Toggle jetpack. Activate if fuel > 0 and worm not roped.
    * Deactivate if already active.
    */

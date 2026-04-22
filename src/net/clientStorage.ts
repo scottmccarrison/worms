@@ -122,3 +122,45 @@ export function clearRoomToken(code: string): void {
   delete all[key];
   writeAll(all);
 }
+
+// ---------------------------------------------------------------------------
+// Nickname persistence
+// ---------------------------------------------------------------------------
+
+const NICKNAME_KEY = "worms.nickname.v1";
+
+/**
+ * Persist a validated nickname. Silently no-ops if the value is empty,
+ * exceeds 16 characters, or localStorage is unavailable (private browsing,
+ * quota exceeded, sandboxed iframe).
+ */
+export function saveNickname(nickname: string): void {
+  try {
+    const trimmed = nickname.trim();
+    if (trimmed.length === 0 || trimmed.length > 16) return;
+    const storage = getStorage();
+    if (!storage) return;
+    storage.setItem(NICKNAME_KEY, trimmed);
+  } catch {
+    // private-browsing / quota: swallow
+  }
+}
+
+/**
+ * Read the previously saved nickname.
+ * Returns "" when localStorage is unavailable, no value is stored,
+ * or the stored value fails validation.
+ */
+export function readNickname(): string {
+  try {
+    const storage = getStorage();
+    if (!storage) return "";
+    const raw = storage.getItem(NICKNAME_KEY);
+    if (typeof raw !== "string") return "";
+    const trimmed = raw.trim();
+    if (trimmed.length === 0 || trimmed.length > 16) return "";
+    return trimmed;
+  } catch {
+    return "";
+  }
+}

@@ -78,7 +78,10 @@ type PendingInput =
   | { kind: "aim_angle"; sessionId: string; angleRad: number }
   | { kind: "aim_power"; sessionId: string; power: number }
   | { kind: "select_weapon"; sessionId: string; weaponId: string }
-  | { kind: "fire"; sessionId: string };
+  | { kind: "fire"; sessionId: string }
+  | { kind: "jetpack_toggle"; sessionId: string }
+  | { kind: "jetpack_thrust"; sessionId: string; active: boolean }
+  | { kind: "jetpack_horizontal"; sessionId: string; dir: -1 | 0 | 1 };
 
 /** Sim-kickoff metadata persisted so hibernation can rebuild. */
 interface SimBootstrap {
@@ -426,6 +429,9 @@ export class Room implements DurableObject {
       case "input_select_weapon":
       case "input_fire":
       case "input_end_turn":
+      case "input_jetpack_toggle":
+      case "input_jetpack_thrust":
+      case "input_jetpack_horizontal":
         this.queueInput(attachment.sessionId, type, msg);
         break;
       case "leave":
@@ -491,6 +497,11 @@ export class Room implements DurableObject {
       const lobby = this.ensureLobby();
       const now = Date.now();
 
+      // Capture the active worm BEFORE any mutation points in this alarm
+      // cycle (handleFinalLeave / drainInputs / arbiter.onTick can all
+      // advance the turn). Compared at the end to trigger utility reset.
+      const prevWormId = lobby.currentWormId;
+
       // Grace expiry forfeits.
       const expiredSessionIds: string[] = [];
       for (const [sid, player] of Object.entries(lobby.players)) {
@@ -527,6 +538,16 @@ export class Room implements DurableObject {
 
       if (lobby.phase === "playing" && this.arbiter) {
         this.arbiter.onTick(SIM_TICK_MS);
+      }
+
+      // Turn-change utility reset: prevWormId was captured at the top of
+      // the alarm, so this catches advances from handleFinalLeave (forfeit),
+      // drainInputs (endTurnByPlayer), and arbiter.onTick (timer / pending).
+      if (lobby.phase === "playing" && this.sim) {
+        const nextWormId = lobby.currentWormId;
+        if (nextWormId && nextWormId !== prevWormId) {
+          this.sim.resetUtilitiesForTurnStart(nextWormId);
+        }
       }
 
       if (this.arbiter) await this.persistArbiter();
@@ -831,6 +852,21 @@ export class Room implements DurableObject {
       case "input_fire":
         this.pendingInputs.push({ kind: "fire", sessionId: senderSessionId });
         return;
+      case "input_jetpack_toggle":
+        this.pendingInputs.push({ kind: "jetpack_toggle", sessionId: senderSessionId });
+        return;
+      case "input_jetpack_thrust": {
+        const active = raw.active;
+        if (typeof active !== "boolean") return;
+        this.pendingInputs.push({ kind: "jetpack_thrust", sessionId: senderSessionId, active });
+        return;
+      }
+      case "input_jetpack_horizontal": {
+        const dir = raw.dir;
+        if (dir !== -1 && dir !== 0 && dir !== 1) return;
+        this.pendingInputs.push({ kind: "jetpack_horizontal", sessionId: senderSessionId, dir });
+        return;
+      }
       case "input_end_turn":
         // Explicit end-turn press from the active player. Force-advance
         // via the arbiter (validates ownership + pause state). Without
@@ -878,6 +914,15 @@ export class Room implements DurableObject {
         case "fire":
           this.sim.applyFire(activeWormId);
           this.arbiter?.onFireCommitted();
+          break;
+        case "jetpack_toggle":
+          this.sim.applyJetPackToggle(activeWormId);
+          break;
+        case "jetpack_thrust":
+          this.sim.applyJetPackThrust(activeWormId, input.active);
+          break;
+        case "jetpack_horizontal":
+          this.sim.applyJetPackHorizontal(activeWormId, input.dir);
           break;
       }
     }

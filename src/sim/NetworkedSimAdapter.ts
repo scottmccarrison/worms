@@ -108,6 +108,10 @@ export class NetworkedSimAdapter implements SimAdapter {
   private pendingAimPower: number | null = null;
   /** Cache last walk dir so a second walk(0) after a walk(1) doesn't re-send. */
   private lastWalkDir: -1 | 0 | 1 | null = null;
+  /** Cache last jetpack thrust so sustained presses don't re-send every frame. */
+  private lastJetThrustV: boolean | null = null;
+  /** Cache last jetpack horizontal dir for the same reason. */
+  private lastJetThrustH: -1 | 0 | 1 | null = null;
 
   constructor(init: NetworkedSimAdapterInit) {
     this.room = init.room;
@@ -242,7 +246,29 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   toggleJetPack(): void {
-    console.warn("[NetworkedSimAdapter] JetPack is not available in networked mode (plan #65).");
+    this.send({ type: "input_jetpack_toggle", seq: this.nextSeq() });
+  }
+
+  setJetPackThrust(active: boolean): void {
+    if (active === this.lastJetThrustV) return;
+    this.lastJetThrustV = active;
+    this.send({ type: "input_jetpack_thrust", active, seq: this.nextSeq() });
+  }
+
+  setJetPackHorizontal(dir: -1 | 0 | 1): void {
+    if (dir === this.lastJetThrustH) return;
+    this.lastJetThrustH = dir;
+    this.send({ type: "input_jetpack_horizontal", dir, seq: this.nextSeq() });
+  }
+
+  isJetPacking(): boolean {
+    const activeId = this.getActiveWormId();
+    return this.currFrame?.state.worms.find((w) => w.id === activeId)?.jetPackActive ?? false;
+  }
+
+  getJetPackFuel(): number {
+    const activeId = this.getActiveWormId();
+    return this.currFrame?.state.worms.find((w) => w.id === activeId)?.jetPackFuel ?? 0;
   }
 
   update(_dtMs: number): void {

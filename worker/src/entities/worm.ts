@@ -62,6 +62,8 @@ export interface WormRenderState {
   alive: boolean;
   activeWeapon: string;
   ammoLeft: number;
+  jetPackActive: boolean;
+  jetPackFuel: number; // 0-100
 }
 
 export class Worm {
@@ -84,6 +86,13 @@ export class Worm {
   private readonly footSensor: Fixture;
   private readonly walkSpeedMps: number;
   private walkingDir: -1 | 0 | 1 = 0;
+  // Jetpack fields are public so serialize/restore can round-trip them
+  // without a separate API surface. Writes from outside are rare and
+  // happen only on hibernation restore.
+  jetPackActive = false;
+  jetPackFuel = 100;
+  jetPackThrustV = false;
+  jetPackThrustH: -1 | 0 | 1 = 0;
 
   constructor(init: WormInit) {
     this.id = init.id;
@@ -186,6 +195,71 @@ export class Worm {
     this.facing = dir;
   }
 
+  // ---- JetPack ----
+
+  toggleJetPack(): void {
+    if (!this.alive) return;
+    if (this.jetPackActive) {
+      this.jetPackActive = false;
+      this.jetPackThrustV = false;
+      this.jetPackThrustH = 0;
+    } else {
+      if (this.jetPackFuel <= 0) return;
+      this.jetPackActive = true;
+    }
+  }
+
+  setJetPackThrust(active: boolean): void {
+    this.jetPackThrustV = active;
+  }
+
+  setJetPackHorizontal(dir: -1 | 0 | 1): void {
+    this.jetPackThrustH = dir;
+  }
+
+  /**
+   * Apply jetpack force for one sim tick. Called from Simulation.tick
+   * on the active worm before world.step(). Drains fuel and auto-deactivates
+   * when empty.
+   */
+  applyJetPackForce(dtMs: number): void {
+    if (!this.alive || !this.jetPackActive) return;
+    if (this.jetPackFuel <= 0) {
+      this.jetPackActive = false;
+      this.jetPackThrustV = false;
+      this.jetPackThrustH = 0;
+      return;
+    }
+
+    // Mirrors src/tuning.ts jetpack section so offline + networked feel the same.
+    const UP_FORCE = 15; // Newtons (planck units)
+    const SIDE_FORCE = 8;
+    const FUEL_PER_SECOND = 30; // percent per second
+
+    const fx = this.jetPackThrustH * SIDE_FORCE;
+    const fy = this.jetPackThrustV ? -UP_FORCE : 0;
+
+    if (fx !== 0 || fy !== 0) {
+      this.body.applyForce({ x: fx, y: fy }, this.body.getPosition(), true);
+      this.jetPackFuel -= FUEL_PER_SECOND * (dtMs / 1000);
+    }
+
+    if (this.jetPackFuel <= 0) {
+      this.jetPackFuel = 0;
+      this.jetPackActive = false;
+      this.jetPackThrustV = false;
+      this.jetPackThrustH = 0;
+    }
+  }
+
+  /** Reset all utility state. Called when a new turn starts for a worm. */
+  resetUtilitiesForTurnStart(): void {
+    this.jetPackActive = false;
+    this.jetPackFuel = 100;
+    this.jetPackThrustV = false;
+    this.jetPackThrustH = 0;
+  }
+
   // ---- Health ----
 
   takeDamage(amount: number): number {
@@ -205,6 +279,9 @@ export class Worm {
     this.health = 0;
     this.alive = false;
     this.walkingDir = 0;
+    this.jetPackActive = false;
+    this.jetPackThrustV = false;
+    this.jetPackThrustH = 0;
   }
 
   // ---- Foot contact ----
@@ -249,6 +326,8 @@ export class Worm {
       alive: this.alive,
       activeWeapon: this.activeWeapon,
       ammoLeft: this.ammoLeft,
+      jetPackActive: this.jetPackActive,
+      jetPackFuel: Math.round(this.jetPackFuel),
     };
   }
 }
