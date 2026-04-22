@@ -67,8 +67,6 @@ export interface ArbiterPersistedState {
   pausedRemainingMs: number | null;
   /** teamId -> next worm cursor index. */
   teamWormCursor: Record<string, number>;
-  /** True once sudden-death water has been triggered. */
-  suddenDeathStarted: boolean;
 }
 
 export class TurnArbiter {
@@ -81,7 +79,6 @@ export class TurnArbiter {
   private turnDurationMs = 0;
   private pausedRemainingMs: number | null = null;
   private pendingAdvance = false;
-  private suddenDeathStarted = false;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -94,7 +91,6 @@ export class TurnArbiter {
       gameOver: this.gameOver,
       pausedRemainingMs: this.pausedRemainingMs,
       teamWormCursor: Object.fromEntries(this.teamWormCursor),
-      suddenDeathStarted: this.suddenDeathStarted,
     };
   }
 
@@ -110,7 +106,6 @@ export class TurnArbiter {
     arbiter.gameOver = state.gameOver;
     arbiter.pausedRemainingMs = state.pausedRemainingMs;
     arbiter.teamWormCursor = new Map(Object.entries(state.teamWormCursor));
-    arbiter.suddenDeathStarted = state.suddenDeathStarted ?? false;
     return arbiter;
   }
 

@@ -372,12 +372,13 @@ export class Simulation {
       if (!worm.alive) continue;
       const dmg = worm.applyPendingFallDamage();
       if (dmg > 0) {
+        const pos = worm.body.getPosition();
         this.events.push({
           type: "damage_event",
           wormId: worm.id,
           amount: dmg,
           fromProjectileId: null,
-          impact: { x: 0, y: 0 },
+          impact: { x: toPixels(pos.x), y: toPixels(pos.y) },
         });
         if (!worm.alive && !this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);
