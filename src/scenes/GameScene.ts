@@ -172,7 +172,10 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Event + game-over subscriptions (both modes).
+    // Event + game-over subscriptions (both modes). We attach these AFTER
+    // adapter construction so the first turn's onTurnStart (fired synchronously
+    // during OfflineSimAdapter's TurnManager.start()) has already fired; the
+    // current active worm is re-read below when the HUDs wire up.
     this.sim.onEvent((ev) => this.handleSimEvent(ev));
     this.sim.onGameOver((winnerTeamId) => this.handleGameOver(winnerTeamId));
     this.sim.onTurnChanged((teamId, wormId) => this.handleTurnChanged(teamId, wormId));
@@ -259,6 +262,25 @@ export class GameScene extends Phaser.Scene {
       scene: this,
       onEndTurnPressed: () => this.sim.endTurn(),
     });
+
+    // Replay the current turn so the HUD + input gates are correctly
+    // primed. Offline mode's TurnManager.start() fires its onTurnStart
+    // synchronously during adapter construction, before our subscribers
+    // are attached - so we manually pull the current state here.
+    const initialTeamId = this.sim.getActiveTeamId();
+    const initialWormId = this.sim.getActiveWormId();
+    if (initialTeamId) {
+      this.handleTurnChanged(initialTeamId, initialWormId);
+    }
+    // Initial inputAllowed is "true" offline (local player drives every turn)
+    // and "am I the active team's owner?" networked.
+    const initialAllowed = this.offlineSim
+      ? this.offlineSim.isInputAllowed()
+      : this.networkedSim
+        ? initialTeamId === this.myTeamId && this.myTeamId !== ""
+        : false;
+    this.inputController.setInputAllowed(initialAllowed);
+    this.turnHUD.setEndTurnEnabled(initialAllowed);
 
     // Networked-only UI (spectator banner + reconnect + room listeners).
     if (this.isNetworked && this.room) {
@@ -451,12 +473,16 @@ export class GameScene extends Phaser.Scene {
       const active = teamId === this.myTeamId && this.myTeamId !== "";
       this.networkedSim.setActive(active);
     }
-    // Sync active worm for InputController when we have its internal list
-    // (offline only). Networked mode doesn't need a Worm handle since
-    // input methods go through the adapter.
+    // Sync active worm for InputController.
     if (this.offlineSim) {
       const activeWorm = this.offlineSim.wormsInternal.find((w) => w.name === _wormId);
       if (activeWorm) this.inputController?.setActiveWorm(activeWorm);
+    } else if (this.networkedSim) {
+      // Wrap the render view in a facade so InputController has something
+      // to read xPx / facing / aimAngle from. The facade's mutator methods
+      // are no-ops because the on* callbacks drive the actual wire sends.
+      const view = this.networkedSim.allWorms.find((w) => w.id === _wormId);
+      this.inputController?.setActiveWorm(view ? adaptRenderableToWormFacade(view) : null);
     }
   }
 
@@ -721,15 +747,33 @@ function parseTeamColor(input: string | number): number {
 }
 
 /**
- * Tiny read-only adapter that lets TouchControls / AimHUD call
- * `worm.xPx`, `worm.yPx`, `worm.facing` in networked mode without
+ * Tiny read-only facade that lets TouchControls / AimHUD / InputController
+ * call `worm.xPx`, `worm.yPx`, `worm.facing` in networked mode without
  * carrying around a full Worm (which would demand a planck body).
  *
+ * Mutator methods (walk, jump, etc.) are no-ops: the real input path in
+ * networked mode goes InputController -> onWalk callback ->
+ * sim.walk() -> room.send(). Direct worm.walk() is never used here.
+ *
+ * Rope + JetPack utilities are stubbed to "inactive" shapes so the
+ * InputController's `worm.isRoped()` / `isJetPacking()` guards short-
+ * circuit correctly (networked mode disables both per plan #65).
+ *
  * Returned as `Worm` (cast) because the existing TouchControls + AimHUD
- * signatures type `getActiveWorm` as `() => Worm | null`. Only the
- * read-only properties are accessed so the cast is safe at runtime.
+ * + InputController signatures type their worm params as `Worm`. The
+ * only fields they read are covered by this facade.
  */
 function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
+  const stubUtility = {
+    isActive: () => false,
+    activate: () => {},
+    deactivate: () => {},
+    update: () => {},
+    destroy: () => {},
+    adjust: () => {},
+    setHorizontalInput: () => {},
+    setVerticalInput: () => {},
+  };
   const facade = {
     get xPx() {
       return view.xPx;
@@ -757,6 +801,34 @@ function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
     },
     get health() {
       return view.hp;
+    },
+    ropeUtility: stubUtility,
+    jetPackUtility: stubUtility,
+    // Input-method stubs: adapter-routed callbacks drive the wire sends.
+    walk: (_dir: -1 | 0 | 1) => {
+      void _dir;
+    },
+    jump: () => {},
+    backflip: () => {},
+    aim: (_d: -1 | 0 | 1) => {
+      void _d;
+    },
+    setAimAngle: (_r: number) => {
+      void _r;
+    },
+    setAimPower: (_p: number) => {
+      void _p;
+    },
+    nudgeAimPower: (_d: number) => {
+      void _d;
+    },
+    setFacing: (_dir: -1 | 1) => {
+      void _dir;
+    },
+    isRoped: () => false,
+    isJetPacking: () => false,
+    setActive: (_b: boolean) => {
+      void _b;
     },
   } as unknown as Worm;
   return facade;
