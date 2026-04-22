@@ -14,7 +14,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "deploy": "npm run build && cd worker && wrangler deploy"
   },
   "dependencies": {
     "phaser": "3.90.0",

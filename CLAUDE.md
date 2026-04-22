@@ -44,6 +44,8 @@ Framework pivot happened 2026-04-20; see [ADR-001](docs/decisions/001-framework-
 
 **Deploy** (future): client to Cloudflare Pages (static CDN). Server (Colyseus) to Fly.io or co-located on brain's EC2 with nginx proxying `/worms/ws`. See Epic 13.
 
+**Deploy command (current, post-Epic 13)**: run `npm run deploy` from the repo root. This runs `npm run build` (Vite) FIRST, then `wrangler deploy` from `worker/`. Never run `cd worker && wrangler deploy` directly — wrangler uploads `../dist` as static assets without rebuilding, which can leave the client bundle stale while the DO/worker code is fresh. Symptom: server-side fixes work, client-side fixes silently don't ship.
+
 ## Drop-in philosophy
 
 Adding content should be a data file + sprite, not custom code. The stack is chosen so:
