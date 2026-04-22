@@ -176,6 +176,47 @@ describe("Simulation - movement", () => {
     // well under half a meter (compare to >1m sustained travel above).
     expect(afterInactive - afterActive).toBeLessThan(0.5);
   });
+
+  it("jetpack: toggle on, sustained thrust lifts worm, fuel drains, auto-deactivates", () => {
+    // Settle worm onto floor.
+    for (let i = 0; i < 30; i++) sim.tick(50, "Red-1");
+    const yBefore = requireWorm(sim, "Red-1").body.getPosition().y;
+
+    // Toggle jetpack on and apply upward thrust.
+    sim.applyJetPackToggle("Red-1");
+    sim.applyJetPackThrust("Red-1", true);
+
+    // 30 ticks at 50ms = 1.5s of thrust - should lift the worm noticeably.
+    for (let i = 0; i < 30; i++) sim.tick(50, "Red-1");
+    const yAfter = requireWorm(sim, "Red-1").body.getPosition().y;
+    // In planck (y-down), moving up means y decreases.
+    expect(yAfter).toBeLessThan(yBefore - 0.3);
+
+    // Check fuel drained. Drain for more ticks until auto-deactivate.
+    for (let i = 0; i < 80; i++) sim.tick(50, "Red-1");
+    const state = requireWorm(sim, "Red-1").toRenderState();
+    expect(state.jetPackActive).toBe(false);
+  });
+
+  it("jetpack: turn advance resets fuel to 100", () => {
+    // Settle.
+    for (let i = 0; i < 20; i++) sim.tick(50, "Red-1");
+
+    // Burn some fuel.
+    sim.applyJetPackToggle("Red-1");
+    sim.applyJetPackThrust("Red-1", true);
+    for (let i = 0; i < 20; i++) sim.tick(50, "Red-1");
+
+    const midState = requireWorm(sim, "Red-1").toRenderState();
+    expect(midState.jetPackFuel).toBeLessThan(100);
+
+    // Simulate turn change: reset utilities for Red-1.
+    sim.resetUtilitiesForTurnStart("Red-1");
+
+    const resetState = requireWorm(sim, "Red-1").toRenderState();
+    expect(resetState.jetPackFuel).toBe(100);
+    expect(resetState.jetPackActive).toBe(false);
+  });
 });
 
 describe("Simulation - fire / cut / damage", () => {

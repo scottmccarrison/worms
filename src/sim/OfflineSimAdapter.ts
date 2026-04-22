@@ -309,6 +309,24 @@ export class OfflineSimAdapter implements SimAdapter {
       : worm.jetPackUtility?.activate();
   }
 
+  setJetPackThrust(active: boolean): void {
+    this.turnManager.getActiveWorm()?.jetPackUtility?.setVerticalInput(active);
+  }
+
+  setJetPackHorizontal(dir: -1 | 0 | 1): void {
+    this.turnManager.getActiveWorm()?.jetPackUtility?.setHorizontalInput(dir);
+  }
+
+  isJetPacking(): boolean {
+    return this.turnManager.getActiveWorm()?.isJetPacking() ?? false;
+  }
+
+  getJetPackFuel(): number {
+    const worm = this.turnManager.getActiveWorm();
+    if (!worm) return 0;
+    return worm.jetPackUtility?.getFuel() ?? 0;
+  }
+
   update(dtMs: number): void {
     this.physicsSystem.step(dtMs);
     this.terrainInstance.flushPendingCuts();

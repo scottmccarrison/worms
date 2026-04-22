@@ -292,7 +292,8 @@ export class GameScene extends Phaser.Scene {
     this.touchControls = new TouchControls({
       scene: this,
       getActiveWorm: () => this.getActiveWormAdapter(),
-      networked: this.isNetworked,
+      ropeEnabled: !this.isNetworked,
+      jetPackEnabled: true,
     });
     this.weaponDrawer = new WeaponDrawer({
       scene: this,
@@ -312,16 +313,17 @@ export class GameScene extends Phaser.Scene {
       onEndTurnPressed: () => this.sim.endTurn(),
     });
 
-    // Utility d-pad is offline-only. In networked mode rope + jetpack are
-    // disabled per plan #65, so we never mount it.
-    if (this.offlineSim) {
-      this.utilityDPad = new UtilityDPad({
-        scene: this,
-        onLeft: (dir) => this.dispatchUtilityHorizontal(dir),
-        onUp: (active) => this.dispatchUtilityUp(active),
-        onDown: (active) => this.dispatchUtilityDown(active),
-      });
-    }
+    // Utility d-pad: always mounted in both modes. Networked mode routes
+    // through the sim adapter (sends to server); offline routes to the
+    // local worm directly. Down button stays offline-only (rope extend).
+    this.utilityDPad = new UtilityDPad({
+      scene: this,
+      onLeft: (dir) => this.sim.setJetPackHorizontal(dir),
+      onUp: (active) => this.sim.setJetPackThrust(active),
+      onDown: (_active) => {
+        if (this.offlineSim) this.dispatchUtilityDown(_active);
+      },
+    });
 
     // Replay the current turn so the HUD + input gates are correctly
     // primed. Offline mode's TurnManager.start() fires its onTurnStart
@@ -543,7 +545,9 @@ export class GameScene extends Phaser.Scene {
       // to read xPx / facing / aimAngle from. The facade's mutator methods
       // are no-ops because the on* callbacks drive the actual wire sends.
       const view = this.networkedSim.allWorms.find((w) => w.id === _wormId);
-      this.inputController?.setActiveWorm(view ? adaptRenderableToWormFacade(view) : null);
+      this.inputController?.setActiveWorm(
+        view ? adaptRenderableToWormFacade(view, () => this.sim.isJetPacking(), this.sim) : null,
+      );
     }
   }
 
@@ -586,55 +590,24 @@ export class GameScene extends Phaser.Scene {
       const id = this.networkedSim.getActiveWormId();
       const view = this.networkedSim.allWorms.find((w) => w.id === id);
       if (!view || !view.isAlive) return null;
-      return adaptRenderableToWormFacade(view);
+      return adaptRenderableToWormFacade(view, () => this.sim.isJetPacking(), this.sim);
     }
     return null;
   }
 
-  /** Offline-only: show the d-pad when the active worm has a utility engaged,
-   *  hide it when idle. Runs every frame from `update`; cheap because all work
-   *  is gated by the visibility flag. */
+  /** Show the d-pad when the active worm has a utility engaged, hide when idle.
+   *  Works in both offline and networked mode. Runs every frame from `update`. */
   private refreshUtilityDPad(): void {
-    if (!this.utilityDPad || !this.offlineSim) return;
-    const worm = this.offlineSim.turns.getActiveWorm();
-    const active = !!worm && (worm.isRoped() || worm.isJetPacking());
+    if (!this.utilityDPad) return;
+    const isJetPacking = this.sim.isJetPacking();
+    const isRoped = this.offlineSim ? !!this.offlineSim.turns.getActiveWorm()?.isRoped() : false;
+    const active = isJetPacking || isRoped;
     if (active && !this.utilityDPadVisible) {
       this.utilityDPad.show();
       this.utilityDPadVisible = true;
     } else if (!active && this.utilityDPadVisible) {
       this.utilityDPad.hide();
       this.utilityDPadVisible = false;
-    }
-  }
-
-  /** Route horizontal d-pad input to rope (no-op horizontal) or jetpack.
-   *  Rope doesn't use horizontal directly (swing drives it); we still call
-   *  worm.walk for completeness since the offline Worm.walk guards against
-   *  roped state internally. */
-  private dispatchUtilityHorizontal(dir: -1 | 0 | 1): void {
-    if (!this.offlineSim) return;
-    const worm = this.offlineSim.turns.getActiveWorm();
-    if (!worm) return;
-    if (worm.isJetPacking()) {
-      worm.jetPackUtility.setHorizontalInput(dir);
-    }
-    // Rope: horizontal inputs don't steer the rope swing; the player swings
-    // by timing the up/down length changes. Intentionally a no-op here.
-  }
-
-  /** Up-button: jetpack thrust, or rope retract. */
-  private dispatchUtilityUp(active: boolean): void {
-    if (!this.offlineSim) return;
-    const worm = this.offlineSim.turns.getActiveWorm();
-    if (!worm) return;
-    if (worm.isJetPacking()) {
-      worm.jetPackUtility.setVerticalInput(active);
-    } else if (worm.isRoped() && active) {
-      // One-shot retract tick per frame the button is held. Update loop
-      // would be more precise but rope.adjust is called every pointer tick
-      // from the keyboard path too, so we match that contract.
-      const rate = tuning.rope.adjustRateMps / 60; // approximate per-frame nudge
-      worm.ropeUtility.adjust(-rate);
     }
   }
 
@@ -940,7 +913,11 @@ function parseTeamColor(input: string | number): number {
  * + InputController signatures type their worm params as `Worm`. The
  * only fields they read are covered by this facade.
  */
-function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
+function adaptRenderableToWormFacade(
+  view: RenderableWorm,
+  isJetPackingFn?: () => boolean,
+  simRef?: SimAdapter,
+): Worm {
   const stubUtility = {
     isActive: () => false,
     activate: () => {},
@@ -950,7 +927,15 @@ function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
     adjust: () => {},
     setHorizontalInput: () => {},
     setVerticalInput: () => {},
+    getFuel: () => 0,
   };
+  const jetPackUtility = simRef
+    ? {
+        ...stubUtility,
+        setHorizontalInput: (dir: -1 | 0 | 1) => simRef.setJetPackHorizontal(dir),
+        setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
+      }
+    : stubUtility;
   const facade = {
     get xPx() {
       return view.xPx;
@@ -980,7 +965,7 @@ function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
       return view.hp;
     },
     ropeUtility: stubUtility,
-    jetPackUtility: stubUtility,
+    jetPackUtility,
     // Input-method stubs: adapter-routed callbacks drive the wire sends.
     walk: (_dir: -1 | 0 | 1) => {
       void _dir;
@@ -1003,7 +988,7 @@ function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
       void _dir;
     },
     isRoped: () => false,
-    isJetPacking: () => false,
+    isJetPacking: isJetPackingFn ?? (() => false),
     setActive: (_b: boolean) => {
       void _b;
     },

@@ -116,6 +116,10 @@ export interface SerializedSim {
     alive: boolean;
     activeWeapon: string;
     ammoLeft: number;
+    jetPackActive?: boolean;
+    jetPackFuel?: number;
+    jetPackThrustV?: boolean;
+    jetPackThrustH?: -1 | 0 | 1;
   }>;
   projectiles: Array<{
     id: string;
@@ -223,6 +227,23 @@ export class Simulation {
     worm.setFacing(facing);
   }
 
+  applyJetPackToggle(wormId: string): void {
+    this.worms.get(wormId)?.toggleJetPack();
+  }
+
+  applyJetPackThrust(wormId: string, active: boolean): void {
+    this.worms.get(wormId)?.setJetPackThrust(active);
+  }
+
+  applyJetPackHorizontal(wormId: string, dir: -1 | 0 | 1): void {
+    this.worms.get(wormId)?.setJetPackHorizontal(dir);
+  }
+
+  /** Reset utility state when a new turn starts for the given worm. */
+  resetUtilitiesForTurnStart(wormId: string): void {
+    this.worms.get(wormId)?.resetUtilitiesForTurnStart();
+  }
+
   applySelectWeapon(wormId: string, weaponId: string): void {
     const worm = this.worms.get(wormId);
     if (!worm) return;
@@ -303,6 +324,7 @@ export class Simulation {
     //    advance implicitly stops the previous walker.
     if (activeWormId) {
       this.worms.get(activeWormId)?.applyWalking();
+      this.worms.get(activeWormId)?.applyJetPackForce(dtMs);
     }
 
     // 1. Step world. planck does fixed-step internally via the passed
@@ -406,6 +428,10 @@ export class Simulation {
           alive: w.alive,
           activeWeapon: w.activeWeapon,
           ammoLeft: w.ammoLeft,
+          jetPackActive: w.toRenderState().jetPackActive,
+          jetPackFuel: w.toRenderState().jetPackFuel,
+          jetPackThrustV: false,
+          jetPackThrustH: 0 as -1 | 0 | 1,
         };
       }),
       projectiles: this.projectiles.map((p) => ({
@@ -442,6 +468,9 @@ export class Simulation {
       worm.alive = ws.alive;
       worm.activeWeapon = ws.activeWeapon;
       worm.ammoLeft = ws.ammoLeft;
+      // Reset jetpack to safe defaults on restore (mid-flight hibernation is
+      // an acceptable edge case; the alternative is serializing thrust state).
+      worm.resetUtilitiesForTurnStart();
     }
     // Clear any bodies we pre-created for projectiles (we didn't).
     for (const ps of state.projectiles) {

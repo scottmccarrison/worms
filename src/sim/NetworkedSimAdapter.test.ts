@@ -145,6 +145,8 @@ function makeSimState(overrides: Partial<SimStateMessage> = {}): SimStateMessage
         alive: true,
         activeWeapon: "bazooka",
         ammoLeft: -1,
+        jetPackActive: false,
+        jetPackFuel: 100,
       },
     ],
     projectiles: [],
@@ -241,6 +243,8 @@ describe("NetworkedSimAdapter", () => {
               alive: true,
               activeWeapon: "bazooka",
               ammoLeft: -1,
+              jetPackActive: false,
+              jetPackFuel: 100,
             },
           ],
         }),
@@ -266,6 +270,8 @@ describe("NetworkedSimAdapter", () => {
               alive: true,
               activeWeapon: "bazooka",
               ammoLeft: -1,
+              jetPackActive: false,
+              jetPackFuel: 100,
             },
           ],
         }),
@@ -310,6 +316,8 @@ describe("NetworkedSimAdapter", () => {
               alive: true,
               activeWeapon: "bazooka",
               ammoLeft: -1,
+              jetPackActive: false,
+              jetPackFuel: 100,
             },
           ],
         }),
@@ -331,6 +339,8 @@ describe("NetworkedSimAdapter", () => {
               alive: true,
               activeWeapon: "bazooka",
               ammoLeft: -1,
+              jetPackActive: false,
+              jetPackFuel: 100,
             },
           ],
         }),
@@ -525,15 +535,19 @@ describe("NetworkedSimAdapter", () => {
     }
   });
 
-  it("rope + jetpack warn but do not crash (plan #65 disabled in networked mode)", () => {
+  it("rope warns but does not crash; jetpack toggle sends input_jetpack_toggle", () => {
     const room = makeFakeRoom();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const sim = new NetworkedSimAdapter({ room, teams: makeTeams() });
     try {
       sim.toggleRope();
       sim.toggleJetPack();
-      expect(warn).toHaveBeenCalledTimes(2);
-      // No room.send for either call.
+      // Rope still warns (not yet ported to networked mode).
+      expect(warn).toHaveBeenCalledTimes(1);
+      // Jetpack sends rather than warns.
+      const jpMsgs = room.sent.filter((m) => m.type === "input_jetpack_toggle");
+      expect(jpMsgs).toHaveLength(1);
+      // No rope sends.
       expect(room.sent.filter((m) => m.type.startsWith("input_rope")).length).toBe(0);
     } finally {
       sim.destroy();

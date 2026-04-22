@@ -81,6 +81,11 @@ export interface SimAdapter {
   /** Rope / jetpack toggle. Offline-only per plan #65; networked adapter no-ops. */
   toggleRope(): void;
   toggleJetPack(): void;
+  setJetPackThrust(active: boolean): void;
+  setJetPackHorizontal(dir: -1 | 0 | 1): void;
+  isJetPacking(): boolean;
+  /** Current jetpack fuel level, 0..100. */
+  getJetPackFuel(): number;
 
   // ---- Lifecycle ----
   /** Per-frame update. Offline: drives planck step + settle. Networked: advances interpolation clock. */
