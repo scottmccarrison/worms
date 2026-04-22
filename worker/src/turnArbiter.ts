@@ -14,12 +14,7 @@
  *   attached hibernatable WebSocket.
  */
 
-import type {
-  CircleCut,
-  LobbyState,
-  TeamInit as _TeamInit,
-  WormSnapshot,
-} from "./messages.js";
+import type { CircleCut, LobbyState, WormSnapshot, TeamInit as _TeamInit } from "./messages.js";
 
 /** Payload shape of `turn_snapshot` (C->S from the active player). */
 export interface TurnSnapshot {

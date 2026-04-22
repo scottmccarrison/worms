@@ -27,8 +27,8 @@ import { isValidNickname, normaliseNickname, sanitiseTurnSnapshot } from "./sani
 import {
   type ArbiterRoomAdapter,
   DISCONNECT_GRACE_MS,
-  type TeamRoster,
   TURN_DURATION_MS,
+  type TeamRoster,
   TurnArbiter,
 } from "./turnArbiter.js";
 
@@ -435,7 +435,11 @@ export class Room implements DurableObject {
     // Grace expiry: any player whose grace window has elapsed forfeits.
     const expiredSessionIds: string[] = [];
     for (const [sid, player] of Object.entries(lobby.players)) {
-      if (player.disconnected && player.disconnectGraceEndsAt > 0 && now >= player.disconnectGraceEndsAt) {
+      if (
+        player.disconnected &&
+        player.disconnectGraceEndsAt > 0 &&
+        now >= player.disconnectGraceEndsAt
+      ) {
         expiredSessionIds.push(sid);
       }
     }
@@ -476,9 +480,10 @@ export class Room implements DurableObject {
   }
 
   private onSetColor(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
-    const color = typeof (msg as { color?: unknown }).color === "string"
-      ? ((msg as { color: string }).color)
-      : "";
+    const color =
+      typeof (msg as { color?: unknown }).color === "string"
+        ? (msg as { color: string }).color
+        : "";
     if (!(ALLOWED_COLORS as readonly string[]).includes(color)) {
       this.sendError(ws, "invalid_color", "Color is not in the allowed palette.");
       return;
@@ -504,9 +509,10 @@ export class Room implements DurableObject {
       this.sendError(ws, "not_host", "Only the host may change the map.");
       return;
     }
-    const mapId = typeof (msg as { mapId?: unknown }).mapId === "string"
-      ? ((msg as { mapId: string }).mapId)
-      : "";
+    const mapId =
+      typeof (msg as { mapId?: unknown }).mapId === "string"
+        ? (msg as { mapId: string }).mapId
+        : "";
     if (!(MAP_WHITELIST as readonly string[]).includes(mapId)) {
       this.sendError(ws, "invalid_map", "Map id is not in the allowed list.");
       return;

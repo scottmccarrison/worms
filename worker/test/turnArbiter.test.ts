@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { LobbyState } from "../src/messages.js";
 import {
   type ArbiterRoomAdapter,
-  type TeamRoster,
   TURN_DURATION_MS,
+  type TeamRoster,
   TurnArbiter,
   type TurnSnapshot,
 } from "../src/turnArbiter.js";

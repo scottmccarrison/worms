@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import WebSocket from "ws";
 import { type Unstable_DevWorker, unstable_dev } from "wrangler";
+import WebSocket from "ws";
 
 /**
  * Integration tests for the Room Durable Object via wrangler's
@@ -154,7 +154,9 @@ describe("Room integration", () => {
         Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
     );
     const state = stateMsg.state as { players: Record<string, { nickname: string }> };
-    const nicknames = Object.values(state.players).map((p) => p.nickname).sort();
+    const nicknames = Object.values(state.players)
+      .map((p) => p.nickname)
+      .sort();
     expect(nicknames).toEqual(["Alice", "Bob"]);
     alice.close();
     bob.close();
@@ -181,9 +183,11 @@ describe("Room integration", () => {
         .players;
       return Object.values(players).some((p) => p.nickname === "Bob" && p.ready === true);
     });
-    const players = (readyState.state as {
-      players: Record<string, { nickname: string; ready: boolean; isHost: boolean }>;
-    }).players;
+    const players = (
+      readyState.state as {
+        players: Record<string, { nickname: string; ready: boolean; isHost: boolean }>;
+      }
+    ).players;
     const aliceRow = Object.values(players).find((p) => p.nickname === "Alice");
     expect(aliceRow?.ready).toBe(false);
     expect(aliceRow?.isHost).toBe(true);
@@ -319,9 +323,11 @@ describe("Room integration", () => {
     );
     const currentTeam = (playing.state as { currentTeamId: string }).currentTeamId;
 
-    const playersRow = (playing.state as {
-      players: Record<string, { ownerOfTeamId: string }>;
-    }).players;
+    const playersRow = (
+      playing.state as {
+        players: Record<string, { ownerOfTeamId: string }>;
+      }
+    ).players;
     const activeSession = Object.entries(playersRow).find(
       ([, p]) => p.ownerOfTeamId === currentTeam,
     )?.[0];
