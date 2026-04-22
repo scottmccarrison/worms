@@ -13,8 +13,8 @@
  */
 
 import type Phaser from "phaser";
-import { tuning } from "../tuning";
 import type { RenderableWorm } from "../sim/SimAdapter";
+import { tuning } from "../tuning";
 
 export interface WormSpriteInit {
   scene: Phaser.Scene;

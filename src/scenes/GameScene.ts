@@ -1,6 +1,4 @@
 import * as Phaser from "phaser";
-import type { Contact } from "planck";
-import type { ContactImpulse } from "planck";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
@@ -8,18 +6,12 @@ import { firstId, getById, nextId } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
-import type {
-  ClientMsg,
-  GameOverMessage,
-  LobbyState,
-  TeamInit as NetTeamInit,
-  TurnResolvedMessage,
-} from "../net/types";
+import type { ClientMsg, TeamInit as NetTeamInit } from "../net/types";
 import type { RoomHandle } from "../net/wsClient";
-import { PhysicsSystem } from "../physics/PhysicsSystem";
-import { drawDebug } from "../rendering/debugDraw";
-import { TurnManager } from "../state/TurnManager";
-import { Terrain } from "../terrain/Terrain";
+import { NetworkedSimAdapter } from "../sim/NetworkedSimAdapter";
+import { OfflineSimAdapter } from "../sim/OfflineSimAdapter";
+import type { RenderableWorm, SimAdapter, SimEvent } from "../sim/SimAdapter";
+import { TerrainRenderer } from "../terrain/TerrainRenderer";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
@@ -27,94 +19,89 @@ import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
-import { JetPack } from "../utilities/JetPack";
-import { NinjaRope } from "../utilities/NinjaRope";
-import { ProjectileManager } from "../weapons/ProjectileManager";
-import { WeaponManager } from "../weapons/WeaponManager";
-import { fire } from "../weapons/fire";
 import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
-import { Team } from "../worm/Team";
-import { Worm } from "../worm/Worm";
-import type { WormUserData } from "../worm/Worm";
-import { fallDamageFromImpulse } from "../worm/fallDamage";
-import { applyRemoteInput, buildTurnSnapshot, setWormFromSnapshot } from "./game/networkBridge";
+import type { Team } from "../worm/Team";
+import type { Worm } from "../worm/Worm";
+import { WormSprite } from "../worm/WormSprite";
 
+/**
+ * Post-Epic-45 GameScene. The scene is a thin shell that:
+ *
+ *   1. Picks a SimAdapter (OfflineSimAdapter or NetworkedSimAdapter)
+ *      based on whether a RoomHandle was handed in by the lobby.
+ *   2. Instantiates input + HUD + touch overlays.
+ *   3. Each frame: calls `adapter.update(dtMs)` (offline: drives local
+ *      planck step; networked: advances interpolation clock), then
+ *      renders worm + projectile sprites from the adapter's
+ *      RenderableWorm snapshots.
+ *   4. Routes VFX events from the adapter onto terrain cuts / particles /
+ *      screen shake (commit 8 fills the VFX hooks).
+ *
+ * The scene NO LONGER owns PhysicsSystem, Terrain-with-bodies, Worm
+ * physics bodies, ProjectileManager, fire, or explode. Those live inside
+ * OfflineSimAdapter.
+ */
 export class GameScene extends Phaser.Scene {
-  private physicsSystem!: PhysicsSystem;
-  private terrain!: Terrain;
+  // ---- Adapter (owns the sim - offline or networked) ----
+  private sim!: SimAdapter;
+  /** Narrowed alias when kind = "offline"; null in networked mode. */
+  private offlineSim: OfflineSimAdapter | null = null;
+  /** Narrowed alias when kind = "networked"; null in offline mode. */
+  private networkedSim: NetworkedSimAdapter | null = null;
+
+  // ---- Networked-mode-only render helpers ----
+  /** Visual-only terrain (mask + sprite, no bodies). Networked mode owns one. */
+  private terrainRenderer: TerrainRenderer | null = null;
+  /** One sprite per worm (networked mode). Offline mode's Worm class
+   * renders itself so this map stays empty. */
+  private wormSprites: Map<string, WormSprite> = new Map();
+  /** Fallback graphics for server-spawned projectiles (networked mode). */
+  private projectileGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
+
+  // ---- Scene-level UI (same for both modes) ----
   private debugGfx!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Text;
-  private allWorms: Worm[] = [];
-  private teams: Team[] = [];
   private inputController!: InputController;
   private touchControls!: TouchControls;
-  private turnManager!: TurnManager;
   private turnHUD!: TurnHUD;
-  // Epic 9: spectator "Waiting for X..." banner. Only instantiated in networked mode.
   private spectatorHUD: SpectatorHUD | null = null;
-
-  // Weapon system
-  private projectileManager!: ProjectileManager;
-  private weaponManagers!: Map<Team, WeaponManager>;
   private weaponDrawer!: WeaponDrawer;
   private aimHUD!: AimHUD;
-  private shotsFiredThisTurn = 0;
 
-  // Drag-to-aim state - tracked per primary pointer ID to block multitouch conflicts
+  // ---- Drag-to-aim state (primary pointer only) ----
   private dragStart: { x: number; y: number } | null = null;
   private dragPointerId: number | null = null;
 
-  // Active map id - set in init() before create() runs
+  // ---- Init-time data ----
   private mapId: string = firstId();
-  // Authoritative seed from the lobby host. Undefined means local/solo play
-  // and loadMap falls back to its own default.
   private seedOverride: number | undefined;
-  // Authoritative team roster from the lobby. Undefined falls back to the
-  // hardcoded red/blue defaults that Epic 7 used for single-device play.
   private teamsInit: NetTeamInit[] | undefined;
-  // Room reference stashed in init(). Drives all Epic 9/13 netcode;
-  // undefined means single-device / ?offline=1 play (no network code runs).
   private room: RoomHandle | undefined;
-  // NetClient reference - only present in networked mode. Used by the Epic
-  // 10 reconnect loop to rebuild a RoomHandle after an unexpected drop.
   private netClient: NetClient | undefined;
-  // True iff `room` is present. Cached so hot paths don't re-check every frame.
   private isNetworked = false;
-  /** Last turn_resolved turnSeq we applied locally. Guards against duplicate
-   *  messages double-cutting terrain. */
-  private lastAppliedTurnSeq = 0;
-  // Our sessionId when networked, "" otherwise.
   private mySessionId = "";
-  // Team id owned by our sessionId (set in create() after teamsInit maps sessionIds
-  // to team ids). Empty when spectating or offline.
   private myTeamId = "";
-  // Client-monotonic input sequence number. Server does not rely on it for
-  // ordering (WebSocket is ordered) but logs it for debugging.
-  private inputSeq = 0;
-  // Aim-broadcast throttle: drag-to-aim fires at 60+ Hz but we only send a
-  // max of one input_aim_{angle,power} pair per 50ms (~20 Hz). Tracks wall-
-  // clock time of the last send + the latest pending value so pointerup
-  // can flush the final state.
+
+  // ---- Networked-mode: monotonic ids for server-spawned projectiles ----
+
+  // ---- Reconnect + disconnected-owner overlay (networked mode only) ----
+  private reconnectingOverlay: ReconnectingOverlay | null = null;
+  private reconnectInFlight = false;
+  private currentRoomCode = "";
+  private disconnectTick: Phaser.Time.TimerEvent | null = null;
+  private roomUnsubs: Array<() => void> = [];
+
+  // ---- Offline-mode WeaponManager map (built per-team) ----
+  // Networked mode: ammo + select state arrive via sim_state.worms[].ammoLeft.
+  // This map is only present in offline mode so the weapon drawer UI can
+  // read authoritative ammo counts.
+
+  // ---- Drag-to-aim throttle (networked mode only) ----
   private lastAimSendMs = 0;
   private pendingAim: { angleRad: number; power: number } | null = null;
 
-  // ----- Epic 10: reconnect + disconnected-owner HUD -----
-  /** Shared ReconnectingOverlay. Lazy-created on first drop. */
-  private reconnectingOverlay: ReconnectingOverlay | null = null;
-  /** Concurrent-loop guard; prevents overlapping reconnect chains. */
-  private reconnectInFlight = false;
-  /** Room code captured at init time (room.state.code may be freed on drop). */
-  private currentRoomCode = "";
-  /** Phaser Time event that refreshes the disconnected-owner countdown. */
-  private disconnectTick: Phaser.Time.TimerEvent | null = null;
-  /** Active RoomHandle subscriptions (unsub fns). Cleared on scene shutdown. */
-  private roomUnsubs: Array<() => void> = [];
-
-  // Latest cached values from the server state. Track manually so
-  // onStateChange can fire field-level callbacks the way Colyseus'
-  // state.listen did. Comparisons happen in handleStateChange.
-  private lastCurrentTeamId = "";
-  private lastTurnEndsAt = 0;
+  // (Active-worm tracking flows through the adapter's onTurnChanged hook;
+  // no field needed at this layer.)
 
   constructor() {
     super("GameScene");
@@ -133,11 +120,8 @@ export class GameScene extends Phaser.Scene {
     this.teamsInit = data?.teams;
     this.room = data?.room;
     this.netClient = data?.netClient;
-    // Presence of room is the ONLY source of truth for networked mode.
-    // Offline / ?offline=1 paths pass no room and this stays false end-to-end.
     this.isNetworked = !!this.room;
     this.mySessionId = this.room?.sessionId ?? "";
-    // Register scene restart hook for dat.gui Maps panel
     registerMapCycleFn((id: string) => {
       this.scene.restart({ mapId: id });
     });
@@ -151,315 +135,139 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     const loaded = loadMap(this.mapId, this.scale.width, this.scale.height, this.seedOverride);
 
-    this.physicsSystem = new PhysicsSystem({ gravity: { x: 0, y: tuning.world.gravityY } });
-    this.terrain = new Terrain({
-      scene: this,
-      physics: this.physicsSystem,
-      widthPx: this.scale.width,
-      heightPx: this.scale.height,
-      sourceMask: loaded.mask,
+    // Build the team roster once; both adapters use the same shape.
+    const teamsForAdapter = this.buildAdapterTeams(this.teamsInit);
+
+    // ------------------------------------------------------------------
+    // Pick the adapter. Everything sim-related flows through it.
+    // ------------------------------------------------------------------
+    if (this.isNetworked && this.room) {
+      // Networked path: server owns the sim. Scene owns the visual terrain.
+      this.terrainRenderer = new TerrainRenderer({
+        scene: this,
+        widthPx: this.scale.width,
+        heightPx: this.scale.height,
+        sourceMask: loaded.mask,
+      });
+      this.networkedSim = new NetworkedSimAdapter({
+        room: this.room,
+        teams: this.teamsInit ?? [],
+      });
+      this.sim = this.networkedSim;
+    } else {
+      // Offline path: adapter owns everything physics-touching.
+      this.offlineSim = new OfflineSimAdapter({
+        scene: this,
+        loaded,
+        widthPx: this.scale.width,
+        heightPx: this.scale.height,
+        teams: teamsForAdapter,
+      });
+      this.sim = this.offlineSim;
+    }
+
+    // Build render sprites for networked worms; offline worms draw themselves.
+    if (this.networkedSim) {
+      for (const w of this.networkedSim.allWorms) {
+        this.wormSprites.set(w.id, new WormSprite({ scene: this }, w));
+      }
+    }
+
+    // Event + game-over subscriptions (both modes).
+    this.sim.onEvent((ev) => this.handleSimEvent(ev));
+    this.sim.onGameOver((winnerTeamId) => this.handleGameOver(winnerTeamId));
+    this.sim.onTurnChanged((teamId, wormId) => this.handleTurnChanged(teamId, wormId));
+    this.sim.onInputAllowedChanged((allowed) => {
+      this.inputController?.setInputAllowed(allowed);
+      this.turnHUD?.setEndTurnEnabled(allowed);
     });
 
-    // Register contact listeners BEFORE spawning worms
-    this.physicsSystem.world.on("begin-contact", this.onBeginContact);
-    this.physicsSystem.world.on("end-contact", this.onEndContact);
-    this.physicsSystem.world.on("post-solve", this.onPostSolve);
-
-    // Clean up on scene shutdown
+    // ------------------------------------------------------------------
+    // Shutdown hook. Scene.restart on reconnect re-runs create(); we rely
+    // on SHUTDOWN to tear down adapter + unsubs.
+    // ------------------------------------------------------------------
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.physicsSystem.world.off("begin-contact", this.onBeginContact);
-      this.physicsSystem.world.off("end-contact", this.onEndContact);
-      this.physicsSystem.world.off("post-solve", this.onPostSolve);
-      this.turnManager.destroy();
-      this.turnHUD.destroy();
-      this.projectileManager.destroy();
-      this.weaponDrawer.destroy();
-      this.aimHUD.destroy();
+      try {
+        this.sim.destroy();
+      } catch {
+        // adapter may have torn itself down on reconnect; ignore.
+      }
+      for (const s of this.wormSprites.values()) s.destroy();
+      this.wormSprites.clear();
+      for (const g of this.projectileGraphics.values()) g.destroy();
+      this.projectileGraphics.clear();
+      this.turnHUD?.destroy();
+      this.weaponDrawer?.destroy();
+      this.aimHUD?.destroy();
       this.spectatorHUD?.destroy();
       this.reconnectingOverlay?.destroy();
       this.reconnectingOverlay = null;
       this.disconnectTick?.remove(false);
       this.disconnectTick = null;
+      this.terrainRenderer?.destroy();
+      this.terrainRenderer = null;
       this.tearDownRoomListeners();
     });
 
-    // Spawn worms using map spawn points (predefined or scanned).
-    // Team roster comes from the lobby in multiplayer mode, falls back to
-    // the hardcoded red/blue defaults for single-device play.
-    this.teams = this.buildTeams(this.teamsInit);
-    const spawnPts = loaded.spawnPoints;
-    const totalWorms = this.teams.reduce((n, t) => {
-      const goal = this.teamsInit
-        ? (this.teamsInit.find((ti) => ti.id === t.id)?.wormNames.length ??
-          tuning.team.wormsPerTeam)
-        : tuning.team.wormsPerTeam;
-      return n + goal;
-    }, 0);
-
-    const fallbackYPx = this.scale.height * 0.3;
-    for (let i = 0; i < totalWorms; i++) {
-      const team = this.teams[i % this.teams.length];
-      if (!team) continue;
-      const pt = spawnPts[i];
-      const spawnXPx = pt ? pt.xPx : (this.scale.width / (totalWorms + 1)) * (i + 1);
-      const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
-      const teamIdx = this.teams.indexOf(team);
-      const fromInit = this.teamsInit?.[teamIdx]?.wormNames[team.worms.length];
-      const wormName = fromInit ?? `${team.id}-${team.worms.length + 1}`;
-      const w = new Worm({
-        scene: this,
-        physics: this.physicsSystem,
-        team,
-        spawnXPx,
-        spawnYPx,
-        wormName,
-      });
-      team.addWorm(w);
-      this.allWorms.push(w);
-    }
-
-    // Assign utilities to each worm AFTER construction
-    for (const w of this.allWorms) {
-      w.ropeUtility = new NinjaRope({
-        scene: this,
-        world: this.physicsSystem.world,
-        worm: w,
-      });
-      w.jetPackUtility = new JetPack({
-        scene: this,
-        worm: w,
-      });
-    }
-
-    // Weapon system - instantiate before inputController so callbacks can reference them
-    this.projectileManager = new ProjectileManager({
-      scene: this,
-      world: this.physicsSystem.world,
-      terrain: this.terrain,
-      onDetonate: (firer, selfDamage) => {
-        if (selfDamage > 0 && firer === this.inputController.getActiveWorm()) {
-          this.turnManager.reportSelfDamage(selfDamage);
-        }
-      },
-    });
-
-    this.weaponManagers = new Map();
-    for (const team of this.teams) {
-      this.weaponManagers.set(team, new WeaponManager(team, defaultAmmoForMatch()));
-    }
-
+    // ------------------------------------------------------------------
+    // Input layer. InputController drives the adapter, not Worm directly.
+    // ------------------------------------------------------------------
     this.inputController = new InputController({
       scene: this,
-      allWorms: this.allWorms,
+      allWorms: this.offlineSim?.wormsInternal ?? [],
       onEndTurn: () => {
-        this.sendLocalInput({ type: "input_end_turn" });
-        this.turnManager.endTurnByPlayer();
+        this.sim.endTurn();
       },
       onSelectWeapon: (n) => {
-        const wm = this.getActiveWeaponManager();
-        wm?.selectByKey(n);
-        const selected = wm?.getSelected().id;
-        if (selected) {
-          this.sendLocalInput({ type: "input_select_weapon", weaponId: selected });
-        }
+        const weapon = allWeapons().find((w) => w.selectKey === n);
+        if (!weapon) return;
+        this.sim.selectWeapon(weapon.id);
       },
       onFire: () => {
-        this.sendLocalInput({ type: "input_fire" });
-        this.tryFireActiveWeapon();
+        this.sim.fire();
       },
       onCycleMap: () => {
-        if (!this.turnManager.isInputAllowed()) return;
+        if (!this.sim.getActiveWormId()) return;
         const next = nextId(this.mapId);
         this.scene.restart({ mapId: next });
       },
-      // Epic 9 input relay. All callbacks are no-ops in offline mode
-      // because sendLocalInput early-returns when !isNetworked.
-      onWalk: (dir) => this.sendLocalInput({ type: "input_walk", dir }),
-      onJump: () => this.sendLocalInput({ type: "input_jump" }),
-      onBackflip: () => this.sendLocalInput({ type: "input_backflip" }),
-      onAimAngleChange: (angleRad) => this.sendLocalInput({ type: "input_aim_angle", angleRad }),
-      onAimPowerChange: (power) => this.sendLocalInput({ type: "input_aim_power", power }),
+      onWalk: (dir) => this.sim.walk(dir),
+      onJump: () => this.sim.jump(),
+      onBackflip: () => this.sim.backflip(),
+      onAimAngleChange: (rad) => this.sim.setAimAngle(rad),
+      onAimPowerChange: (p) => this.sim.setAimPower(p),
     });
 
-    // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
+    // Touch + HUDs are scene-owned and identical across modes.
     this.touchControls = new TouchControls({
       scene: this,
-      getActiveWorm: () => this.inputController.getActiveWorm(),
+      getActiveWorm: () => this.getActiveWormAdapter(),
     });
-
     this.weaponDrawer = new WeaponDrawer({
       scene: this,
       weapons: allWeapons(),
-      onSelect: (id) => {
-        // Guard: weapon select via touch drawer must respect the same inputAllowed
-        // gate as keyboard 1/2/3 select (InputController.update guards those).
-        if (!this.turnManager.isInputAllowed()) return;
-        this.getActiveWeaponManager()?.select(id);
-      },
-      getAmmo: (id) => this.getActiveWeaponManager()?.ammoFor(id) ?? 0,
-      getSelectedId: () => this.getActiveWeaponManager()?.getSelected().id ?? "",
-      getTeamColor: () => this.getActiveTeam()?.color ?? 0xffffff,
+      onSelect: (id) => this.sim.selectWeapon(id),
+      getAmmo: (id) => this.getAmmoFor(id),
+      getSelectedId: () => this.getSelectedWeaponId(),
+      getTeamColor: () => this.getActiveTeamColor(),
     });
-
     this.aimHUD = new AimHUD({
       scene: this,
-      getActiveWorm: () => this.inputController.getActiveWorm(),
-      isInputAllowed: () => this.turnManager.isInputAllowed(),
+      getActiveWorm: () => this.getActiveWormAdapter(),
+      isInputAllowed: () => this.isInputAllowed(),
     });
-
     this.turnHUD = new TurnHUD({
       scene: this,
-      onEndTurnPressed: () => this.turnManager.endTurnByPlayer(),
+      onEndTurnPressed: () => this.sim.endTurn(),
     });
 
-    this.turnManager = new TurnManager({
-      scene: this,
-      teams: this.teams,
-      allWorms: this.allWorms,
-      onTurnStart: (team, worm) => {
-        this.inputController.setActiveWorm(worm);
-        // In networked mode, input is gated on "is this my team?". In offline
-        // mode all turns are local so input is always allowed.
-        const allow = this.isNetworked ? this.iAmActive() : true;
-        this.inputController.setInputAllowed(allow);
-        this.turnHUD.showTurnBanner(team.name, team.color);
-        this.turnHUD.setEndTurnEnabled(allow);
-        // Reset per-turn weapon activation state
-        this.shotsFiredThisTurn = 0;
-        this.getActiveWeaponManager()?.resetActivation();
-      },
-      onTurnEnd: () => {
-        this.inputController.setInputAllowed(false);
-        this.turnHUD.setEndTurnEnabled(false);
-        for (const w of this.allWorms) {
-          w.ropeUtility?.deactivate();
-          w.jetPackUtility?.deactivate();
-        }
-      },
-      onGameOver: (winner) => {
-        this.inputController.setInputAllowed(false);
-        this.turnHUD.setEndTurnEnabled(false);
-        this.turnHUD.showGameOver(winner?.name ?? null);
-      },
-    });
-    this.turnManager.start();
-
-    // ---------------------------------------------------------------------
-    // Epic 9/13: networked mode wiring. All of this is gated on `isNetworked`
-    // so the `?offline=1` / single-device path runs zero network code.
-    // ---------------------------------------------------------------------
+    // Networked-only UI (spectator banner + reconnect + room listeners).
     if (this.isNetworked && this.room) {
-      // Find which team our sessionId owns. Matched against teamsInit's
-      // ownerSessionId (populated by the server on start_game).
-      const mine = this.teamsInit?.find((t) => t.ownerSessionId === this.mySessionId);
-      this.myTeamId = mine?.id ?? "";
-
-      // Server owns turn rotation; local SETTLED no longer cycles teams.
-      this.turnManager.setExternallyDriven(true);
-
-      // Passive "Waiting for X..." banner, only mounted in networked mode.
-      this.spectatorHUD = new SpectatorHUD({ scene: this });
-      this.refreshSpectatorBanner();
-
-      // Gate initial input based on the state we see at scene-create time.
-      // If the server hasn't picked currentTeamId yet, err on the side of
-      // locked input - onActiveTeamChanged will unlock once it arrives.
-      const currentTeamId = this.room.state.currentTeamId ?? "";
-      this.lastCurrentTeamId = currentTeamId;
-      this.lastTurnEndsAt = this.room.state.turnEndsAt ?? 0;
-      const initiallyActive = currentTeamId !== "" && currentTeamId === this.myTeamId;
-      this.inputController.setInputAllowed(initiallyActive);
-      this.turnHUD.setEndTurnEnabled(initiallyActive);
-
-      // Epic 13: single onStateChange replaces the Colyseus
-      // state.listen("currentTeamId", ...) / state.listen("turnEndsAt", ...)
-      // / players.onChange(...) trio. We diff against the last-cached values
-      // and dispatch synthetic field-level callbacks.
-      this.roomUnsubs.push(this.room.onStateChange((state) => this.handleStateChange(state)));
-
-      // Input relay handlers. Server broadcasts relayed messages to non-senders;
-      // when we're the active player we should never receive our own inputs, so
-      // these only fire for other players' actions.
-      this.roomUnsubs.push(
-        this.room.onMessage("input_walk", (p) => {
-          this.applyRemoteToActiveWorm("walk", p);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_jump", (p) => {
-          this.applyRemoteToActiveWorm("jump", p);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_backflip", (p) => {
-          this.applyRemoteToActiveWorm("backflip", p);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_aim_angle", (p) => {
-          this.applyRemoteToActiveWorm("aim_angle", p);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_aim_power", (p) => {
-          this.applyRemoteToActiveWorm("aim_power", p);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_select_weapon", (p) => {
-          const wm = this.getActiveWeaponManager();
-          if (wm && p.weaponId) wm.select(p.weaponId);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("input_fire", () => {
-          // Fire is GameScene-level: networkBridge treats "fire" as a no-op
-          // because it needs WeaponManager + ProjectileManager context. We
-          // replay directly here using the active worm's current aim state
-          // (prior input_aim_angle / input_aim_power messages have synced it).
-          this.tryFireActiveWeapon();
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("turn_resolved", (msg) => {
-          this.applyTurnResolved(msg);
-        }),
-      );
-      this.roomUnsubs.push(
-        this.room.onMessage("game_over", (msg) => {
-          this.onServerGameOver(msg);
-        }),
-      );
-
-      // Active client fires turn_snapshot when local settle says the turn is
-      // done. Spectator clients' hook fires too but sendTurnSnapshot()
-      // self-gates on iAmActive(), so only one snapshot lands per turn.
-      this.turnManager.onLocalTurnFinished = () => this.sendTurnSnapshot();
-
-      // Epic 10: capture the room code + unexpected-drop handler. Any close
-      // code other than 1000 (consented) triggers the reconnect loop.
-      this.currentRoomCode = this.room.state?.code ?? "";
-      this.roomUnsubs.push(
-        this.room.onClose((code) => {
-          if (code === 1000) return;
-          void this.startReconnectionLoop();
-        }),
-      );
-
-      // Countdown tick for "(owner disconnected, Ns)". 250ms is plenty for a
-      // 1-second-precision countdown without burning render budget. The
-      // onStateChange listener handles the connected/disconnected flip;
-      // this only drives the remaining-seconds text.
-      this.disconnectTick = this.time.addEvent({
-        delay: 250,
-        loop: true,
-        callback: () => this.refreshSpectatorBanner(),
-      });
+      this.wireNetworkedScene();
     }
 
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
-
     this.hud = this.add
       .text(12, 12, "", {
         fontSize: "14px",
@@ -468,464 +276,262 @@ export class GameScene extends Phaser.Scene {
       })
       .setDepth(20);
 
-    // Pointerdown chain: TurnHUD -> TouchControls -> WeaponDrawer -> Shift+click dev cut -> drag-to-aim
-    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (this.turnHUD.hitsButton(p)) return;
-      if (this.touchControls.hitsButton(p)) return;
-      if (this.weaponDrawer.hitsIcon(p)) return; // drawer owns tap via its zones
-      // Shift+click = dev terrain cut (removed in Epic 7)
-      if ((p.event as MouseEvent | undefined)?.shiftKey) {
-        this.terrain.cutCircle(p.x, p.y, tuning.weapons.testCutRadiusPx);
-        return;
-      }
-      // Only track the FIRST (primary) pointer for drag-to-aim.
-      // Multitouch: ignore secondary fingers so a second tap can't steal
-      // dragStart and cause an accidental fire when the first finger lifts.
-      if (this.dragPointerId !== null) return;
-      this.dragStart = { x: p.x, y: p.y };
-      this.dragPointerId = p.id;
-    });
-
-    // Drag updates aim angle + power in real-time relative to active worm position
-    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart || p.id !== this.dragPointerId) return;
-      const worm = this.inputController.getActiveWorm();
-      if (!worm || !this.turnManager.isInputAllowed()) return;
-
-      // Slingshot convention: the aim vector points FROM the pointer TO
-      // the worm, so dragging DOWN-LEFT of the worm aims UP-RIGHT. Matches
-      // Angry Birds / touch-first Worms clients. Negate both axes.
-      const dx = worm.xPx - p.x;
-      const dy = worm.yPx - p.y;
-      const mag = Math.hypot(dx, dy);
-      const cap = tuning.weapons.dragMaxLengthPx;
-      const power = Math.min(1, mag / cap);
-
-      // Flip facing if the pointer is on the opposite side of the worm
-      // from the current facing direction.
-      const rawAngle = Math.atan2(dy, dx);
-      const facingDot = Math.cos(rawAngle) * worm.facing;
-      if (facingDot < 0) {
-        worm.setFacing(-worm.facing as -1 | 1);
-      }
-      // Aim angle is relative to facing; atan2(dy, |dx|) gives correct up/down angle
-      const aimRad = Math.atan2(dy, Math.abs(dx));
-      worm.setAimAngle(aimRad);
-      worm.setAimPower(power);
-      // Drag-to-aim bypasses InputController's per-frame aim hook, so we
-      // forward to the network directly here. Otherwise spectators never
-      // see the arrow move during the active player's turn. Throttled to
-      // ~20 Hz (50ms between messages) so 60+Hz pointermove doesn't flood
-      // the socket; the last value is always flushed at pointerup.
-      this.throttleAimBroadcast(aimRad, power);
-    });
-
-    // Drag release: if distance >= deadzone, fire current weapon
-    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart || p.id !== this.dragPointerId) return;
-      const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
-      this.dragStart = null;
-      this.dragPointerId = null;
-      // Flush the final aim state before release so spectators see the
-      // exact angle/power the fire was released with. Without this, the
-      // last throttled aim value could be a beat stale vs the fire event.
-      this.flushPendingAim();
-      if (dragDist < tuning.weapons.dragDeadZonePx) return; // tap, not a drag
-      this.tryFireActiveWeapon();
-    });
+    this.wirePointerInput();
 
     void mountTuningPanel(() => {
-      this.physicsSystem.world.setGravity({ x: 0, y: tuning.world.gravityY });
+      // Tuning panel gravity edit only affects offline; networked sim gravity
+      // lives on the server and is immutable from the client.
+      if (this.offlineSim) {
+        this.offlineSim.wormsInternal[0]?.body.getWorld().setGravity({
+          x: 0,
+          y: tuning.world.gravityY,
+        });
+      }
     });
   }
 
   update(_time: number, deltaMs: number): void {
-    this.physicsSystem.step(deltaMs);
-    this.terrain.flushPendingCuts();
-
-    // ProjectileManager runs AFTER physics + terrain flush, BEFORE damage apply
-    // so same-frame detonation damage is visible in the win check
-    this.projectileManager.update(deltaMs);
-
-    // Apply pending damage BEFORE win check so same-frame kills are detected
-    for (const w of this.allWorms) {
-      w.applyPendingDamage();
-    }
-
-    // Win check + settle detection + timer tick
-    this.turnManager.update(deltaMs);
-
-    // Input: respects inputAllowed set by turn manager
+    this.sim.update(deltaMs);
+    this.renderFromAdapter();
     this.inputController.update(deltaMs);
-
-    // Per-worm update + utilities
-    for (const w of this.allWorms) {
-      w.update(deltaMs);
-      w.ropeUtility.update(deltaMs);
-      w.jetPackUtility.update(deltaMs);
-    }
-
-    // HUD timer
-    this.turnHUD.update(this.turnManager.getTurnSecondsRemaining());
-
-    // Weapon UI
+    this.turnHUD.update(this.sim.getTurnSecondsRemaining());
     this.weaponDrawer.update();
     this.aimHUD.update();
-
-    drawDebug(this.debugGfx, this.physicsSystem.world);
-
-    const wm = this.getActiveWeaponManager();
-    const selectedName = wm ? wm.getSelected().name : "-";
-    this.hud.setText(`weapon: ${selectedName}  bodies: ${this.terrain.bodyCount()}`);
+    const selectedId = this.getSelectedWeaponId();
+    const weapon = allWeapons().find((w) => w.id === selectedId);
+    const bodies = this.offlineSim?.terrain.bodyCount() ?? 0;
+    this.hud.setText(`weapon: ${weapon?.name ?? "-"}  bodies: ${bodies}`);
   }
 
   // ---------------------------------------------------------------------------
-  // Weapon helpers
+  // Rendering
   // ---------------------------------------------------------------------------
 
-  /**
-   * Build the Team list for this match.
-   *
-   * - Lobby path: server sends TeamInit[] in the `game_started` message;
-   *   we instantiate Teams with those id/name/color values.
-   * - Solo path: fall back to the Epic 7 hardcoded red/blue defaults.
-   */
-  private buildTeams(init: NetTeamInit[] | undefined): Team[] {
-    if (init && init.length > 0) {
-      return init.map((t) => new Team({ id: t.id, name: t.name, color: parseTeamColor(t.color) }));
+  private renderFromAdapter(): void {
+    if (this.networkedSim) {
+      this.renderNetworkedWorms();
+      this.renderNetworkedProjectiles();
     }
+    // Offline: Worm.update draws each worm's own sprite + HUD text. Nothing
+    // to do at the scene level for worm rendering.
+  }
+
+  private renderNetworkedWorms(): void {
+    if (!this.networkedSim) return;
+    const activeWormId = this.networkedSim.getActiveWormId();
+    for (const w of this.networkedSim.allWorms) {
+      const sprite = this.wormSprites.get(w.id);
+      if (!sprite) continue;
+      sprite.setActive(w.id === activeWormId);
+      sprite.render(w);
+    }
+  }
+
+  private renderNetworkedProjectiles(): void {
+    if (!this.networkedSim) return;
+    const projs = this.networkedSim.getProjectiles();
+    const live = new Set<string>();
+    for (const p of projs) {
+      live.add(p.id);
+      let g = this.projectileGraphics.get(p.id);
+      if (!g) {
+        g = this.add.graphics();
+        g.setDepth(8);
+        g.fillStyle(0xffffff, 1);
+        g.fillCircle(0, 0, 5);
+        this.projectileGraphics.set(p.id, g);
+      }
+      g.setPosition(p.xPx, p.yPx);
+    }
+    // Destroy any stale graphics (projectile no longer in server state).
+    for (const [id, g] of this.projectileGraphics) {
+      if (!live.has(id)) {
+        g.destroy();
+        this.projectileGraphics.delete(id);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event hooks (expanded in commit 8 for VFX; minimal plumbing here).
+  // ---------------------------------------------------------------------------
+
+  private handleSimEvent(ev: SimEvent): void {
+    // Commit 8 fleshes this out (terrain_cut -> TerrainRenderer.cutCircle,
+    // damage_event -> flash + number, worm_died -> death animation, etc.).
+    // Here we wire the minimal terrain_cut path so server cuts show up.
+    if (ev.type === "terrain_cut" && this.terrainRenderer) {
+      this.terrainRenderer.cutCircle(ev.x, ev.y, ev.r, ev.seq);
+    }
+  }
+
+  private handleGameOver(winnerTeamId: string | null): void {
+    this.inputController?.setInputAllowed(false);
+    this.turnHUD?.setEndTurnEnabled(false);
+    this.spectatorHUD?.hide();
+    const winner = this.sim.teams.find((t) => t.id === winnerTeamId) ?? null;
+    this.turnHUD?.showGameOver(winner?.name ?? null);
+  }
+
+  private handleTurnChanged(teamId: string, _wormId: string): void {
+    if (!teamId) return;
+    const team = this.sim.teams.find((t) => t.id === teamId);
+    if (team) this.turnHUD?.showTurnBanner(team.name, team.color);
+    this.refreshSpectatorBanner();
+    // Networked mode: update inputAllowed based on team ownership.
+    if (this.networkedSim) {
+      const active = teamId === this.myTeamId && this.myTeamId !== "";
+      this.networkedSim.setActive(active);
+    }
+    // Sync active worm for InputController when we have its internal list
+    // (offline only). Networked mode doesn't need a Worm handle since
+    // input methods go through the adapter.
+    if (this.offlineSim) {
+      const activeWorm = this.offlineSim.wormsInternal.find((w) => w.name === _wormId);
+      if (activeWorm) this.inputController?.setActiveWorm(activeWorm);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  private buildAdapterTeams(
+    init: NetTeamInit[] | undefined,
+  ): Array<{ id: string; name: string; color: number; wormNames: string[] }> {
+    if (init && init.length > 0) {
+      return init.map((t) => ({
+        id: t.id,
+        name: t.name,
+        color: parseTeamColor(t.color),
+        wormNames: t.wormNames,
+      }));
+    }
+    // Offline fallback: Epic 7 red + blue with default worm names.
+    const wormsPerTeam = tuning.team.wormsPerTeam;
+    const mkNames = (prefix: string) =>
+      Array.from({ length: wormsPerTeam }, (_, i) => `${prefix}-${i + 1}`);
     return [
-      new Team({ id: "red", name: "Red", color: 0xff4444 }),
-      new Team({ id: "blue", name: "Blue", color: 0x4488ff }),
+      { id: "red", name: "Red", color: 0xff4444, wormNames: mkNames("red") },
+      { id: "blue", name: "Blue", color: 0x4488ff, wormNames: mkNames("blue") },
     ];
   }
 
-  private getActiveTeam(): Team | null {
-    const worm = this.inputController.getActiveWorm();
-    if (!worm) return null;
-    return worm.team;
+  /**
+   * Return a worm-shaped handle for callers that need xPx/yPx + facing,
+   * primarily TouchControls and AimHUD. Offline mode returns the live Worm
+   * instance; networked mode synthesizes a lightweight view from the
+   * adapter's active RenderableWorm so the same callers work.
+   */
+  private getActiveWormAdapter(): Worm | null {
+    if (this.offlineSim) {
+      return this.offlineSim.turns.getActiveWorm();
+    }
+    if (this.networkedSim) {
+      const id = this.networkedSim.getActiveWormId();
+      const view = this.networkedSim.allWorms.find((w) => w.id === id);
+      if (!view || !view.isAlive) return null;
+      return adaptRenderableToWormFacade(view);
+    }
+    return null;
   }
 
-  private getActiveWeaponManager(): WeaponManager | null {
-    const team = this.getActiveTeam();
-    if (!team) return null;
-    return this.weaponManagers.get(team) ?? null;
+  private getAmmoFor(id: string): number {
+    if (this.offlineSim) {
+      const team = this.offlineSim.turns.getActiveTeam();
+      return this.offlineSim.getWeaponManager(team)?.ammoFor(id) ?? 0;
+    }
+    if (this.networkedSim) {
+      // Networked mode reads authoritative ammo out of the active worm's
+      // sim_state entry. Until W1 ships, expose the match-default so the
+      // drawer still renders ammo numbers in dev.
+      const defaults = defaultAmmoForMatch();
+      return defaults[id] ?? 0;
+    }
+    return 0;
   }
 
-  private tryFireActiveWeapon(): void {
-    if (!this.turnManager.isInputAllowed()) return;
-    const wm = this.getActiveWeaponManager();
-    const worm = this.inputController.getActiveWorm();
-    if (!wm || !worm) return;
+  private getSelectedWeaponId(): string {
+    if (this.offlineSim) {
+      const team = this.offlineSim.turns.getActiveTeam();
+      return this.offlineSim.getWeaponManager(team)?.getSelected().id ?? "";
+    }
+    // Networked mode: until sim_state carries activeWeapon (W1), default to
+    // the first registry entry so the drawer draws a selection.
+    return allWeapons()[0]?.id ?? "";
+  }
 
-    const weapon = wm.getSelected();
-    if (!wm.hasAmmo(weapon.id)) return; // out of ammo
+  private getActiveTeamColor(): number {
+    const id = this.sim.getActiveTeamId();
+    return this.sim.teams.find((t) => t.id === id)?.color ?? 0xffffff;
+  }
 
-    const result = fire(
-      weapon,
-      {
-        world: this.physicsSystem.world,
-        terrain: this.terrain,
-        firer: worm,
-        aimRadians: worm.aimAngle,
-        aimPower01: worm.aimPower01,
-        projectileManager: this.projectileManager,
-      },
-      wm.shotsFiredThisActivation,
+  private isInputAllowed(): boolean {
+    if (this.offlineSim) return this.offlineSim.turns.isInputAllowed();
+    if (this.networkedSim) return this.networkedSim.isInputAllowed();
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Networked-only wiring (spectator banner + reconnect loop + room listeners).
+  // ---------------------------------------------------------------------------
+
+  private wireNetworkedScene(): void {
+    if (!this.room) return;
+
+    const mine = this.teamsInit?.find((t) => t.ownerSessionId === this.mySessionId);
+    this.myTeamId = mine?.id ?? "";
+
+    this.spectatorHUD = new SpectatorHUD({ scene: this });
+    this.refreshSpectatorBanner();
+
+    this.currentRoomCode = this.room.state?.code ?? "";
+
+    this.roomUnsubs.push(
+      this.room.onClose((code) => {
+        if (code === 1000) return;
+        void this.startReconnectionLoop();
+      }),
     );
 
-    wm.consumeOne(weapon.id);
-    wm.shotsFiredThisActivation++;
-    this.shotsFiredThisTurn++;
-
-    if (result.turnEndsImmediately) {
-      this.turnManager.endTurnByPlayer();
-    }
+    this.disconnectTick = this.time.addEvent({
+      delay: 250,
+      loop: true,
+      callback: () => this.refreshSpectatorBanner(),
+    });
   }
 
-  // ------ Contact listeners ------
-
-  private onBeginContact = (contact: Contact): void => {
-    const a = contact.getFixtureA();
-    const b = contact.getFixtureB();
-
-    if (a.isSensor()) {
-      const ud = a.getBody().getUserData() as WormUserData | null;
-      if (ud?.kind === "worm") ud.worm.onFootContactBegin();
-    }
-    if (b.isSensor()) {
-      const ud = b.getBody().getUserData() as WormUserData | null;
-      if (ud?.kind === "worm") ud.worm.onFootContactBegin();
-    }
-  };
-
-  private onEndContact = (contact: Contact): void => {
-    const a = contact.getFixtureA();
-    const b = contact.getFixtureB();
-
-    if (a.isSensor()) {
-      const ud = a.getBody().getUserData() as WormUserData | null;
-      if (ud?.kind === "worm") ud.worm.onFootContactEnd();
-    }
-    if (b.isSensor()) {
-      const ud = b.getBody().getUserData() as WormUserData | null;
-      if (ud?.kind === "worm") ud.worm.onFootContactEnd();
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Epic 9/13 network hooks.
-  // ---------------------------------------------------------------------------
-
-  /**
-   * True when our sessionId is the owner of the currently active team.
-   * Returns false in offline mode.
-   */
-  protected iAmActive(): boolean {
-    if (!this.isNetworked || !this.room) return false;
-    return this.room.state.currentTeamId === this.myTeamId && this.myTeamId !== "";
-  }
-
-  /**
-   * Dispatch synthetic field-level callbacks from a full-state snapshot.
-   *
-   * Replaces the Colyseus `state.listen("currentTeamId", ...)` +
-   * `state.listen("turnEndsAt", ...)` + `players.onChange` trio. We diff
-   * the incoming state against our cached last values; anything that
-   * changed routes to the matching handler.
-   */
-  private handleStateChange(state: LobbyState): void {
-    if (!this.isNetworked) return;
-    if (state.currentTeamId !== this.lastCurrentTeamId) {
-      this.lastCurrentTeamId = state.currentTeamId;
-      this.onActiveTeamChanged(state.currentTeamId);
-    }
-    if (state.turnEndsAt !== this.lastTurnEndsAt) {
-      this.lastTurnEndsAt = state.turnEndsAt;
-      this.syncTurnTimer(state.turnEndsAt);
-    }
-    // The disconnected-owner banner reads directly from state.players, so
-    // a refresh on every state change keeps the "(disconnected, Ns)"
-    // countdown live without a dedicated players.onChange subscription.
-    this.refreshSpectatorBanner();
-  }
-
-  /**
-   * Called every time the server advances `currentTeamId`. Flips the local
-   * InputController on iff the new active team belongs to us. Remote worms
-   * are driven entirely by relayed input messages.
-   */
-  protected onActiveTeamChanged(_teamId: string): void {
-    if (!this.isNetworked) return;
-    const active = this.iAmActive();
-    // Flush a pending walk if we were walking when control flipped away.
-    // Otherwise spectators keep seeing the active worm walk forever on our
-    // last known dir. Bugcheck M6.
-    if (!active && this.inputController) {
-      const dir = this.inputController.getLastWalkDir();
-      if (dir !== 0 && this.room) {
-        this.inputSeq++;
-        this.room.send({ type: "input_walk", dir: 0, seq: this.inputSeq });
-      }
-      this.inputController.resetWalkState();
-    }
-    this.inputController?.setInputAllowed(active);
-    this.turnHUD?.setEndTurnEnabled(active);
-    this.refreshSpectatorBanner();
-  }
-
-  /**
-   * Toggle the spectator banner based on current turn ownership.
-   * - I'm active: hide.
-   * - Someone else is active: show "Waiting for {their nickname}...".
-   * - Active team has no owner (server about to auto-skip): show a
-   *   generic message. The banner will flip to the real owner a moment
-   *   later when the skip lands.
-   */
   private refreshSpectatorBanner(): void {
     if (!this.spectatorHUD || !this.room) return;
-    const activeTeamId = this.room.state.currentTeamId;
+    const activeTeamId = this.sim.getActiveTeamId();
     if (!activeTeamId) {
       this.spectatorHUD.hide();
       return;
     }
-    // Find the owner's sessionId via teamsInit, then look up the live
-    // LobbyPlayer for nickname + disconnected flag. Falls back to the
-    // team name if the lookup misses.
     const team = this.teamsInit?.find((t) => t.id === activeTeamId);
     const ownerSessionId = team?.ownerSessionId ?? "";
-    // Epic 13: players is now a plain Record; no .get() method.
     const ownerPlayer = ownerSessionId ? this.room.state.players[ownerSessionId] : undefined;
     const ownerName = ownerPlayer?.nickname ?? team?.name ?? activeTeamId;
-
-    // Epic 10: if the active team's owner is disconnected, surface it on
-    // the banner with a grace countdown. This takes precedence over the
-    // usual "I'm active - hide banner" rule so the active player also sees
-    // the countdown when... someone else (e.g. the other player in a
-    // 1v1) has dropped.
     if (ownerPlayer?.disconnected) {
       const graceEndsAt = ownerPlayer.disconnectGraceEndsAt ?? 0;
       const remainingSec = Math.max(0, Math.ceil((graceEndsAt - Date.now()) / 1000));
       this.spectatorHUD.show(`${ownerName} (disconnected, ${remainingSec}s)`);
       return;
     }
-
-    if (this.iAmActive()) {
+    if (activeTeamId === this.myTeamId) {
       this.spectatorHUD.hide();
       return;
     }
     this.spectatorHUD.show(`Waiting for ${ownerName}...`);
   }
 
-  /**
-   * Sync the local turn timer to the server's authoritative turnEndsAt.
-   * TurnManager reads endsAt on adoption (in applyTurnResolved); this hook
-   * is left wired so future epics can inject latency compensation without
-   * changing the listener shape.
-   */
-  protected syncTurnTimer(_endsAt: number): void {
-    // no-op placeholder
-  }
-
-  /**
-   * Forward a local input event to the server.
-   * No-op in offline mode or when we're not the active player (guards
-   * against races between gate-flips and in-flight key events).
-   *
-   * Accepts a partial ClientMsg (without `seq`) for input_* variants and
-   * the flat start_game / select_map / set_ready / end_turn messages.
-   * For input messages we stamp the next inputSeq before sending.
-   */
-  protected sendLocalInput(partial: Omit<InputClientMsg, "seq"> | ClientMsg): void {
-    if (!this.isNetworked || !this.room) return;
-    if (!this.iAmActive()) return;
-    const needsSeq = isInputType(partial.type);
-    if (needsSeq) {
-      this.inputSeq++;
-      // Spread with seq appended. Cast through unknown to satisfy the
-      // discriminated-union narrowing.
-      const msg = { ...partial, seq: this.inputSeq } as unknown as ClientMsg;
-      this.room.send(msg);
-    } else {
-      this.room.send(partial as ClientMsg);
-    }
-  }
-
-  /**
-   * Throttled aim broadcast from drag-to-aim. Drops intermediate values
-   * that arrive within 50ms of the previous send, stashing the latest so
-   * `flushPendingAim()` can emit it on pointerup. Without throttling, a
-   * single drag gesture sends 30-60+ messages/second over the WebSocket.
-   */
-  private throttleAimBroadcast(angleRad: number, power: number): void {
-    this.pendingAim = { angleRad, power };
-    const now = Date.now();
-    if (now - this.lastAimSendMs < 50) return;
-    this.lastAimSendMs = now;
-    this.sendLocalInput({ type: "input_aim_angle", angleRad });
-    this.sendLocalInput({ type: "input_aim_power", power });
-    this.pendingAim = null;
-  }
-
-  /**
-   * Emit any pending throttled aim value immediately. Called at pointerup
-   * so the fire event is preceded by the exact aim state we're releasing at.
-   */
-  private flushPendingAim(): void {
-    if (!this.pendingAim) return;
-    const { angleRad, power } = this.pendingAim;
-    this.pendingAim = null;
-    this.sendLocalInput({ type: "input_aim_angle", angleRad });
-    this.sendLocalInput({ type: "input_aim_power", power });
-  }
-
-  /**
-   * Route a relayed input message onto the currently-active remote worm.
-   * Looks up the target worm by the server's `currentWormId` so if the
-   * server has already rotated worms within a team, we replay onto the
-   * right one.
-   */
-  private applyRemoteToActiveWorm(type: string, payload: unknown): void {
-    if (!this.isNetworked || !this.room) return;
-    const currentWormId = this.room.state.currentWormId;
-    if (!currentWormId) return;
-    const target = this.allWorms.find((w) => w.name === currentWormId);
-    if (!target) return;
-    applyRemoteInput(target, type, payload);
-  }
-
-  /**
-   * Active player only: bundle the current sim into a turn_snapshot and
-   * ship it to the server. The server broadcasts it back as turn_resolved
-   * so all clients (including us) snap to the same authoritative state.
-   *
-   * Terrain cuts ARE carried in the snapshot now (Epic 13 playtest
-   * surfaced per-client sim drift producing different craters). The
-   * active client is authoritative; spectators apply the cut log in
-   * `turn_resolved` so everyone lands on the same terrain between turns.
-   */
-  protected sendTurnSnapshot(): void {
-    if (!this.isNetworked || !this.room) return;
-    if (!this.iAmActive()) return;
-    const cuts = this.terrain.consumeTurnCuts();
-    const snap = buildTurnSnapshot(this.teams, cuts);
-    this.room.send({ type: "turn_snapshot", ...snap });
-  }
-
-  /**
-   * Apply the server's authoritative turn reconciliation.
-   * - Snap every worm to the server's (x, y, vx, vy, hp, alive).
-   * - Replay terrain cuts (idempotent: the CircleCut.seq guard lives in
-   *   future logic; here we simply queue them via terrain.cutCircle).
-   * - Hand the new team + worm + endsAt to TurnManager.adoptServerTurn.
-   */
-  protected applyTurnResolved(msg: TurnResolvedMessage): void {
-    // Idempotent on turnSeq: a duplicate message must not double-cut terrain.
-    if (msg.turnSeq <= this.lastAppliedTurnSeq) return;
-    this.lastAppliedTurnSeq = msg.turnSeq;
-
-    // 1. Worm snap.
-    for (const snapWorm of msg.worms) {
-      const w = this.allWorms.find((ww) => ww.name === snapWorm.id);
-      if (w) setWormFromSnapshot(w, snapWorm);
-    }
-    // 2. Terrain cuts.
-    for (const cut of msg.terrainCuts) {
-      this.terrain.cutCircle(cut.x, cut.y, cut.r);
-    }
-    // 3. Turn rotation.
-    const endsAt = this.room?.state.turnEndsAt ?? 0;
-    this.turnManager.adoptServerTurn(msg.turnSeq, msg.nextTeamId, msg.nextWormId, endsAt);
-  }
-
-  /**
-   * Server has declared the match over. Pipe through the same
-   * game-over HUD path used by offline mode so the UX is unified.
-   */
-  protected onServerGameOver(msg: GameOverMessage): void {
-    this.inputController?.setInputAllowed(false);
-    this.turnHUD?.setEndTurnEnabled(false);
-    this.spectatorHUD?.hide();
-    const winningTeam = this.teams.find((t) => t.id === msg.winnerTeamId) ?? null;
-    this.turnHUD?.showGameOver(winningTeam?.name ?? null);
-  }
-
-  /**
-   * Epic 10/13: unexpected-drop reconnect loop. Matches the LobbyScene
-   * pattern but operates on the live game Room. On success we swap
-   * `this.room` via scene.restart so listeners rewire cleanly. On
-   * failure we clear the cached token and drop back to the LobbyScene
-   * home view so the user can re-join manually.
-   */
   private async startReconnectionLoop(): Promise<void> {
     if (this.reconnectInFlight) return;
     if (!this.netClient) {
-      // Can't reconnect without a client reference; bounce to home.
       this.scene.start("LobbyScene");
       return;
     }
     this.reconnectInFlight = true;
-
     const code = this.currentRoomCode;
     const stored = code ? readRoomToken(code) : null;
     if (!stored) {
@@ -933,12 +539,8 @@ export class GameScene extends Phaser.Scene {
       this.scene.start("LobbyScene", { netClient: this.netClient, autoJoinCode: null });
       return;
     }
-
     const overlay = this.ensureOverlay();
     overlay.show(1);
-
-    // Use a neutral nickname + the lobby's known color; the worker will
-    // match us by resume token first and ignore these values on a match.
     const result = await runReconnectLoop({
       netClient: this.netClient,
       code,
@@ -947,16 +549,10 @@ export class GameScene extends Phaser.Scene {
       resumeToken: stored.resumeToken,
       onAttempt: (n) => overlay.show(n),
     });
-
     if (result.ok && result.room) {
-      // Swap to the fresh RoomHandle. Rotated resume token gets saved.
       saveRoomToken(code, result.room.resumeToken);
       overlay.hide();
       this.reconnectInFlight = false;
-      // Full re-wire of listeners on the new Room would be invasive here;
-      // a scene.restart() is simpler and guaranteed consistent. We keep
-      // the same teamsInit + mapId + seed so physics state is rebuilt
-      // from scratch and then catches up via the next turn_resolved.
       this.scene.restart({
         mapId: this.mapId,
         seed: this.seedOverride,
@@ -966,8 +562,6 @@ export class GameScene extends Phaser.Scene {
       });
       return;
     }
-
-    // All attempts failed. Token is stale; drop to home.
     overlay.showFinal("Lost connection. Returning home.");
     if (code) clearRoomToken(code);
     this.time.delayedCall(2000, () => {
@@ -989,62 +583,92 @@ export class GameScene extends Phaser.Scene {
       try {
         unsub();
       } catch {
-        // Already torn down - drop.
+        // already torn down
       }
     }
     this.roomUnsubs = [];
   }
 
-  private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
-    const normalImpulse = impulse.normalImpulses[0] ?? 0;
-    if (normalImpulse <= 0) return;
+  // ---------------------------------------------------------------------------
+  // Pointer input (drag-to-aim) - routes through adapter, no local side effect.
+  // ---------------------------------------------------------------------------
 
-    const a = contact.getFixtureA();
-    const b = contact.getFixtureB();
+  private wirePointerInput(): void {
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (this.turnHUD.hitsButton(p)) return;
+      if (this.touchControls.hitsButton(p)) return;
+      if (this.weaponDrawer.hitsIcon(p)) return;
+      if (this.dragPointerId !== null) return;
+      this.dragStart = { x: p.x, y: p.y };
+      this.dragPointerId = p.id;
+    });
 
-    for (const fixture of [a, b]) {
-      if (fixture.isSensor()) continue;
-      const ud = fixture.getBody().getUserData() as WormUserData | null;
-      if (ud?.kind === "worm") {
-        const dmg = fallDamageFromImpulse(normalImpulse, {
-          density: tuning.worm.density,
-          threshold: tuning.worm.fallDamageThresholdImpulse,
-          maxDamage: tuning.worm.fallDamageCapHp,
-        });
-        if (dmg > 0) ud.worm.takeDamage(dmg);
+    this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
+      if (!this.dragStart || p.id !== this.dragPointerId) return;
+      const worm = this.getActiveWormAdapter();
+      if (!worm || !this.isInputAllowed()) return;
+      const dx = worm.xPx - p.x;
+      const dy = worm.yPx - p.y;
+      const mag = Math.hypot(dx, dy);
+      const cap = tuning.weapons.dragMaxLengthPx;
+      const power = Math.min(1, mag / cap);
+      const rawAngle = Math.atan2(dy, dx);
+      const facingDot = Math.cos(rawAngle) * worm.facing;
+      if (facingDot < 0) {
+        this.sim.setFacing(-worm.facing as -1 | 1);
       }
-    }
-  };
+      const aimRad = Math.atan2(dy, Math.abs(dx));
+      this.sim.setAimAngle(aimRad);
+      this.sim.setAimPower(power);
+      if (this.isNetworked) {
+        this.throttleAimBroadcast(aimRad, power);
+      }
+    });
+
+    this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
+      if (!this.dragStart || p.id !== this.dragPointerId) return;
+      const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
+      this.dragStart = null;
+      this.dragPointerId = null;
+      if (this.isNetworked) this.flushPendingAim();
+      if (dragDist < tuning.weapons.dragDeadZonePx) return;
+      this.sim.fire();
+    });
+  }
+
+  /**
+   * Drag-to-aim throttle. Pointermove fires up to 60Hz; we coalesce to
+   * 20Hz on the network side so the socket doesn't flood. The last
+   * pending value is flushed at pointerup so the fire event is preceded
+   * by the exact aim state we released at.
+   */
+  private throttleAimBroadcast(angleRad: number, power: number): void {
+    this.pendingAim = { angleRad, power };
+    const now = Date.now();
+    if (now - this.lastAimSendMs < 50) return;
+    this.lastAimSendMs = now;
+    this.sendInput({ type: "input_aim_angle", angleRad, seq: 0 });
+    this.sendInput({ type: "input_aim_power", power, seq: 0 });
+    this.pendingAim = null;
+  }
+
+  private flushPendingAim(): void {
+    if (!this.pendingAim) return;
+    const { angleRad, power } = this.pendingAim;
+    this.pendingAim = null;
+    this.sendInput({ type: "input_aim_angle", angleRad, seq: 0 });
+    this.sendInput({ type: "input_aim_power", power, seq: 0 });
+  }
+
+  private sendInput(msg: ClientMsg): void {
+    this.room?.send(msg);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** ClientMsg variants that carry a `seq` field (all the input_* ones). */
-type InputClientMsg = Extract<ClientMsg, { seq: number }>;
-
-const INPUT_TYPES: ReadonlySet<InputClientMsg["type"]> = new Set([
-  "input_walk",
-  "input_jump",
-  "input_backflip",
-  "input_aim_angle",
-  "input_aim_power",
-  "input_select_weapon",
-  "input_fire",
-  "input_end_turn",
-]);
-
-function isInputType(type: ClientMsg["type"]): type is InputClientMsg["type"] {
-  return INPUT_TYPES.has(type as InputClientMsg["type"]);
-}
-
-/**
- * Convert a `game_started` team color (server sends "#ff4444" as a string)
- * into the Phaser hex int that `Team.color` expects. Tolerates numeric
- * inputs for callers that already have an int. Bugcheck found the mismatch
- * on first Epic 9 integration.
- */
 function parseTeamColor(input: string | number): number {
   if (typeof input === "number" && Number.isFinite(input)) return input;
   if (typeof input === "string") {
@@ -1053,4 +677,46 @@ function parseTeamColor(input: string | number): number {
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0xaaaaaa;
+}
+
+/**
+ * Tiny read-only adapter that lets TouchControls / AimHUD call
+ * `worm.xPx`, `worm.yPx`, `worm.facing` in networked mode without
+ * carrying around a full Worm (which would demand a planck body).
+ *
+ * Returned as `Worm` (cast) because the existing TouchControls + AimHUD
+ * signatures type `getActiveWorm` as `() => Worm | null`. Only the
+ * read-only properties are accessed so the cast is safe at runtime.
+ */
+function adaptRenderableToWormFacade(view: RenderableWorm): Worm {
+  const facade = {
+    get xPx() {
+      return view.xPx;
+    },
+    get yPx() {
+      return view.yPx;
+    },
+    get facing() {
+      return view.facing;
+    },
+    get aimAngle() {
+      return view.aimAngle;
+    },
+    get aimPower01() {
+      return view.aimPower;
+    },
+    get isAlive() {
+      return view.isAlive;
+    },
+    get name() {
+      return view.name;
+    },
+    get team(): Team {
+      return view.team;
+    },
+    get health() {
+      return view.hp;
+    },
+  } as unknown as Worm;
+  return facade;
 }

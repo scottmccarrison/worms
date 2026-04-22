@@ -113,7 +113,8 @@ export class OfflineSimAdapter implements SimAdapter {
       const pt = spawnPts[i];
       const spawnXPx = pt ? pt.xPx : (init.widthPx / (totalWorms + 1)) * (i + 1);
       const spawnYPx = pt ? pt.yPx - tuning.worm.radiusPx * 2 : fallbackYPx;
-      const wormName = teamInit.wormNames[team.worms.length] ?? `${team.id}-${team.worms.length + 1}`;
+      const wormName =
+        teamInit.wormNames[team.worms.length] ?? `${team.id}-${team.worms.length + 1}`;
       const w = new Worm({
         scene: init.scene,
         physics: this.physicsSystem,
