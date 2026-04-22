@@ -20,22 +20,37 @@ export type { RoomHandle } from "./wsClient";
 export { createRoom, joinRoom } from "./wsClient";
 
 /**
- * WebSocket base URL (`ws://` or `wss://`) derived from the page origin.
- * Respects the page protocol so secure origins keep TLS on the socket too.
+ * Vite's configured base path, with the trailing slash trimmed so it
+ * concatenates cleanly with /api paths. Prod deploys under
+ * `mccarrison.me/worms/` so BASE_URL = "/worms/"; the trimmed value is
+ * "/worms" and API calls go to "/worms/api/room". In dev this is still
+ * "/worms/" (see vite.config.ts base), and Vite's proxy rewrites it to
+ * the worker's unprefixed path on :8787.
+ */
+function basePath(): string {
+  const raw = import.meta.env.BASE_URL ?? "/";
+  return raw.replace(/\/$/, "");
+}
+
+/**
+ * WebSocket base URL (`ws://` or `wss://`) derived from the page origin
+ * plus Vite's configured base path. The Worker is mounted at
+ * `mccarrison.me/worms/*` so WebSocket upgrades must target
+ * `wss://mccarrison.me/worms/api/room/...` - not the bare origin.
  */
 export function wsBaseUrl(): string {
   const { protocol, host } = window.location;
   const wsProto = protocol === "https:" ? "wss" : "ws";
-  return `${wsProto}://${host}`;
+  return `${wsProto}://${host}${basePath()}`;
 }
 
 /**
- * HTTP(S) base URL derived from the page origin. Used for `POST /api/room`
- * matchmaking + any future REST-shaped endpoints.
+ * HTTP(S) base URL derived from the page origin + Vite base path. Used
+ * for `POST /api/room` matchmaking + any future REST-shaped endpoints.
  */
 export function httpBaseUrl(): string {
   const { protocol, host } = window.location;
-  return `${protocol}//${host}`;
+  return `${protocol}//${host}${basePath()}`;
 }
 
 /**

@@ -16,5 +16,18 @@ export default defineConfig({
   server: {
     port: 5173,
     open: false,
+    // Dev proxy: the client computes API paths relative to BASE_URL
+    // (so "POST /worms/api/room" in both dev and prod). The worker
+    // running under `wrangler dev --local` serves at :8787 without the
+    // /worms prefix, so rewrite the path before proxying. WebSocket
+    // upgrades are proxied identically with ws: true.
+    proxy: {
+      "/worms/api": {
+        target: "http://localhost:8787",
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/worms/, ""),
+      },
+    },
   },
 });
