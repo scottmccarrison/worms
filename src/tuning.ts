@@ -90,7 +90,7 @@ export const tuning: Tuning = {
   water: { suddenDeathTurn: 15, risePxPerTurn: 50 },
   weapons: {
     testCutRadiusPx: 40,
-    dragMaxLengthPx: 200,
+    dragMaxLengthPx: 140,
     dragDeadZonePx: 8,
     powerStepPerPress: 0.05,
     ammo: { bazooka: -1, shotgun: -1, handgrenade: -1 },

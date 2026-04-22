@@ -242,6 +242,10 @@ export class GameScene extends Phaser.Scene {
     // on SHUTDOWN to tear down adapter + unsubs.
     // ------------------------------------------------------------------
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      // Tear down room listeners FIRST so a throw in any of the downstream
+      // destroys can't leave an active onStateChange listener that keeps
+      // firing (and attempting scene.start) after we've moved on.
+      this.tearDownRoomListeners();
       try {
         this.sim.destroy();
       } catch {
@@ -267,7 +271,6 @@ export class GameScene extends Phaser.Scene {
       this.disconnectTick = null;
       this.terrainRenderer?.destroy();
       this.terrainRenderer = null;
-      this.tearDownRoomListeners();
     });
 
     // ------------------------------------------------------------------
@@ -716,13 +719,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getSelectedWeaponId(): string {
-    if (this.offlineSim) {
-      const team = this.offlineSim.turns.getActiveTeam();
-      return this.offlineSim.getWeaponManager(team)?.getSelected().id ?? "";
-    }
-    // Networked mode: until sim_state carries activeWeapon (W1), default to
-    // the first registry entry so the drawer draws a selection.
-    return allWeapons()[0]?.id ?? "";
+    return this.sim.getActiveWeaponId() || allWeapons()[0]?.id || "";
   }
 
   private getActiveTeamColor(): number {
@@ -761,13 +758,20 @@ export class GameScene extends Phaser.Scene {
     // Phase change: if the server flips back to "lobby" (after host presses
     // Back to lobby from the game-over overlay), return to LobbyScene with
     // the existing room handle so players re-ready in place.
-    this.roomUnsubs.push(
-      this.room.onStateChange((state) => {
-        if (state.phase === "lobby" && this.scene.key === "GameScene") {
-          this.scene.start("LobbyScene", { netClient: this.netClient, room: this.room });
-        }
-      }),
-    );
+    //
+    // CRITICAL: self-unsubscribe after the first lobby-phase hit. Without
+    // this, every subsequent state change (e.g. the non-host readying up
+    // in the rematch lobby) retriggers scene.start("LobbyScene") because
+    // the transition is async and state keeps flowing. That produced a
+    // freeze on rematch-ready.
+    let phaseSub: (() => void) | null = null;
+    phaseSub = this.room.onStateChange((state) => {
+      if (state.phase !== "lobby") return;
+      phaseSub?.();
+      phaseSub = null;
+      this.scene.start("LobbyScene", { netClient: this.netClient, room: this.room });
+    });
+    this.roomUnsubs.push(() => phaseSub?.());
 
     this.disconnectTick = this.time.addEvent({
       delay: 250,

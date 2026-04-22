@@ -222,6 +222,11 @@ export class OfflineSimAdapter implements SimAdapter {
     return this.turnManager.getActiveTeam()?.id ?? "";
   }
 
+  getActiveWeaponId(): string {
+    const team = this.turnManager.getActiveTeam();
+    return this.getWeaponManager(team)?.getSelected().id ?? "";
+  }
+
   getTurnSecondsRemaining(): number {
     return this.turnManager.getTurnSecondsRemaining();
   }

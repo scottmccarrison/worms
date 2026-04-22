@@ -65,6 +65,8 @@ export interface SimAdapter {
 
   getActiveWormId(): string;
   getActiveTeamId(): string;
+  /** Weapon id currently selected by the active worm, empty if none. */
+  getActiveWeaponId(): string;
   /** Seconds remaining on the active turn. Server-authoritative when networked. */
   getTurnSecondsRemaining(): number;
   /** Wind strength -1..1; negative = leftward. Zero in offline mode. */

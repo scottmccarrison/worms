@@ -185,6 +185,13 @@ export class NetworkedSimAdapter implements SimAdapter {
     return this.currFrame?.state.activeTeamId ?? this.lastActiveTeamId;
   }
 
+  getActiveWeaponId(): string {
+    const activeId = this.getActiveWormId();
+    if (!activeId) return "";
+    const worm = this.currFrame?.state.worms.find((w) => w.id === activeId);
+    return worm?.activeWeapon ?? "";
+  }
+
   getTurnSecondsRemaining(): number {
     const endsAt = this.currFrame?.state.turnEndsAt ?? this.lastTurnEndsAt;
     if (endsAt <= 0) return 0;
