@@ -622,7 +622,11 @@ export class Room implements DurableObject {
       worms: snap.worms.filter((w) => myWormIds.has(w.id)),
       terrainCuts: snap.terrainCuts,
     };
-    this.arbiter.onSnapshot(filtered);
+    // Epic 45: turn_snapshot is deprecated. The server owns the sim
+    // authoritatively now; alive counts come from the Simulation. This
+    // handler is kept as a no-op shim until the room rewrite in commit
+    // 8 removes the message entry-point. Silently drop the payload.
+    void filtered;
     await this.persistArbiter();
     this.broadcastState();
   }
@@ -721,6 +725,12 @@ export class Room implements DurableObject {
       },
       getPlayerDisconnected(sessionId: string): boolean {
         return self.ensureLobby().players[sessionId]?.disconnected === true;
+      },
+      getAliveCountsProvider(): null {
+        // Populated in commit 8 when the Simulation is wired into the
+        // room. Returning null makes the arbiter fall back to roster
+        // sizes so the pre-sim invariants hold for existing tests.
+        return null;
       },
     };
   }
