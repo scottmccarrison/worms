@@ -30,8 +30,12 @@ function makeState(): LobbyState {
 
 class StubAliveCountsProvider implements AliveCountsProvider {
   counts = new Map<string, number>();
+  deadWorms = new Set<string>();
   aliveWormsByTeam(): Map<string, number> {
     return new Map(this.counts);
+  }
+  isWormAlive(wormId: string): boolean {
+    return !this.deadWorms.has(wormId);
   }
 }
 

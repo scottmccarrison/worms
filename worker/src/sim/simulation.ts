@@ -610,6 +610,10 @@ export class Simulation {
     return out;
   }
 
+  isWormAlive(wormId: string): boolean {
+    return this.worms.get(wormId)?.alive ?? false;
+  }
+
   getWorm(wormId: string): Worm | undefined {
     return this.worms.get(wormId);
   }
