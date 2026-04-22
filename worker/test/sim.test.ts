@@ -142,6 +142,40 @@ describe("Simulation - movement", () => {
     const after = requireWorm(sim, "Red-1").body.getLinearVelocity().y;
     expect(after).toBeLessThan(before);
   });
+
+  it("walk input sustains motion across ticks when only sent once (edge-triggered safe)", () => {
+    // Settle.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+    const before = requireWorm(sim, "Red-1").body.getPosition().x;
+
+    // Simulate the real client behaviour: ONE input_walk (on press), then
+    // many ticks with no further input until release. The sim must keep
+    // re-applying walk velocity each tick on the active worm.
+    sim.applyWalkInput("Red-1", 1);
+    for (let i = 0; i < 20; i++) sim.tick(50, "Red-1");
+
+    const after = requireWorm(sim, "Red-1").body.getPosition().x;
+    // Positions are in meters. walkSpeedMps = 2.5, 20 ticks at 50ms = 1s.
+    // Sustained walking yields ~1.5-2m of travel after friction. Without
+    // sustained walk, friction damps the initial velocity in 2-3 ticks and
+    // the worm moves less than 0.2m.
+    expect(after - before).toBeGreaterThan(1);
+  });
+
+  it("non-active worms do not sustain walking (stale walkingDir is ignored)", () => {
+    for (let i = 0; i < 20; i++) sim.tick(50);
+    sim.applyWalkInput("Red-1", 1);
+    // Red-1 is active: walks.
+    for (let i = 0; i < 10; i++) sim.tick(50, "Red-1");
+    const afterActive = requireWorm(sim, "Red-1").body.getPosition().x;
+    // Turn advances; Blue-1 is now active. Red-1's walkingDir is still 1
+    // but applyWalking only runs for the active worm, so Red-1 stops.
+    for (let i = 0; i < 20; i++) sim.tick(50, "Blue-1");
+    const afterInactive = requireWorm(sim, "Red-1").body.getPosition().x;
+    // Residual velocity from the handoff tick plus friction glide should be
+    // well under half a meter (compare to >1m sustained travel above).
+    expect(afterInactive - afterActive).toBeLessThan(0.5);
+  });
 });
 
 describe("Simulation - fire / cut / damage", () => {

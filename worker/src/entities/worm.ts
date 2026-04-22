@@ -83,6 +83,7 @@ export class Worm {
   private footContactCount = 0;
   private readonly footSensor: Fixture;
   private readonly walkSpeedMps: number;
+  private walkingDir: -1 | 0 | 1 = 0;
 
   constructor(init: WormInit) {
     this.id = init.id;
@@ -132,9 +133,23 @@ export class Worm {
 
   walk(direction: -1 | 0 | 1): void {
     if (!this.alive) return;
+    this.walkingDir = direction;
     const vel = this.body.getLinearVelocity();
     this.body.setLinearVelocity({ x: direction * this.walkSpeedMps, y: vel.y });
     if (direction !== 0) this.facing = direction;
+  }
+
+  /**
+   * Sustain the current walk for one sim tick. Called from Simulation.tick
+   * on the active worm only; clients send input_walk edge-triggered (one
+   * message on press, one on release), and without this re-applying the
+   * velocity every tick, ground friction damps the worm to a halt in a
+   * few frames.
+   */
+  applyWalking(): void {
+    if (!this.alive || this.walkingDir === 0) return;
+    const vel = this.body.getLinearVelocity();
+    this.body.setLinearVelocity({ x: this.walkingDir * this.walkSpeedMps, y: vel.y });
   }
 
   jump(): void {
@@ -189,6 +204,7 @@ export class Worm {
   kill(): void {
     this.health = 0;
     this.alive = false;
+    this.walkingDir = 0;
   }
 
   // ---- Foot contact ----
