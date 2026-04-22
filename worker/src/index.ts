@@ -47,7 +47,10 @@ export default {
     }
 
     // GET /api/room/{CODE} with WebSocket upgrade -> route to the DO.
-    const roomMatch = path.match(/^\/api\/room\/([A-Z]{4})$/);
+    // Match the codegen alphabet exactly (no I, no O). Using [A-Z]{4}
+    // would accept codes the generator never produces and let an
+    // attacker squat DO slots at predictable ids.
+    const roomMatch = path.match(/^\/api\/room\/([ABCDEFGHJKLMNPQRSTUVWXYZ]{4})$/);
     if (roomMatch) {
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("expected websocket", { status: 426 });
