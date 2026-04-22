@@ -21,20 +21,20 @@
  * and drains them right before calling tick().
  */
 
-import { createPhysicsWorld } from "../physics/world.js";
-import type { PlanckWorld } from "../physics/world.js";
 import type { Contact } from "planck";
-import { Terrain } from "../entities/terrain.js";
 import {
   Projectile,
   type ProjectileRenderState,
   type ProjectileUserData,
 } from "../entities/projectile.js";
+import { Terrain } from "../entities/terrain.js";
 import { Worm, type WormFootUserData, type WormRenderState } from "../entities/worm.js";
-import { explode, type ExplodeResult } from "../weapons/explode.js";
-import { fire, type FireResult } from "../weapons/fire.js";
-import { getById } from "../weapons/registry.js";
 import { toPixels } from "../physics/scale.js";
+import { createPhysicsWorld } from "../physics/world.js";
+import type { PlanckWorld } from "../physics/world.js";
+import { type ExplodeResult, explode } from "../weapons/explode.js";
+import { type FireResult, fire } from "../weapons/fire.js";
+import { getById } from "../weapons/registry.js";
 
 const OFF_MAP_MARGIN_PX = 200;
 const MAX_PROJECTILES = 8;
@@ -69,11 +69,7 @@ export interface SimEventWormDied {
   wormId: string;
 }
 
-export type SimEvent =
-  | SimEventTerrainCut
-  | SimEventFire
-  | SimEventDamage
-  | SimEventWormDied;
+export type SimEvent = SimEventTerrainCut | SimEventFire | SimEventDamage | SimEventWormDied;
 
 export interface SimTickResult {
   tick: number;
@@ -446,7 +442,7 @@ export class Simulation {
         fuseMs: ps.fuseRemainingMs,
       });
       this.projectiles.push(proj);
-      const n = parseInt(ps.id.replace("p", ""), 10);
+      const n = Number.parseInt(ps.id.replace("p", ""), 10);
       if (Number.isFinite(n) && n > this.projectileIdCounter) {
         this.projectileIdCounter = n;
       }
@@ -570,4 +566,3 @@ export class Simulation {
     return false;
   }
 }
-

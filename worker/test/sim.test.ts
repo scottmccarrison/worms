@@ -8,8 +8,8 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { Simulation, type SimTeamInit, type SimEvent } from "../src/sim/simulation.js";
 import { toMeters } from "../src/physics/scale.js";
+import { type SimEvent, type SimTeamInit, Simulation } from "../src/sim/simulation.js";
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -34,6 +34,13 @@ function makeSim(teams: SimTeamInit[]): Simulation {
   });
 }
 
+/** Unwrap a required Worm ref in tests; throws if missing. */
+function requireWorm(sim: Simulation, id: string) {
+  const w = sim.getWorm(id);
+  if (!w) throw new Error(`worm ${id} not found`);
+  return w;
+}
+
 function twoTeams(): SimTeamInit[] {
   return [
     {
@@ -56,7 +63,11 @@ function twoTeams(): SimTeamInit[] {
 }
 
 /** Tick the sim until condition holds or maxTicks elapse; return ticks. */
-function tickUntil(sim: Simulation, cond: (events: SimEvent[]) => boolean, maxTicks = 400): {
+function tickUntil(
+  sim: Simulation,
+  cond: (events: SimEvent[]) => boolean,
+  maxTicks = 400,
+): {
   ticks: number;
   events: SimEvent[];
 } {
@@ -90,33 +101,33 @@ describe("Simulation - movement", () => {
   it("walk input moves the worm horizontally", () => {
     // Let gravity settle the worm onto the floor.
     for (let i = 0; i < 20; i++) sim.tick(50);
-    const before = sim.getWorm("Red-1")!.body.getPosition().x;
+    const before = requireWorm(sim, "Red-1").body.getPosition().x;
 
     for (let i = 0; i < 20; i++) {
       sim.applyWalkInput("Red-1", 1);
       sim.tick(50);
     }
 
-    const after = sim.getWorm("Red-1")!.body.getPosition().x;
+    const after = requireWorm(sim, "Red-1").body.getPosition().x;
     expect(after).toBeGreaterThan(before);
   });
 
   it("walk left decreases x, walk right increases x", () => {
     for (let i = 0; i < 20; i++) sim.tick(50);
-    const mid = sim.getWorm("Red-1")!.body.getPosition().x;
+    const mid = requireWorm(sim, "Red-1").body.getPosition().x;
 
     for (let i = 0; i < 20; i++) {
       sim.applyWalkInput("Red-1", -1);
       sim.tick(50);
     }
-    const leftX = sim.getWorm("Red-1")!.body.getPosition().x;
+    const leftX = requireWorm(sim, "Red-1").body.getPosition().x;
     expect(leftX).toBeLessThan(mid);
 
     for (let i = 0; i < 40; i++) {
       sim.applyWalkInput("Red-1", 1);
       sim.tick(50);
     }
-    const rightX = sim.getWorm("Red-1")!.body.getPosition().x;
+    const rightX = requireWorm(sim, "Red-1").body.getPosition().x;
     expect(rightX).toBeGreaterThan(leftX);
   });
 
@@ -124,11 +135,11 @@ describe("Simulation - movement", () => {
     // Settle onto floor.
     for (let i = 0; i < 30; i++) sim.tick(50);
 
-    const before = sim.getWorm("Red-1")!.body.getLinearVelocity().y;
+    const before = requireWorm(sim, "Red-1").body.getLinearVelocity().y;
     sim.applyJumpInput("Red-1");
     // One step to let the impulse register.
     sim.tick(50);
-    const after = sim.getWorm("Red-1")!.body.getLinearVelocity().y;
+    const after = requireWorm(sim, "Red-1").body.getLinearVelocity().y;
     expect(after).toBeLessThan(before);
   });
 });
@@ -220,8 +231,8 @@ describe("Simulation - fire / cut / damage", () => {
     // Brute-force damage the blue worm via direct takeDamage + tick.
     const blue = sim.getWorm("Blue-1");
     expect(blue).toBeDefined();
-    blue!.takeDamage(100);
-    expect(blue!.alive).toBe(false);
+    blue?.takeDamage(100);
+    expect(blue?.alive).toBe(false);
 
     // Now run a tick. The kill floor also emits worm_died if the
     // worm falls; but if it doesn't fall, we need the explosion path
@@ -231,18 +242,20 @@ describe("Simulation - fire / cut / damage", () => {
     // worm_died. That means the ONLY way the sim learns a worm
     // died is via explode or kill-floor. Let's test the kill-floor
     // path instead: push the worm off-map.
-    blue!.body.setPosition({
-      x: blue!.body.getPosition().x,
+    blue?.body.setPosition({
+      x: blue?.body.getPosition().x,
       y: (HEIGHT + 400) / 30, // well below kill line in meters
     });
     // Un-kill so the kill-floor branch actually emits.
-    blue!.alive = true;
-    blue!.health = 100;
+    if (blue) {
+      blue.alive = true;
+      blue.health = 100;
+    }
 
     const result = sim.tick(50);
     const died = result.events.find((e) => e.type === "worm_died" && e.wormId === "Blue-1");
     expect(died).toBeDefined();
-    expect(blue!.alive).toBe(false);
+    expect(blue?.alive).toBe(false);
   });
 
   it("off-map worm is killed + worm_died emitted (absorbs #53)", () => {
@@ -252,12 +265,12 @@ describe("Simulation - fire / cut / damage", () => {
     const red1 = sim.getWorm("Red-1");
     expect(red1).toBeDefined();
     // Teleport off-map.
-    red1!.body.setPosition({ x: red1!.body.getPosition().x, y: (HEIGHT + 500) / 30 });
+    red1?.body.setPosition({ x: red1?.body.getPosition().x, y: (HEIGHT + 500) / 30 });
 
     const result = sim.tick(50);
     const died = result.events.find((e) => e.type === "worm_died" && e.wormId === "Red-1");
     expect(died).toBeDefined();
-    expect(red1!.alive).toBe(false);
+    expect(red1?.alive).toBe(false);
   });
 
   it("aliveWormsByTeam reflects deaths", () => {
@@ -268,12 +281,12 @@ describe("Simulation - fire / cut / damage", () => {
     expect(before.get("red")).toBe(2);
     expect(before.get("blue")).toBe(2);
 
-    sim.getWorm("Red-1")!.kill();
+    sim.getWorm("Red-1")?.kill();
     const after = sim.aliveWormsByTeam();
     expect(after.get("red")).toBe(1);
     expect(after.get("blue")).toBe(2);
 
-    sim.getWorm("Red-2")!.kill();
+    sim.getWorm("Red-2")?.kill();
     const fin = sim.aliveWormsByTeam();
     expect(fin.get("red") ?? 0).toBe(0);
     expect(fin.get("blue")).toBe(2);
@@ -287,7 +300,7 @@ describe("Simulation - serialize/restore", () => {
     for (let i = 0; i < 20; i++) sim1.tick(50);
     sim1.applyWalkInput("Red-1", 1);
     for (let i = 0; i < 5; i++) sim1.tick(50);
-    sim1.getWorm("Blue-1")!.takeDamage(30);
+    sim1.getWorm("Blue-1")?.takeDamage(30);
 
     const serialized = sim1.serialize();
     const before = sim1.toSimState();
@@ -300,9 +313,9 @@ describe("Simulation - serialize/restore", () => {
     for (const w of before.worms) {
       const w2 = after.worms.find((x) => x.id === w.id);
       expect(w2).toBeDefined();
-      expect(w2!.x).toBeCloseTo(w.x, 3);
-      expect(w2!.y).toBeCloseTo(w.y, 3);
-      expect(w2!.hp).toBe(w.hp);
+      expect(w2?.x).toBeCloseTo(w.x, 3);
+      expect(w2?.y).toBeCloseTo(w.y, 3);
+      expect(w2?.hp).toBe(w.hp);
     }
   });
 });
@@ -311,29 +324,29 @@ describe("Simulation - aim input", () => {
   it("applyAimAngle clamps to [-PI/2, PI/2]", () => {
     const sim = makeSim(twoTeams());
     sim.applyAimAngle("Red-1", -Math.PI);
-    expect(sim.getWorm("Red-1")!.aimAngle).toBeCloseTo(-Math.PI / 2, 5);
+    expect(sim.getWorm("Red-1")?.aimAngle).toBeCloseTo(-Math.PI / 2, 5);
     sim.applyAimAngle("Red-1", Math.PI);
-    expect(sim.getWorm("Red-1")!.aimAngle).toBeCloseTo(Math.PI / 2, 5);
+    expect(sim.getWorm("Red-1")?.aimAngle).toBeCloseTo(Math.PI / 2, 5);
     sim.applyAimAngle("Red-1", 0);
-    expect(sim.getWorm("Red-1")!.aimAngle).toBe(0);
+    expect(sim.getWorm("Red-1")?.aimAngle).toBe(0);
   });
 
   it("applyAimPower clamps to [0, 1]", () => {
     const sim = makeSim(twoTeams());
     sim.applyAimPower("Red-1", -5);
-    expect(sim.getWorm("Red-1")!.aimPower).toBe(0);
+    expect(sim.getWorm("Red-1")?.aimPower).toBe(0);
     sim.applyAimPower("Red-1", 10);
-    expect(sim.getWorm("Red-1")!.aimPower).toBe(1);
+    expect(sim.getWorm("Red-1")?.aimPower).toBe(1);
     sim.applyAimPower("Red-1", 0.42);
-    expect(sim.getWorm("Red-1")!.aimPower).toBe(0.42);
+    expect(sim.getWorm("Red-1")?.aimPower).toBe(0.42);
   });
 
   it("rejects NaN / Infinity aim values", () => {
     const sim = makeSim(twoTeams());
-    const original = sim.getWorm("Red-1")!.aimAngle;
+    const original = sim.getWorm("Red-1")?.aimAngle;
     sim.applyAimAngle("Red-1", Number.NaN);
-    expect(sim.getWorm("Red-1")!.aimAngle).toBe(original);
+    expect(sim.getWorm("Red-1")?.aimAngle).toBe(original);
     sim.applyAimAngle("Red-1", Number.POSITIVE_INFINITY);
-    expect(sim.getWorm("Red-1")!.aimAngle).toBe(original);
+    expect(sim.getWorm("Red-1")?.aimAngle).toBe(original);
   });
 });

@@ -15,9 +15,9 @@
 
 import { Vec2 } from "planck";
 import type { World } from "planck";
-import { toMeters } from "../physics/scale.js";
 import type { Terrain, TerrainCut } from "../entities/terrain.js";
 import type { Worm, WormUserData } from "../entities/worm.js";
+import { toMeters } from "../physics/scale.js";
 import type { ExplosionConfig } from "./types.js";
 
 export interface ExplodeParams {

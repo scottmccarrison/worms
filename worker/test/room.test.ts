@@ -359,15 +359,10 @@ describe("Room integration", () => {
     bob.close();
   });
 
-  it("turn_snapshot from active player cannot mark opponent worms dead", async () => {
-    // HIGH 1 regression: an active player used to be able to flip
-    // `alive: false` on opponent worm entries and trigger instant win.
-    // The room should filter snapshot entries to the sender's own team.
+  it("broadcasts sim_state at ~20Hz once the game starts", async () => {
     const code = await createRoom();
     const alice = await joinRoom(code, "Alice", "#ff4444");
-    const aliceWelcome = (await alice.waitFor((m) => m.type === "welcome")) as unknown as {
-      sessionId: string;
-    };
+    await alice.waitFor((m) => m.type === "welcome");
     const bob = await joinRoom(code, "Bob", "#4488ff");
     await bob.waitFor((m) => m.type === "welcome");
     await alice.waitFor(
@@ -375,7 +370,6 @@ describe("Room integration", () => {
         m.type === "state" &&
         Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
     );
-
     bob.send({ type: "set_ready", ready: true });
     await alice.waitFor((m) => {
       if (m.type !== "state") return false;
@@ -383,62 +377,26 @@ describe("Room integration", () => {
         .players;
       return Object.values(players).some((p) => p.nickname === "Bob" && p.ready === true);
     });
-
     alice.send({ type: "start_game" });
-    const gameStarted = (await alice.waitFor((m) => m.type === "game_started")) as unknown as {
-      teams: Array<{ id: string; wormNames: string[]; ownerSessionId: string }>;
-    };
-    const playing = await alice.waitFor(
-      (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
-    );
-    const currentTeam = (playing.state as { currentTeamId: string }).currentTeamId;
-    const activeTeam = gameStarted.teams.find((t) => t.id === currentTeam);
-    const passiveTeam = gameStarted.teams.find((t) => t.id !== currentTeam);
-    expect(activeTeam).toBeDefined();
-    expect(passiveTeam).toBeDefined();
+    await alice.waitFor((m) => m.type === "game_started");
 
-    const active = activeTeam?.ownerSessionId === aliceWelcome.sessionId ? alice : bob;
-
-    // Malicious payload: mark BOTH opponent worms dead while leaving
-    // own worms alive. Pre-fix, arbiter would see 0 alive opponents
-    // and broadcast game_over.
-    const malicious = {
-      type: "turn_snapshot",
-      worms: [
-        ...(activeTeam?.wormNames ?? []).map((id) => ({
-          id,
-          x: 0,
-          y: 0,
-          vx: 0,
-          vy: 0,
-          hp: 100,
-          alive: true,
-        })),
-        ...(passiveTeam?.wormNames ?? []).map((id) => ({
-          id,
-          x: 0,
-          y: 0,
-          vx: 0,
-          vy: 0,
-          hp: 0,
-          alive: false,
-        })),
-      ],
-      terrainCuts: [],
-    };
-    active.send(malicious);
-
-    // Expect turn to advance to the opponent, NOT a game_over.
-    const resolved = await alice.waitFor((m) => m.type === "turn_resolved");
-    expect((resolved as unknown as { nextTeamId: string }).nextTeamId).toBe(passiveTeam?.id);
-    const gameOver = alice.messages.find((m) => m.type === "game_over");
-    expect(gameOver).toBeUndefined();
+    // Wait for at least 3 sim_state broadcasts (~150ms at 20Hz).
+    const got: unknown[] = [];
+    await alice.waitFor((m) => {
+      if (m.type === "sim_state") got.push(m);
+      return got.length >= 3;
+    }, 5000);
+    expect(got.length).toBeGreaterThanOrEqual(3);
+    const first = got[0] as { worms: unknown[]; tick: number };
+    expect(Array.isArray(first.worms)).toBe(true);
+    expect(first.worms.length).toBe(4);
+    expect(typeof first.tick).toBe("number");
 
     alice.close();
     bob.close();
   });
 
-  it("relays input_walk from the active player to other sockets", async () => {
+  it("non-active player's input_walk is ignored silently", async () => {
     const code = await createRoom();
     const alice = await joinRoom(code, "Alice", "#ff4444");
     const aliceWelcome = (await alice.waitFor((m) => m.type === "welcome")) as unknown as {
@@ -451,7 +409,6 @@ describe("Room integration", () => {
         m.type === "state" &&
         Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
     );
-
     bob.send({ type: "set_ready", ready: true });
     await alice.waitFor((m) => {
       if (m.type !== "state") return false;
@@ -459,13 +416,11 @@ describe("Room integration", () => {
         .players;
       return Object.values(players).some((p) => p.nickname === "Bob" && p.ready === true);
     });
-
     alice.send({ type: "start_game" });
     const playing = await alice.waitFor(
       (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
     );
     const currentTeam = (playing.state as { currentTeamId: string }).currentTeamId;
-
     const playersRow = (
       playing.state as {
         players: Record<string, { ownerOfTeamId: string }>;
@@ -475,14 +430,88 @@ describe("Room integration", () => {
       ([, p]) => p.ownerOfTeamId === currentTeam,
     )?.[0];
     expect(activeSession).toBeDefined();
+    const spectator = activeSession === aliceWelcome.sessionId ? bob : alice;
 
+    // Collect sim_state frames before + after the spectator input.
+    const framesBefore: Array<{ worms: Array<{ id: string; x: number }> }> = [];
+    await alice.waitFor((m) => {
+      if (m.type === "sim_state")
+        framesBefore.push(m as unknown as { worms: Array<{ id: string; x: number }> });
+      return framesBefore.length >= 2;
+    }, 5000);
+    const redX0 = framesBefore[1].worms.find((w) => w.id === "Red-1")?.x ?? 0;
+
+    // Spectator tries to walk. Should be silently ignored.
+    spectator.send({ type: "input_walk", dir: 1, seq: 1 });
+
+    // After several more frames, Red-1 should NOT have moved (aside
+    // from any gravitational settling of a few cm).
+    const framesAfter: Array<{ worms: Array<{ id: string; x: number }> }> = [];
+    await alice.waitFor((m) => {
+      if (m.type === "sim_state")
+        framesAfter.push(m as unknown as { worms: Array<{ id: string; x: number }> });
+      return framesAfter.length >= 5;
+    }, 5000);
+    const redX1 = framesAfter[framesAfter.length - 1].worms.find((w) => w.id === "Red-1")?.x ?? 0;
+    // Walking would move the worm several meters. Expect near-zero.
+    expect(Math.abs(redX1 - redX0)).toBeLessThan(0.5);
+
+    // No input_walk relay should arrive back (that message type is
+    // gone from the ServerMsg union).
+    const relay = alice.messages.find(
+      (m) => m.type === "input_walk" || m.type === "input_walk_relay",
+    );
+    expect(relay).toBeUndefined();
+
+    alice.close();
+    bob.close();
+  });
+
+  it("active player's input_fire queues through the sim", async () => {
+    const code = await createRoom();
+    const alice = await joinRoom(code, "Alice", "#ff4444");
+    const aliceWelcome = (await alice.waitFor((m) => m.type === "welcome")) as unknown as {
+      sessionId: string;
+    };
+    const bob = await joinRoom(code, "Bob", "#4488ff");
+    await bob.waitFor((m) => m.type === "welcome");
+    await alice.waitFor(
+      (m) =>
+        m.type === "state" &&
+        Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
+    );
+    bob.send({ type: "set_ready", ready: true });
+    await alice.waitFor((m) => {
+      if (m.type !== "state") return false;
+      const players = (m.state as { players: Record<string, { ready: boolean; nickname: string }> })
+        .players;
+      return Object.values(players).some((p) => p.nickname === "Bob" && p.ready === true);
+    });
+    alice.send({ type: "start_game" });
+    const playing = await alice.waitFor(
+      (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
+    );
+    const currentTeam = (playing.state as { currentTeamId: string }).currentTeamId;
+    const playersRow = (
+      playing.state as {
+        players: Record<string, { ownerOfTeamId: string }>;
+      }
+    ).players;
+    const activeSession = Object.entries(playersRow).find(
+      ([, p]) => p.ownerOfTeamId === currentTeam,
+    )?.[0];
+    expect(activeSession).toBeDefined();
     const active = activeSession === aliceWelcome.sessionId ? alice : bob;
-    const spectator = active === alice ? bob : alice;
 
-    active.send({ type: "input_walk", dir: 1 });
-    const relay = await spectator.waitFor((m) => m.type === "input_walk");
-    expect((relay as unknown as { from: string; dir: number }).from).toBe(activeSession);
-    expect((relay as unknown as { from: string; dir: number }).dir).toBe(1);
+    // Aim sharply up so the projectile doesn't immediately contact.
+    active.send({ type: "input_aim_angle", angleRad: -1.4, seq: 1 });
+    active.send({ type: "input_aim_power", power: 1.0, seq: 2 });
+    active.send({ type: "input_select_weapon", weaponId: "bazooka", seq: 3 });
+    active.send({ type: "input_fire", seq: 4 });
+
+    // Wait for a fire_event on any client.
+    const fire = await alice.waitFor((m) => m.type === "fire_event", 5000);
+    expect((fire as unknown as { weaponId: string }).weaponId).toBe("bazooka");
 
     alice.close();
     bob.close();

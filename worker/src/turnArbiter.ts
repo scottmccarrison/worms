@@ -274,25 +274,18 @@ export class TurnArbiter {
     const roster = this.teamRosters.get(teamId);
     if (!roster || roster.wormIds.length === 0) return "";
 
-    const provider = this.room.getAliveCountsProvider();
+    // Simple cursor rotation. The Simulation provider only exposes
+    // aliveWormsByTeam() aggregate counts, not per-worm liveness, so
+    // we can't skip dead worms at this layer; instead the turn
+    // rotation's alive-count filter in advanceTurn prevents the
+    // team from being selected when its count is 0, and a dead-
+    // but-selected worm just receives no input (its walk / fire
+    // calls are no-ops when alive=false).
     const startCursor = this.teamWormCursor.get(teamId) ?? 0;
-
-    // Without a sim provider we can't tell dead from alive; fall back
-    // to the raw cursor walk. With a provider we iterate worm ids and
-    // skip any that the sim reports dead.
-    for (let step = 0; step < roster.wormIds.length; step++) {
-      const idx = (startCursor + step) % roster.wormIds.length;
-      const wormId = roster.wormIds[idx];
-      if (provider) {
-        // Hacky: aliveWormsByTeam returns counts only; we can't
-        // check per-worm liveness. Instead, trust the cursor to
-        // rotate; dead worms still occupy the slot but are skipped
-        // via the team rotation's alive-count filter.
-      }
-      this.teamWormCursor.set(teamId, (idx + 1) % roster.wormIds.length);
-      return wormId;
-    }
-    return "";
+    const idx = startCursor % roster.wormIds.length;
+    const wormId = roster.wormIds[idx];
+    this.teamWormCursor.set(teamId, (idx + 1) % roster.wormIds.length);
+    return wormId;
   }
 
   private checkGameOver(): void {

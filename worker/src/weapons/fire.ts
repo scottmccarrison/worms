@@ -16,10 +16,10 @@
  */
 
 import type { World } from "planck";
-import { toMeters, toPixels } from "../physics/scale.js";
 import type { Terrain } from "../entities/terrain.js";
 import { DEFAULT_WORM_RADIUS_PX, type Worm } from "../entities/worm.js";
-import { explode, type ExplodeResult } from "./explode.js";
+import { toMeters, toPixels } from "../physics/scale.js";
+import { type ExplodeResult, explode } from "./explode.js";
 import type { WeaponConfig } from "./types.js";
 
 export interface FireResult {

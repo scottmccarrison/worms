@@ -28,6 +28,7 @@ import {
   type TeamInit,
 } from "./messages.js";
 import { isValidNickname, normaliseNickname } from "./sanitize.js";
+import { type SerializedSim, type SimEvent, Simulation } from "./sim/simulation.js";
 import {
   type AliveCountsProvider,
   type ArbiterPersistedState,
@@ -37,7 +38,6 @@ import {
   type TeamRoster,
   TurnArbiter,
 } from "./turnArbiter.js";
-import { Simulation, type SerializedSim, type SimEvent } from "./sim/simulation.js";
 
 const MAP_WHITELIST = ["flat", "hills", "island", "cave"] as const;
 const MIN_PLAYERS_TO_START = 2;

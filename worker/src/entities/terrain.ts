@@ -83,10 +83,7 @@ export class Terrain {
     this.eraseCircleInMask(xPx, yPx, rPx);
 
     const yMin = Math.max(0, Math.floor((yPx - rPx) / this.rowHeight) * this.rowHeight);
-    const yMax = Math.min(
-      this.heightPx,
-      Math.ceil((yPx + rPx) / this.rowHeight) * this.rowHeight,
-    );
+    const yMax = Math.min(this.heightPx, Math.ceil((yPx + rPx) / this.rowHeight) * this.rowHeight);
     this.rebuildBodiesInRegion(yMin, yMax);
 
     this.cutSeq += 1;
@@ -120,12 +117,18 @@ export class Terrain {
       this.terrainBodies.delete(body);
     }
 
-    const boxes = scanMaskForBoxes(this.mask, this.widthPx, this.heightPx, {
-      xMin: 0,
-      xMax: this.widthPx,
-      yMin: yLo,
-      yMax: yHi,
-    }, this.rowHeight);
+    const boxes = scanMaskForBoxes(
+      this.mask,
+      this.widthPx,
+      this.heightPx,
+      {
+        xMin: 0,
+        xMax: this.widthPx,
+        yMin: yLo,
+        yMax: yHi,
+      },
+      this.rowHeight,
+    );
 
     for (const box of boxes) {
       this.createBody(box.cxPx, box.cyPx, box.wPx, box.hPx);

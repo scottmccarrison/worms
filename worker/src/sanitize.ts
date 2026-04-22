@@ -17,7 +17,7 @@ export function normaliseNickname(input: unknown): string {
   return (
     input
       // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional; stripping control chars from user input
-      .replace(/[ --​-‏‪-‮⁦-⁩﻿]/g, "")
+      .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "")
       .trim()
   );
 }
