@@ -178,6 +178,20 @@ export class TurnArbiter {
     }
   }
 
+  /**
+   * Explicit "end turn" pressed by the active player. Advances immediately
+   * without waiting for the settle-grace timeout. Validated caller must
+   * own the currently-active team; other players are ignored.
+   */
+  endTurnByPlayer(sessionId: string): void {
+    if (this.gameOver) return;
+    if (this.pausedRemainingMs !== null) return;
+    const activeTeamId = this.room.state.currentTeamId;
+    const activeTeam = this.teamRosters.get(activeTeamId);
+    if (!activeTeam || activeTeam.ownerSessionId !== sessionId) return;
+    this.advanceTurn();
+  }
+
   onOwnerDisconnected(sessionId: string): void {
     if (this.gameOver) return;
     const activeTeamId = this.room.state.currentTeamId;
