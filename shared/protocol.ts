@@ -296,6 +296,7 @@ export type ClientMsg =
   | { type: "input_backflip"; seq: number }
   | { type: "input_aim_angle"; angleRad: number; seq: number }
   | { type: "input_aim_power"; power: number; seq: number }
+  | { type: "input_facing"; dir: -1 | 1; seq: number }
   | { type: "input_select_weapon"; weaponId: string; seq: number }
   | { type: "input_fire"; seq: number }
   | { type: "input_end_turn"; seq: number }

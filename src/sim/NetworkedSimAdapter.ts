@@ -225,10 +225,12 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.maybeFlushAim();
   }
 
-  setFacing(_dir: -1 | 1): void {
-    // Facing is derived from the server sim (from the last walk dir applied
-    // server-side). Client does not own facing authoritatively in networked
-    // mode. Intentional no-op.
+  setFacing(dir: -1 | 1): void {
+    // Send an explicit facing input so drag-to-aim can flip the worm to face
+    // the slingshot direction. Without this the server would keep the facing
+    // set by the last walk input, causing the fire direction to ignore the
+    // drag side.
+    this.send({ type: "input_facing", dir, seq: this.nextSeq() });
   }
 
   selectWeapon(id: string): void {
