@@ -92,6 +92,11 @@ interface SimBootstrap {
     spawns: Array<{ xPx: number; yPx: number }>;
   }>;
   seed: number;
+  /** Map id chosen by the host (e.g. "flat", "hills"). */
+  mapId: string;
+  /** Raw surface spawn points forwarded from the host. Used to replay
+   *  game_started to clients that reconnect into an active game. */
+  spawnPoints: Array<{ xPx: number; yPx: number }>;
 }
 
 export class Room implements DurableObject {
@@ -354,6 +359,17 @@ export class Room implements DurableObject {
       // swallow
     }
     this.broadcastState();
+
+    // If a client resumes into an already-playing room, replay game_started
+    // so it can transition to GameScene. The one-shot broadcast at match
+    // start was missed by any client that wasn't connected at that moment.
+    if (isResume && this.lobby?.phase === "playing" && this.simBootstrap) {
+      try {
+        server.send(JSON.stringify(this.buildGameStartedPayload()));
+      } catch {
+        // swallow - client will see it after reconnect stabilises
+      }
+    }
 
     if (this.lobby?.phase === "playing" && !this.arbiter) {
       this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
@@ -706,6 +722,8 @@ export class Room implements DurableObject {
       maskBase64: bytesToBase64(mask),
       teams: simTeams,
       seed,
+      mapId: lobby.selectedMapId,
+      spawnPoints: mapSpawns,
     };
     await this.persistSimBootstrap();
 
@@ -720,16 +738,7 @@ export class Room implements DurableObject {
 
     // Broadcast the authoritative geometry back to all clients so
     // non-host tabs render the same terrain the server is simulating.
-    this.broadcast({
-      type: "game_started",
-      mapId: lobby.selectedMapId,
-      seed,
-      teams,
-      widthPx: WORLD_WIDTH_PX,
-      heightPx: WORLD_HEIGHT_PX,
-      mask: bytesToBase64(mask),
-      spawnPoints: mapSpawns,
-    });
+    this.broadcast(this.buildGameStartedPayload());
     lobby.phase = "playing";
 
     this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
@@ -738,6 +747,39 @@ export class Room implements DurableObject {
 
     this.broadcastState();
     await this.ensureRunning();
+  }
+
+  /**
+   * Build the `game_started` wire payload from persisted bootstrap + rosters.
+   * Called at match-start broadcast AND when replaying to a client that
+   * reconnects into an already-playing room (see fetch / resume path).
+   */
+  private buildGameStartedPayload(): Extract<ServerMsg, { type: "game_started" }> {
+    const bootstrap = this.simBootstrap;
+    if (!bootstrap) {
+      throw new Error("buildGameStartedPayload called without simBootstrap");
+    }
+    // Reconstruct TeamInit[] from rosters (wormIds === wormNames) + palette.
+    const teams: TeamInit[] = this.rosters.map((r) => {
+      const slot = TEAM_PALETTE.find((p) => p.id === r.id);
+      return {
+        id: r.id,
+        name: slot?.name ?? r.id,
+        color: slot?.color ?? "#ffffff",
+        wormNames: r.wormIds.slice(),
+        ownerSessionId: r.ownerSessionId,
+      };
+    });
+    return {
+      type: "game_started",
+      mapId: bootstrap.mapId,
+      seed: bootstrap.seed,
+      teams,
+      widthPx: bootstrap.widthPx,
+      heightPx: bootstrap.heightPx,
+      mask: bootstrap.maskBase64,
+      spawnPoints: bootstrap.spawnPoints,
+    };
   }
 
   private queueInput(senderSessionId: string, type: string, msg: unknown): void {
