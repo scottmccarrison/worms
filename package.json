@@ -17,7 +17,6 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "colyseus.js": "^0.15.26",
     "phaser": "3.90.0",
     "planck": "1.5.0",
     "xstate": "^5.30.0"

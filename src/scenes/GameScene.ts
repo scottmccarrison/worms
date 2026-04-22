@@ -1,4 +1,3 @@
-import type { Client, Room } from "colyseus.js";
 import * as Phaser from "phaser";
 import type { Contact } from "planck";
 import type { ContactImpulse } from "planck";
@@ -6,15 +5,18 @@ import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
+import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
 import type {
   CircleCut,
+  ClientMsg,
   GameOverMessage,
   LobbyState,
   TeamInit as NetTeamInit,
   TurnResolvedMessage,
 } from "../net/types";
+import type { RoomHandle } from "../net/wsClient";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { drawDebug } from "../rendering/debugDraw";
 import { TurnManager } from "../state/TurnManager";
@@ -71,18 +73,18 @@ export class GameScene extends Phaser.Scene {
   // Authoritative team roster from the lobby. Undefined falls back to the
   // hardcoded red/blue defaults that Epic 7 used for single-device play.
   private teamsInit: NetTeamInit[] | undefined;
-  // Colyseus room reference stashed in init(). Drives all Epic 9 netcode;
+  // Room reference stashed in init(). Drives all Epic 9/13 netcode;
   // undefined means single-device / ?offline=1 play (no network code runs).
-  private room: Room<LobbyState> | undefined;
+  private room: RoomHandle | undefined;
   // NetClient reference - only present in networked mode. Used by the Epic
-  // 10 reconnect loop to `client.reconnect(token)` after an unexpected drop.
-  private netClient: Client | undefined;
+  // 10 reconnect loop to rebuild a RoomHandle after an unexpected drop.
+  private netClient: NetClient | undefined;
   // True iff `room` is present. Cached so hot paths don't re-check every frame.
   private isNetworked = false;
   /** Last turn_resolved turnSeq we applied locally. Guards against duplicate
    *  messages double-cutting terrain. */
   private lastAppliedTurnSeq = 0;
-  // Our Colyseus sessionId when networked, "" otherwise.
+  // Our sessionId when networked, "" otherwise.
   private mySessionId = "";
   // Team id owned by our sessionId (set in create() after teamsInit maps sessionIds
   // to team ids). Empty when spectating or offline.
@@ -100,6 +102,14 @@ export class GameScene extends Phaser.Scene {
   private currentRoomCode = "";
   /** Phaser Time event that refreshes the disconnected-owner countdown. */
   private disconnectTick: Phaser.Time.TimerEvent | null = null;
+  /** Active RoomHandle subscriptions (unsub fns). Cleared on scene shutdown. */
+  private roomUnsubs: Array<() => void> = [];
+
+  // Latest cached values from the server state. Track manually so
+  // onStateChange can fire field-level callbacks the way Colyseus'
+  // state.listen did. Comparisons happen in handleStateChange.
+  private lastCurrentTeamId = "";
+  private lastTurnEndsAt = 0;
 
   constructor() {
     super("GameScene");
@@ -109,8 +119,8 @@ export class GameScene extends Phaser.Scene {
     mapId?: string;
     seed?: number;
     teams?: NetTeamInit[];
-    room?: Room<LobbyState>;
-    netClient?: Client;
+    room?: RoomHandle;
+    netClient?: NetClient;
   }): void {
     const candidate = data?.mapId ?? this.readMapQueryParam() ?? tuning.maps.defaultId ?? firstId();
     this.mapId = getById(candidate) ? candidate : firstId();
@@ -165,6 +175,7 @@ export class GameScene extends Phaser.Scene {
       this.reconnectingOverlay = null;
       this.disconnectTick?.remove(false);
       this.disconnectTick = null;
+      this.tearDownRoomListeners();
     });
 
     // Spawn worms using map spawn points (predefined or scanned).
@@ -236,7 +247,7 @@ export class GameScene extends Phaser.Scene {
       scene: this,
       allWorms: this.allWorms,
       onEndTurn: () => {
-        this.sendLocalInput("input_end_turn", {});
+        this.sendLocalInput({ type: "input_end_turn" });
         this.turnManager.endTurnByPlayer();
       },
       onSelectWeapon: (n) => {
@@ -244,11 +255,11 @@ export class GameScene extends Phaser.Scene {
         wm?.selectByKey(n);
         const selected = wm?.getSelected().id;
         if (selected) {
-          this.sendLocalInput("input_select_weapon", { weaponId: selected });
+          this.sendLocalInput({ type: "input_select_weapon", weaponId: selected });
         }
       },
       onFire: () => {
-        this.sendLocalInput("input_fire", {});
+        this.sendLocalInput({ type: "input_fire" });
         this.tryFireActiveWeapon();
       },
       onCycleMap: () => {
@@ -258,11 +269,11 @@ export class GameScene extends Phaser.Scene {
       },
       // Epic 9 input relay. All callbacks are no-ops in offline mode
       // because sendLocalInput early-returns when !isNetworked.
-      onWalk: (dir) => this.sendLocalInput("input_walk", { dir }),
-      onJump: () => this.sendLocalInput("input_jump", {}),
-      onBackflip: () => this.sendLocalInput("input_backflip", {}),
-      onAimAngleChange: (angleRad) => this.sendLocalInput("input_aim_angle", { angleRad }),
-      onAimPowerChange: (power) => this.sendLocalInput("input_aim_power", { power }),
+      onWalk: (dir) => this.sendLocalInput({ type: "input_walk", dir }),
+      onJump: () => this.sendLocalInput({ type: "input_jump" }),
+      onBackflip: () => this.sendLocalInput({ type: "input_backflip" }),
+      onAimAngleChange: (angleRad) => this.sendLocalInput({ type: "input_aim_angle", angleRad }),
+      onAimPowerChange: (power) => this.sendLocalInput({ type: "input_aim_power", power }),
     });
 
     // Touch overlay - instantiated AFTER inputController so getActiveWorm() works
@@ -329,10 +340,8 @@ export class GameScene extends Phaser.Scene {
     this.turnManager.start();
 
     // ---------------------------------------------------------------------
-    // Epic 9: networked mode wiring. All of this is gated on `isNetworked`
+    // Epic 9/13: networked mode wiring. All of this is gated on `isNetworked`
     // so the `?offline=1` / single-device path runs zero network code.
-    // Per-commit scope: this commit establishes the listener surface only.
-    // Actual input forwarding + turn adoption land in later commits.
     // ---------------------------------------------------------------------
     if (this.isNetworked && this.room) {
       // Find which team our sessionId owns. Matched against teamsInit's
@@ -351,74 +360,91 @@ export class GameScene extends Phaser.Scene {
       // If the server hasn't picked currentTeamId yet, err on the side of
       // locked input - onActiveTeamChanged will unlock once it arrives.
       const currentTeamId = this.room.state.currentTeamId ?? "";
+      this.lastCurrentTeamId = currentTeamId;
+      this.lastTurnEndsAt = this.room.state.turnEndsAt ?? 0;
       const initiallyActive = currentTeamId !== "" && currentTeamId === this.myTeamId;
       this.inputController.setInputAllowed(initiallyActive);
       this.turnHUD.setEndTurnEnabled(initiallyActive);
 
-      // Subscribe to authoritative turn state.
-      this.room.state.listen("currentTeamId", (teamId) => this.onActiveTeamChanged(teamId));
-      this.room.state.listen("turnEndsAt", (t) => this.syncTurnTimer(t));
+      // Epic 13: single onStateChange replaces the Colyseus
+      // state.listen("currentTeamId", ...) / state.listen("turnEndsAt", ...)
+      // / players.onChange(...) trio. We diff against the last-cached values
+      // and dispatch synthetic field-level callbacks.
+      this.roomUnsubs.push(this.room.onStateChange((state) => this.handleStateChange(state)));
 
       // Input relay handlers. Server broadcasts relayed messages to non-senders;
       // when we're the active player we should never receive our own inputs, so
       // these only fire for other players' actions.
-      this.room.onMessage("input_walk", (p: { dir?: -1 | 0 | 1 }) => {
-        this.applyRemoteToActiveWorm("walk", p);
-      });
-      this.room.onMessage("input_jump", (p: unknown) => {
-        this.applyRemoteToActiveWorm("jump", p);
-      });
-      this.room.onMessage("input_backflip", (p: unknown) => {
-        this.applyRemoteToActiveWorm("backflip", p);
-      });
-      this.room.onMessage("input_aim_angle", (p: { angleRad?: number }) => {
-        this.applyRemoteToActiveWorm("aim_angle", p);
-      });
-      this.room.onMessage("input_aim_power", (p: { power?: number }) => {
-        this.applyRemoteToActiveWorm("aim_power", p);
-      });
-      this.room.onMessage(
-        "input_select_weapon",
-        (p: { weaponId?: "bazooka" | "shotgun" | "handgrenade" }) => {
+      this.roomUnsubs.push(
+        this.room.onMessage("input_walk", (p) => {
+          this.applyRemoteToActiveWorm("walk", p);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("input_jump", (p) => {
+          this.applyRemoteToActiveWorm("jump", p);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("input_backflip", (p) => {
+          this.applyRemoteToActiveWorm("backflip", p);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("input_aim_angle", (p) => {
+          this.applyRemoteToActiveWorm("aim_angle", p);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("input_aim_power", (p) => {
+          this.applyRemoteToActiveWorm("aim_power", p);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("input_select_weapon", (p) => {
           const wm = this.getActiveWeaponManager();
           if (wm && p.weaponId) wm.select(p.weaponId);
-        },
+        }),
       );
-      this.room.onMessage("input_fire", () => {
-        // Fire is GameScene-level: networkBridge treats "fire" as a no-op
-        // because it needs WeaponManager + ProjectileManager context. We
-        // replay directly here using the active worm's current aim state
-        // (prior input_aim_angle / input_aim_power messages have synced it).
-        this.tryFireActiveWeapon();
-      });
-      this.room.onMessage("input_end_turn", () => {
-        // Server owns the turn machine; our local end-turn just drops us into
-        // turnEnding so the settle/snapshot cadence runs on all clients.
-        this.turnManager.endTurnByPlayer();
-      });
-      this.room.onMessage<TurnResolvedMessage>("turn_resolved", (msg) => {
-        this.applyTurnResolved(msg);
-      });
-      this.room.onMessage<GameOverMessage>("game_over", (msg) => {
-        this.onServerGameOver(msg);
-      });
+      this.roomUnsubs.push(
+        this.room.onMessage("input_fire", () => {
+          // Fire is GameScene-level: networkBridge treats "fire" as a no-op
+          // because it needs WeaponManager + ProjectileManager context. We
+          // replay directly here using the active worm's current aim state
+          // (prior input_aim_angle / input_aim_power messages have synced it).
+          this.tryFireActiveWeapon();
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("turn_resolved", (msg) => {
+          this.applyTurnResolved(msg);
+        }),
+      );
+      this.roomUnsubs.push(
+        this.room.onMessage("game_over", (msg) => {
+          this.onServerGameOver(msg);
+        }),
+      );
 
       // Active client fires turn_snapshot when local settle says the turn is
       // done. Spectator clients' hook fires too but sendTurnSnapshot()
       // self-gates on iAmActive(), so only one snapshot lands per turn.
       this.turnManager.onLocalTurnFinished = () => this.sendTurnSnapshot();
 
-      // Epic 10: capture the room code + unexpected-drop handler. Any leave
-      // code other than 1000 / 4200 (consented) triggers the reconnect loop.
-      // Also re-render the disconnected-owner banner on any player change.
+      // Epic 10: capture the room code + unexpected-drop handler. Any close
+      // code other than 1000 (consented) triggers the reconnect loop.
       this.currentRoomCode = this.room.state?.code ?? "";
-      this.room.onLeave((code) => {
-        if (code === 1000 || code === 4200) return;
-        void this.startReconnectionLoop();
-      });
-      this.room.state.players.onChange(() => this.refreshSpectatorBanner());
+      this.roomUnsubs.push(
+        this.room.onClose((code) => {
+          if (code === 1000) return;
+          void this.startReconnectionLoop();
+        }),
+      );
+
       // Countdown tick for "(owner disconnected, Ns)". 250ms is plenty for a
-      // 1-second-precision countdown without burning render budget.
+      // 1-second-precision countdown without burning render budget. The
+      // onStateChange listener handles the connected/disconnected flip;
+      // this only drives the remaining-seconds text.
       this.disconnectTick = this.time.addEvent({
         delay: 250,
         loop: true,
@@ -630,8 +656,7 @@ export class GameScene extends Phaser.Scene {
   };
 
   // ---------------------------------------------------------------------------
-  // Epic 9 network hooks. No-ops until later commits fill them in; stubs keep
-  // create() compiling now that it references them.
+  // Epic 9/13 network hooks.
   // ---------------------------------------------------------------------------
 
   /**
@@ -644,9 +669,33 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * Dispatch synthetic field-level callbacks from a full-state snapshot.
+   *
+   * Replaces the Colyseus `state.listen("currentTeamId", ...)` +
+   * `state.listen("turnEndsAt", ...)` + `players.onChange` trio. We diff
+   * the incoming state against our cached last values; anything that
+   * changed routes to the matching handler.
+   */
+  private handleStateChange(state: LobbyState): void {
+    if (!this.isNetworked) return;
+    if (state.currentTeamId !== this.lastCurrentTeamId) {
+      this.lastCurrentTeamId = state.currentTeamId;
+      this.onActiveTeamChanged(state.currentTeamId);
+    }
+    if (state.turnEndsAt !== this.lastTurnEndsAt) {
+      this.lastTurnEndsAt = state.turnEndsAt;
+      this.syncTurnTimer(state.turnEndsAt);
+    }
+    // The disconnected-owner banner reads directly from state.players, so
+    // a refresh on every state change keeps the "(disconnected, Ns)"
+    // countdown live without a dedicated players.onChange subscription.
+    this.refreshSpectatorBanner();
+  }
+
+  /**
    * Called every time the server advances `currentTeamId`. Flips the local
    * InputController on iff the new active team belongs to us. Remote worms
-   * are driven entirely by relayed input messages in later commits.
+   * are driven entirely by relayed input messages.
    */
   protected onActiveTeamChanged(_teamId: string): void {
     if (!this.isNetworked) return;
@@ -658,7 +707,7 @@ export class GameScene extends Phaser.Scene {
       const dir = this.inputController.getLastWalkDir();
       if (dir !== 0 && this.room) {
         this.inputSeq++;
-        this.room.send("input_walk", { dir: 0, seq: this.inputSeq });
+        this.room.send({ type: "input_walk", dir: 0, seq: this.inputSeq });
       }
       this.inputController.resetWalkState();
     }
@@ -687,16 +736,15 @@ export class GameScene extends Phaser.Scene {
     // team name if the lookup misses.
     const team = this.teamsInit?.find((t) => t.id === activeTeamId);
     const ownerSessionId = team?.ownerSessionId ?? "";
-    const ownerPlayer = ownerSessionId ? this.room.state.players.get(ownerSessionId) : undefined;
+    // Epic 13: players is now a plain Record; no .get() method.
+    const ownerPlayer = ownerSessionId ? this.room.state.players[ownerSessionId] : undefined;
     const ownerName = ownerPlayer?.nickname ?? team?.name ?? activeTeamId;
 
     // Epic 10: if the active team's owner is disconnected, surface it on
     // the banner with a grace countdown. This takes precedence over the
     // usual "I'm active - hide banner" rule so the active player also sees
     // the countdown when... someone else (e.g. the other player in a
-    // 1v1) has dropped. That second case actually can't happen because
-    // only the active owner pauses the turn, but the banner still shows
-    // cleanly for spectators either way.
+    // 1v1) has dropped.
     if (ownerPlayer?.disconnected) {
       const graceEndsAt = ownerPlayer.disconnectGraceEndsAt ?? 0;
       const remainingSec = Math.max(0, Math.ceil((graceEndsAt - Date.now()) / 1000));
@@ -713,27 +761,36 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Sync the local turn timer to the server's authoritative turnEndsAt.
-   * TurnManager.getTurnSecondsRemaining() already reads externalTurnEndsAt
-   * when externallyDriven, so we only need to forward the value on adoption
-   * (happens in applyTurnResolved, not here). This listener fires on every
-   * state mutation - we use it to proactively refresh the HUD so the timer
-   * stays accurate if the server clamps or extends the turn mid-run.
+   * TurnManager reads endsAt on adoption (in applyTurnResolved); this hook
+   * is left wired so future epics can inject latency compensation without
+   * changing the listener shape.
    */
   protected syncTurnTimer(_endsAt: number): void {
-    // TurnManager reads endsAt on adoption; this hook is left wired so future
-    // epics can inject latency compensation without changing the listener shape.
+    // no-op placeholder
   }
 
   /**
    * Forward a local input event to the server.
    * No-op in offline mode or when we're not the active player (guards
    * against races between gate-flips and in-flight key events).
+   *
+   * Accepts a partial ClientMsg (without `seq`) for input_* variants and
+   * the flat start_game / select_map / set_ready / end_turn messages.
+   * For input messages we stamp the next inputSeq before sending.
    */
-  protected sendLocalInput(type: string, payload: Record<string, unknown>): void {
+  protected sendLocalInput(partial: Omit<InputClientMsg, "seq"> | ClientMsg): void {
     if (!this.isNetworked || !this.room) return;
     if (!this.iAmActive()) return;
-    this.inputSeq++;
-    this.room.send(type, { ...payload, seq: this.inputSeq });
+    const needsSeq = isInputType(partial.type);
+    if (needsSeq) {
+      this.inputSeq++;
+      // Spread with seq appended. Cast through unknown to satisfy the
+      // discriminated-union narrowing.
+      const msg = { ...partial, seq: this.inputSeq } as unknown as ClientMsg;
+      this.room.send(msg);
+    } else {
+      this.room.send(partial as ClientMsg);
+    }
   }
 
   /**
@@ -767,7 +824,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.iAmActive()) return;
     const emptyCuts: CircleCut[] = [];
     const snap = buildTurnSnapshot(this.teams, emptyCuts);
-    this.room.send("turn_snapshot", snap);
+    this.room.send({ type: "turn_snapshot", ...snap });
   }
 
   /**
@@ -779,8 +836,6 @@ export class GameScene extends Phaser.Scene {
    */
   protected applyTurnResolved(msg: TurnResolvedMessage): void {
     // Idempotent on turnSeq: a duplicate message must not double-cut terrain.
-    // Bugcheck found the previous ordering applied cuts BEFORE the seq check
-    // in adoptServerTurn, so replays double-applied. Guard here.
     if (msg.turnSeq <= this.lastAppliedTurnSeq) return;
     this.lastAppliedTurnSeq = msg.turnSeq;
 
@@ -811,11 +866,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Epic 10: unexpected-drop reconnect loop. Matches the LobbyScene pattern
-   * but operates on the live game Room. On success we swap `this.room`,
-   * re-wire the message + state listeners, and unhide input if it's still
-   * our turn. On failure we clear the cached token and drop back to the
-   * LobbyScene home view so the user can re-join manually.
+   * Epic 10/13: unexpected-drop reconnect loop. Matches the LobbyScene
+   * pattern but operates on the live game Room. On success we swap
+   * `this.room` via scene.restart so listeners rewire cleanly. On
+   * failure we clear the cached token and drop back to the LobbyScene
+   * home view so the user can re-join manually.
    */
   private async startReconnectionLoop(): Promise<void> {
     if (this.reconnectInFlight) return;
@@ -837,17 +892,20 @@ export class GameScene extends Phaser.Scene {
     const overlay = this.ensureOverlay();
     overlay.show(1);
 
-    const result = await runReconnectLoop<LobbyState>({
-      client: this.netClient,
-      token: stored.token,
+    // Use a neutral nickname + the lobby's known color; the worker will
+    // match us by resume token first and ignore these values on a match.
+    const result = await runReconnectLoop({
+      netClient: this.netClient,
+      code,
+      nickname: "player",
+      color: "#ff4444",
+      resumeToken: stored.resumeToken,
       onAttempt: (n) => overlay.show(n),
     });
 
     if (result.ok && result.room) {
-      // Swap to the fresh Room. reconnectionToken rotated; cache the new one.
-      this.room = result.room;
-      this.mySessionId = result.room.sessionId;
-      saveRoomToken(code, result.room.roomId, result.room.reconnectionToken);
+      // Swap to the fresh RoomHandle. Rotated resume token gets saved.
+      saveRoomToken(code, result.room.resumeToken);
       overlay.hide();
       this.reconnectInFlight = false;
       // Full re-wire of listeners on the new Room would be invasive here;
@@ -881,6 +939,17 @@ export class GameScene extends Phaser.Scene {
     return this.reconnectingOverlay;
   }
 
+  private tearDownRoomListeners(): void {
+    for (const unsub of this.roomUnsubs) {
+      try {
+        unsub();
+      } catch {
+        // Already torn down - drop.
+      }
+    }
+    this.roomUnsubs = [];
+  }
+
   private onPostSolve = (contact: Contact, impulse: ContactImpulse): void => {
     const normalImpulse = impulse.normalImpulses[0] ?? 0;
     if (normalImpulse <= 0) return;
@@ -901,6 +970,28 @@ export class GameScene extends Phaser.Scene {
       }
     }
   };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** ClientMsg variants that carry a `seq` field (all the input_* ones). */
+type InputClientMsg = Extract<ClientMsg, { seq: number }>;
+
+const INPUT_TYPES: ReadonlySet<InputClientMsg["type"]> = new Set([
+  "input_walk",
+  "input_jump",
+  "input_backflip",
+  "input_aim_angle",
+  "input_aim_power",
+  "input_select_weapon",
+  "input_fire",
+  "input_end_turn",
+]);
+
+function isInputType(type: ClientMsg["type"]): type is InputClientMsg["type"] {
+  return INPUT_TYPES.has(type as InputClientMsg["type"]);
 }
 
 /**

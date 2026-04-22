@@ -1,7 +1,6 @@
 import * as Phaser from "phaser";
 import { createNetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
-import type { LobbyState } from "../net/types";
 import { parseUrlParams } from "./lobby/urlParams";
 import type { UrlParams } from "./lobby/urlParams";
 
@@ -12,15 +11,17 @@ import type { UrlParams } from "./lobby/urlParams";
  * Renders no visible UI - Phaser runs this, the next scene takes over on the
  * same frame.
  *
- * Epic 10: when we arrive with `?room=CODE` in the URL AND we have a
- * cached reconnectionToken for that code, try `client.reconnect` first.
- * On success we jump straight into the LobbyScene room view; on failure
- * (stale token, server restarted, grace expired) we clear the token and
- * fall through to the normal join flow.
+ * Epic 10/13: when we arrive with `?room=CODE` in the URL AND we have a
+ * cached resumeToken for that code, try `netClient.joinRoom(code, nick,
+ * color, resumeToken)` first. On success the DO matched our token and
+ * restored the session; we jump straight into the LobbyScene room view.
+ * On failure (stale token, DO hibernated + evicted, grace expired) we
+ * clear the token and fall through to the normal join flow.
  *
  * The offline path (`?offline=1`) is a hard short-circuit: no localStorage
- * read, no reconnect attempt, no NetClient created. Matches the Epic 7
- * single-device contract exactly.
+ * read, no network call, no NetClient created. Matches the Epic 7
+ * single-device contract exactly. Regression-locked in
+ * bootSceneOffline.test.ts.
  */
 export class BootScene extends Phaser.Scene {
   private urlParams!: UrlParams;
@@ -37,7 +38,7 @@ export class BootScene extends Phaser.Scene {
     if (this.urlParams.offline) {
       // Dev shortcut: skip multiplayer entirely. Preserves Epic 7 behaviour
       // when GameScene is booted directly. Must stay before any localStorage
-      // access so `?offline=1` never touches client storage.
+      // access so `?offline=1` never touches client storage or the network.
       this.scene.start("GameScene", { mapId: this.urlParams.mapId ?? undefined });
       return;
     }
@@ -56,16 +57,20 @@ export class BootScene extends Phaser.Scene {
       const stored = readRoomToken(code);
       if (stored) {
         try {
-          // Colyseus 0.15: reconnectionToken is a single composite string
-          // ("roomId:token") that fully identifies the reconnect target.
-          const room = await netClient.reconnect<LobbyState>(stored.token);
-          // Reconnect succeeded. The reconnectionToken rotates on every
+          // Epic 13: joinRoom opens a WebSocket to the DO with the resume
+          // token query param. DO looks up the token in storage, matches
+          // it to an existing player slot, and restores our sessionId.
+          // Placeholder nickname + color are ignored by the server on a
+          // resume-token match; they only kick in if the token is stale
+          // and we fall through to fresh-join semantics.
+          const room = await netClient.joinRoom(code, "player", "#ff4444", stored.resumeToken);
+          // Reconnect succeeded. The resume token rotates on every
           // (re)connect so we immediately refresh the cached value.
-          saveRoomToken(code, room.roomId, room.reconnectionToken);
+          saveRoomToken(code, room.resumeToken);
           this.scene.start("LobbyScene", { netClient, room });
           return;
         } catch {
-          // Token was stale / grace expired / server was bounced.
+          // Token was stale / grace expired / DO evicted storage.
           // Drop the bad entry so subsequent reloads don't waste a round-trip.
           clearRoomToken(code);
         }

@@ -130,8 +130,15 @@ export function applyRemoteInput(worm: WormLike, type: string, payload: unknown)
  * Build a WormSnapshot array from live teams. Positions converted from meters
  * to pixels here so the wire format stays in screen space (same unit the
  * client displays and the terrain uses).
+ *
+ * The returned object omits the discriminator `type: "turn_snapshot"` - it's
+ * added by the caller right before `room.send(...)` so this helper stays a
+ * pure value producer usable from tests.
  */
-export function buildTurnSnapshot(teams: TeamLike[], cuts: CircleCut[]): TurnSnapshotMessage {
+export function buildTurnSnapshot(
+  teams: TeamLike[],
+  cuts: CircleCut[],
+): Omit<TurnSnapshotMessage, "type"> {
   const worms: WormSnapshot[] = [];
   for (const team of teams) {
     for (const w of team.worms) {

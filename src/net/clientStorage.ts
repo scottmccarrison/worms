@@ -1,28 +1,27 @@
 /**
- * Reconnection token persistence for Colyseus rooms.
+ * Resume-token persistence for Cloudflare Durable Object rooms (Epic 13).
  *
- * Epic 10: when a client joins a room we stash
- * {roomId, reconnectionToken} in localStorage keyed by the 4-letter room code.
- * On cold boot (page reload / tab crash), BootScene looks up the cached token
- * and calls `client.reconnect(roomId, token)` to slide back into the running
- * room inside the server-side 60s grace window.
+ * When the client joins a room the server sends a `welcome` message with a
+ * `resumeToken`. We stash `{code, resumeToken, ts}` in localStorage keyed
+ * by the room code. On cold boot (page reload / tab crash / network drop)
+ * BootScene + scene-level reconnect loops look up the cached token and
+ * call `joinRoom(wsBase, code, nick, color, resumeToken)`; the DO matches
+ * the token against its storage and restores the player's sessionId +
+ * color + team.
+ *
+ * Pre-Epic-13 shape had `{code, roomId, token, ts}` - roomId was a
+ * Colyseus concept. With DOs, the code IS the DO's name (via
+ * `idFromName(code)`), so storage simplifies to `{code, resumeToken, ts}`.
  *
  * Design notes:
- * - Single JSON blob under `worms.roomTokens.v1` rather than one key per code,
- *   so pruning stale entries is a single read-modify-write.
- * - Entries older than 10 minutes are pruned on every save. The server's grace
- *   is 60s but we keep extra slack so a quick browser-crash-then-reload still
- *   finds a token even if it's just outside grace (the reconnect attempt will
- *   fail cleanly and we fall back to home).
- * - Every localStorage access is wrapped in try/catch because private browsing,
- *   storage quota exceeded, and sandboxed iframes can all throw.
- * - All keys are uppercased on write and read so the on-disk format is
- *   case-stable regardless of how the room code shows up in a URL.
- * - Colyseus 0.15's `room.reconnectionToken` is already a composite
- *   "roomId:token" string, so the `token` field below is the full opaque
- *   string we pass to `client.reconnect()` and `roomId` is stored alongside
- *   purely for diagnostics / logging. Callers should pass `token` to
- *   `client.reconnect(token)` (NOT roomId + token).
+ * - Single JSON blob under `worms.roomTokens.v1` so prune-on-write is one
+ *   read-modify-write.
+ * - Entries older than 10 minutes are pruned on every save. The server's
+ *   grace is 60s but we keep slack so a quick reload after a 30s network
+ *   hiccup still finds a token.
+ * - Every localStorage access wrapped in try/catch (private browsing,
+ *   quota exceeded, sandboxed iframes all throw).
+ * - Keys uppercased on read + write so on-disk format is case-stable.
  */
 
 const KEY = "worms.roomTokens.v1";
@@ -30,17 +29,15 @@ const MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
 
 export interface StoredToken {
   code: string;
-  roomId: string;
-  token: string;
+  resumeToken: string;
   ts: number;
 }
 
 type StoredTokenMap = Record<string, StoredToken>;
 
 /**
- * Returns a handle to a Storage-like object, or null if it's not accessible
- * (Node test environment, private mode, sandboxed iframe). Caller is
- * expected to no-op on null.
+ * Storage handle or null if unavailable (Node test env, private mode,
+ * sandboxed iframe). Caller is expected to no-op on null.
  */
 function getStorage(): Storage | null {
   try {
@@ -74,20 +71,20 @@ function writeAll(all: StoredTokenMap): void {
   try {
     ls.setItem(KEY, JSON.stringify(all));
   } catch {
-    // Quota exceeded / private mode write-blocked / sandboxed iframe.
-    // Reconnect will fall back to a full rejoin; dropping the write is fine.
+    // Quota / private mode / sandboxed iframe. Reconnect will fall back
+    // to a full rejoin; dropping the write is fine.
   }
 }
 
 /**
- * Persist the reconnection token for a room code. Prunes entries older than
+ * Persist the resume token for a room code. Prunes entries older than
  * 10 minutes as a side effect so the stored blob stays small.
  * No-op (swallows errors) when localStorage is unavailable.
  */
-export function saveRoomToken(code: string, roomId: string, token: string): void {
+export function saveRoomToken(code: string, resumeToken: string): void {
   const all = readAll();
   const key = code.toUpperCase();
-  all[key] = { code: key, roomId, token, ts: Date.now() };
+  all[key] = { code: key, resumeToken, ts: Date.now() };
   const cutoff = Date.now() - MAX_AGE_MS;
   for (const [k, v] of Object.entries(all)) {
     if (!v || typeof v.ts !== "number" || v.ts < cutoff) {
@@ -98,12 +95,12 @@ export function saveRoomToken(code: string, roomId: string, token: string): void
 }
 
 /**
- * Read a previously saved reconnection token.
+ * Read a previously saved resume token.
  * Returns null when:
  * - the code has never been saved
  * - the stored entry has expired (> 10 minutes old)
  * - localStorage is unavailable
- * - the stored blob is malformed
+ * - the stored blob is malformed (including pre-Epic-13 `{roomId, token}` shape)
  */
 export function readRoomToken(code: string): StoredToken | null {
   const all = readAll();
@@ -111,7 +108,7 @@ export function readRoomToken(code: string): StoredToken | null {
   const entry = all[key];
   if (!entry) return null;
   if (typeof entry.ts !== "number" || Date.now() - entry.ts > MAX_AGE_MS) return null;
-  if (typeof entry.roomId !== "string" || typeof entry.token !== "string") return null;
+  if (typeof entry.resumeToken !== "string") return null;
   return entry;
 }
 

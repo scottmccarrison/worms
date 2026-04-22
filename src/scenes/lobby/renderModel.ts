@@ -41,7 +41,7 @@ export interface ViewModel {
 
 /**
  * Pure derive of the rendered view model from the authoritative LobbyState.
- * `mySessionId` comes from the Colyseus Room.
+ * `mySessionId` comes from the RoomHandle (was the Colyseus Room pre-Epic-13).
  *
  * canStart rule:
  * - current user is the host
@@ -52,9 +52,9 @@ export interface ViewModel {
  * not Ready, to signal go.
  */
 export function toViewModel(state: LobbyState, mySessionId: string): ViewModel {
-  const all: LobbyPlayer[] = [];
-  // biome-ignore lint/complexity/noForEach: LobbyPlayersMap (colyseus.js 0.15) exposes forEach only
-  state.players.forEach((p) => all.push(p));
+  // Epic 13: `state.players` is now a plain Record (was a Colyseus MapSchema
+  // with forEach-only). Object.values iterates on the JSON object directly.
+  const all: LobbyPlayer[] = Object.values(state.players);
 
   // Host first, then original order for the rest.
   const host = all.find((p) => p.isHost) ?? null;

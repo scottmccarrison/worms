@@ -29,7 +29,7 @@ function makeMemoryStorage(): Storage {
 type Globals = { localStorage?: Storage };
 const g = globalThis as unknown as Globals;
 
-describe("clientStorage", () => {
+describe("clientStorage (Epic 13 resume-token shape)", () => {
   const originalLocalStorage = g.localStorage;
 
   beforeEach(() => {
@@ -44,45 +44,44 @@ describe("clientStorage", () => {
   });
 
   it("round-trips save -> read", () => {
-    saveRoomToken("WAVE", "room-1", "tok-abc");
+    saveRoomToken("WAVE", "resume-abc");
     const got = readRoomToken("WAVE");
     expect(got).not.toBeNull();
-    expect(got?.roomId).toBe("room-1");
-    expect(got?.token).toBe("tok-abc");
+    expect(got?.resumeToken).toBe("resume-abc");
     expect(got?.code).toBe("WAVE");
   });
 
   it("read is case-insensitive on the code", () => {
-    saveRoomToken("wave", "room-1", "tok-abc");
-    expect(readRoomToken("WAVE")?.roomId).toBe("room-1");
-    expect(readRoomToken("Wave")?.roomId).toBe("room-1");
+    saveRoomToken("wave", "resume-abc");
+    expect(readRoomToken("WAVE")?.resumeToken).toBe("resume-abc");
+    expect(readRoomToken("Wave")?.resumeToken).toBe("resume-abc");
   });
 
   it("read returns null for an unknown code", () => {
-    saveRoomToken("WAVE", "room-1", "tok-abc");
+    saveRoomToken("WAVE", "resume-abc");
     expect(readRoomToken("ZZZZ")).toBeNull();
   });
 
   it("read returns null for an entry older than 10 minutes", () => {
-    saveRoomToken("WAVE", "room-1", "tok-abc");
+    saveRoomToken("WAVE", "resume-abc");
     // Advance just past the 10-minute expiry.
     vi.advanceTimersByTime(10 * 60 * 1000 + 1);
     expect(readRoomToken("WAVE")).toBeNull();
   });
 
   it("clear removes the entry", () => {
-    saveRoomToken("WAVE", "room-1", "tok-abc");
+    saveRoomToken("WAVE", "resume-abc");
     clearRoomToken("WAVE");
     expect(readRoomToken("WAVE")).toBeNull();
   });
 
   it("save prunes expired entries as a side effect", () => {
-    saveRoomToken("WAVE", "room-1", "tok-1");
+    saveRoomToken("WAVE", "resume-1");
     vi.advanceTimersByTime(10 * 60 * 1000 + 1);
     // This save should evict WAVE (older than 10 min) while adding SURF.
-    saveRoomToken("SURF", "room-2", "tok-2");
+    saveRoomToken("SURF", "resume-2");
     expect(readRoomToken("WAVE")).toBeNull();
-    expect(readRoomToken("SURF")?.roomId).toBe("room-2");
+    expect(readRoomToken("SURF")?.resumeToken).toBe("resume-2");
   });
 
   it("does not throw when localStorage.setItem throws (private mode)", () => {
@@ -99,7 +98,7 @@ describe("clientStorage", () => {
       clear: () => {},
     } as Storage;
     g.localStorage = throwing;
-    expect(() => saveRoomToken("WAVE", "room-1", "tok-abc")).not.toThrow();
+    expect(() => saveRoomToken("WAVE", "resume-abc")).not.toThrow();
     expect(() => clearRoomToken("WAVE")).not.toThrow();
     // readRoomToken returns null because getItem returns null.
     expect(readRoomToken("WAVE")).toBeNull();
@@ -107,7 +106,7 @@ describe("clientStorage", () => {
 
   it("does not throw and returns null when localStorage is missing entirely", () => {
     g.localStorage = undefined;
-    expect(() => saveRoomToken("WAVE", "room-1", "tok-abc")).not.toThrow();
+    expect(() => saveRoomToken("WAVE", "resume-abc")).not.toThrow();
     expect(readRoomToken("WAVE")).toBeNull();
     expect(() => clearRoomToken("WAVE")).not.toThrow();
   });
@@ -116,7 +115,20 @@ describe("clientStorage", () => {
     g.localStorage?.setItem("worms.roomTokens.v1", "not json at all");
     expect(readRoomToken("WAVE")).toBeNull();
     // Subsequent save should succeed and overwrite the malformed blob.
-    saveRoomToken("WAVE", "room-1", "tok-abc");
-    expect(readRoomToken("WAVE")?.token).toBe("tok-abc");
+    saveRoomToken("WAVE", "resume-abc");
+    expect(readRoomToken("WAVE")?.resumeToken).toBe("resume-abc");
+  });
+
+  it("rejects legacy pre-Epic-13 entries missing resumeToken", () => {
+    // Old Colyseus shape: `{roomId, token}` keys; no `resumeToken`. Should
+    // be treated as malformed so callers fall through to a fresh join
+    // rather than sending an undefined token to the worker.
+    g.localStorage?.setItem(
+      "worms.roomTokens.v1",
+      JSON.stringify({
+        WAVE: { code: "WAVE", roomId: "room-1", token: "old-tok", ts: Date.now() },
+      }),
+    );
+    expect(readRoomToken("WAVE")).toBeNull();
   });
 });
