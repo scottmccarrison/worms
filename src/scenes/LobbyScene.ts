@@ -777,14 +777,30 @@ export class LobbyScene extends Phaser.Scene {
 
   private async handleLeave(): Promise<void> {
     const room = this.room;
+    // Immediately flip back to home without waiting for the socket's close
+    // event. The close ack is async and on mobile/slow connections can take
+    // a perceptible beat, making the Leave button feel dead. Tear down
+    // listeners + render home synchronously, then fire-and-forget the close.
+    this.tearDownRoomListeners();
+    this.room = null;
+    this.currentRoomCode = "";
+    // Drop any cached reconnection token for this room - the user chose to
+    // leave, we don't want a page reload to silently rejoin.
+    try {
+      if (room) {
+        const code = room.code;
+        if (code) clearRoomToken(code);
+      }
+    } catch {
+      // Best-effort cleanup.
+    }
+    this.renderHome();
     if (!room) return;
     try {
       room.leave();
     } catch {
-      // onClose handler drops us back to home regardless.
+      // Already closed.
     }
-    // Provide a micro-delay so onClose (code 1000) fires on the same tick.
-    await Promise.resolve();
   }
 }
 

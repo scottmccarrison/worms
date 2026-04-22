@@ -29,7 +29,11 @@ import type { RoomHandle } from "./wsClient";
  * fail we've exited the grace window anyway so the token is stale.
  */
 export const DEFAULT_BACKOFFS_MS: readonly number[] = [
-  500, 1000, 2000, 4000, 8000, 16000, 30000,
+  // First attempt fires immediately - a dropped WebSocket often recovers
+  // within a tick (wifi flicker, tab focus event) so there's no reason to
+  // wait half a second before probing. Subsequent attempts ramp up toward
+  // the 60s grace window.
+  0, 500, 1000, 2000, 4000, 8000, 15000, 30000,
 ] as const;
 
 export interface RunReconnectLoopParams {
