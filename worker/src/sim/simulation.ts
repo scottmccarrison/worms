@@ -373,24 +373,28 @@ export class Simulation {
   }
 
   serialize(): SerializedSim {
+    // Serialized positions/velocities are in METERS (physics-body native).
+    // Only the wire format (`toRenderState`) is in pixels; internal
+    // storage stays in meters so restore() can set body position directly.
     return {
       tick: this.tickCount,
       worms: Array.from(this.worms.values()).map((w) => {
-        const r = w.toRenderState();
+        const pos = w.body.getPosition();
+        const vel = w.body.getLinearVelocity();
         return {
-          id: r.id,
-          teamId: r.teamId,
-          x: r.x,
-          y: r.y,
-          vx: r.vx,
-          vy: r.vy,
-          facing: r.facing,
-          aimAngle: r.aimAngle,
-          aimPower: r.aimPower,
-          hp: r.hp,
-          alive: r.alive,
-          activeWeapon: r.activeWeapon,
-          ammoLeft: r.ammoLeft,
+          id: w.id,
+          teamId: w.teamId,
+          x: pos.x,
+          y: pos.y,
+          vx: vel.x,
+          vy: vel.y,
+          facing: w.facing,
+          aimAngle: w.aimAngle,
+          aimPower: w.aimPower,
+          hp: w.health,
+          alive: w.alive,
+          activeWeapon: w.activeWeapon,
+          ammoLeft: w.ammoLeft,
         };
       }),
       projectiles: this.projectiles.map((p) => ({
