@@ -29,6 +29,7 @@ export interface ViewModel {
   iAmHost: boolean;
   myReady: boolean;
   canStart: boolean;
+  startBlockedReason: "need-players" | "need-ready" | null;
   /** Colors not yet taken by another player. `myColor` is always included
    * (the current player can re-pick their own color). */
   availableColors: string[];
@@ -75,6 +76,12 @@ export function toViewModel(state: LobbyState, mySessionId: string): ViewModel {
   const allNonHostReady = nonHostPlayers.every((p) => p.ready);
   const canStart = iAmHost && all.length >= 2 && allNonHostReady;
 
+  let startBlockedReason: "need-players" | "need-ready" | null = null;
+  if (iAmHost && !canStart) {
+    if (all.length < 2) startBlockedReason = "need-players";
+    else if (!allNonHostReady) startBlockedReason = "need-ready";
+  }
+
   const rows: PlayerRow[] = sorted.map((p) => ({
     sessionId: p.sessionId,
     nickname: p.nickname,
@@ -89,6 +96,7 @@ export function toViewModel(state: LobbyState, mySessionId: string): ViewModel {
     iAmHost,
     myReady,
     canStart,
+    startBlockedReason,
     availableColors,
     players: rows,
     mapId: state.selectedMapId,

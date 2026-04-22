@@ -652,10 +652,16 @@ export class LobbyScene extends Phaser.Scene {
       this.roomObjects.push(...startBtn);
 
       if (!vm.canStart) {
-        const reason = this.add
-          .text(cx, y + 50, "Need 2+ players, all non-host ready", TEXT_STYLE_SMALL)
-          .setOrigin(0.5);
-        this.roomObjects.push(reason);
+        const msg =
+          vm.startBlockedReason === "need-players"
+            ? "Waiting for another player to join..."
+            : vm.startBlockedReason === "need-ready"
+              ? "Waiting for players to ready up..."
+              : "";
+        if (msg) {
+          const reason = this.add.text(cx, y + 50, msg, TEXT_STYLE_SMALL).setOrigin(0.5);
+          this.roomObjects.push(reason);
+        }
       }
     } else {
       // Non-host sees Ready toggle.
