@@ -206,14 +206,23 @@ describe("joinRoom", () => {
     const errors: Array<{ code: string; message: string }> = [];
     room.onMessage("error", (msg) => errors.push({ code: msg.code, message: msg.message }));
 
-    const walks: Array<{ dir: number; seq: number }> = [];
-    room.onMessage("input_walk", (msg) => walks.push({ dir: msg.dir, seq: msg.seq }));
+    const fires: Array<{ wormId: string; weaponId: string }> = [];
+    room.onMessage("fire_event", (msg) =>
+      fires.push({ wormId: msg.wormId, weaponId: msg.weaponId }),
+    );
 
     ws.recv({ type: "error", code: "bad_code", message: "nope" });
-    ws.recv({ type: "input_walk", dir: 1, seq: 42 });
+    ws.recv({
+      type: "fire_event",
+      wormId: "Red-1",
+      weaponId: "bazooka",
+      angleRad: 0,
+      power: 1,
+      facing: 1,
+    });
 
     expect(errors).toEqual([{ code: "bad_code", message: "nope" }]);
-    expect(walks).toEqual([{ dir: 1, seq: 42 }]);
+    expect(fires).toEqual([{ wormId: "Red-1", weaponId: "bazooka" }]);
   });
 
   it("onMessage returns an unsub fn that stops future callbacks", async () => {

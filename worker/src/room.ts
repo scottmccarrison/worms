@@ -490,9 +490,12 @@ export class Room implements DurableObject {
         this.handleFinalLeave(sid);
       }
 
-      // Sim tick while in playing phase.
+      // Sim tick while in playing phase. simTickState holds just the
+      // physics-owned fields (tick + worms + projectiles); activeTeamId,
+      // activeWormId, turnEndsAt are merged in from the lobby at the
+      // broadcast site below.
       let simTickEvents: SimEvent[] = [];
-      let simTickState: SimState | null = null;
+      let simTickState: Pick<SimState, "tick" | "worms" | "projectiles"> | null = null;
       if (lobby.phase === "playing" && this.sim) {
         this.drainInputs();
         const result = this.sim.tick(SIM_TICK_MS);
@@ -520,7 +523,17 @@ export class Room implements DurableObject {
       // client's lobby view reflects any turn / game_over change
       // triggered by the tick.
       if (simTickState) {
-        this.broadcast({ type: "sim_state", ...simTickState });
+        // Merge sim (positions + projectiles) with turn state from the
+        // lobby/arbiter so clients have a single place to read "who's
+        // active right now". Epic 45 protocol requires these fields on
+        // every sim_state broadcast.
+        this.broadcast({
+          type: "sim_state",
+          ...simTickState,
+          activeTeamId: lobby.currentTeamId,
+          activeWormId: lobby.currentWormId,
+          turnEndsAt: lobby.turnEndsAt,
+        });
       }
       for (const ev of simTickEvents) {
         this.broadcastSimEvent(ev);
