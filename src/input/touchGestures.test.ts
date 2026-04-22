@@ -39,6 +39,20 @@ describe("touchGestures state machine", () => {
     expect(up).toEqual([{ kind: "walk_release" }]);
   });
 
+  it("walk direction is relative to the worm, not the screen midline", () => {
+    const t = createGestureTracker();
+    // Worm on the far right; tap on the far left of the screen - still left
+    // of the worm, so this should walk left.
+    const leftOfRightWorm = t.processDown(mkInput({ downXPx: 100, wormXPx: 1000, nowMs: 1000 }));
+    expect(leftOfRightWorm).toEqual([{ kind: "walk", dir: -1 }]);
+    t.processUp(1100);
+
+    // Worm on the far left; tap on the right side - right of the worm even
+    // though still left of the screen midline at x=640.
+    const rightOfLeftWorm = t.processDown(mkInput({ downXPx: 500, wormXPx: 200, nowMs: 3000 }));
+    expect(rightOfLeftWorm).toEqual([{ kind: "walk", dir: 1 }]);
+  });
+
   it("tap on worm enters aim mode (no walk)", () => {
     const t = createGestureTracker();
     // downXPx within 40px of worm (640, 400)
