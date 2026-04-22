@@ -21,6 +21,7 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 | 11 | Source original sprite assets (Aseprite) | Todo     | -        | -                                                  |
 | 12 | Source original audio assets             | Todo     | -        | -                                                  |
 | 13 | Deploy pipeline (Cloudflare Workers + DO) | Done    | (Epic 13 PR) | [epic-13-workers](plans/epic-13-workers.md) |
+| 45 | Server-authoritative sim (graduation from Option C) | Done | (Epic 45 PR) | [epic-45-server-sim](plans/epic-45-server-sim.md) |
 | 14 | CI/CD                                    | Partial  | #26      | (minimal CI landed in #26; full auto-deploy TBD)   |
 | 15 | Test harness (Vitest)                    | Todo     | -        | -                                                  |
 
