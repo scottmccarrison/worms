@@ -1,11 +1,16 @@
+import { bridgesGenerator } from "./generators/bridges";
+import { canyonGenerator } from "./generators/canyon";
 import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
+import { plateauGenerator } from "./generators/plateau";
+import { spireGenerator } from "./generators/spire";
 import type { MapConfig, MapGenerator } from "./types";
 
 type RegistryEntry = { config: MapConfig; generator: MapGenerator };
 
+// Keep in sync with MAP_WHITELIST in worker/src/room.ts
 export const MAPS: Record<string, RegistryEntry> = {
   flat: {
     config: {
@@ -52,6 +57,46 @@ export const MAPS: Record<string, RegistryEntry> = {
       generator: { id: "cave", seed: 0 },
     },
     generator: caveGenerator,
+  },
+  bridges: {
+    config: {
+      id: "bridges",
+      name: "Bridges",
+      description: "Two plateaus connected by a narrow central bridge.",
+      maxWorms: 4,
+      generator: { id: "bridges", seed: 0 },
+    },
+    generator: bridgesGenerator,
+  },
+  spire: {
+    config: {
+      id: "spire",
+      name: "Spire",
+      description: "A tall central spire rising from a continuous floor.",
+      maxWorms: 4,
+      generator: { id: "spire", seed: 0 },
+    },
+    generator: spireGenerator,
+  },
+  canyon: {
+    config: {
+      id: "canyon",
+      name: "Canyon",
+      description: "Two cliffs split by an impassable gap. Fire across.",
+      maxWorms: 4,
+      generator: { id: "canyon", seed: 0 },
+    },
+    generator: canyonGenerator,
+  },
+  plateau: {
+    config: {
+      id: "plateau",
+      name: "Plateau",
+      description: "A raised central plateau with stepped slopes on each side.",
+      maxWorms: 4,
+      generator: { id: "plateau", seed: 0 },
+    },
+    generator: plateauGenerator,
   },
 };
 

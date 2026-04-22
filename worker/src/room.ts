@@ -39,7 +39,17 @@ import {
   TurnArbiter,
 } from "./turnArbiter.js";
 
-const MAP_WHITELIST = ["flat", "hills", "island", "cave"] as const;
+// Keep in sync with MAPS in src/maps/registry.ts
+const MAP_WHITELIST = [
+  "flat",
+  "hills",
+  "island",
+  "cave",
+  "bridges",
+  "spire",
+  "canyon",
+  "plateau",
+] as const;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_CLIENTS = 8;
 /** Sim tick cadence. 50ms = 20Hz. */

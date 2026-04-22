@@ -1,9 +1,14 @@
 import { createCanvas } from "canvas";
 import { describe, expect, it } from "vitest";
+import { findSpawnPoints } from "../worm/spawnPoints";
+import { bridgesGenerator } from "./generators/bridges";
+import { canyonGenerator } from "./generators/canyon";
 import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
 import { islandGenerator } from "./generators/island";
+import { plateauGenerator } from "./generators/plateau";
+import { spireGenerator } from "./generators/spire";
 
 const W = 1280;
 const H = 720;
@@ -152,6 +157,157 @@ describe("islandGenerator", () => {
         }
       }
       expect(foundTerrain).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helper: render a generator into a fresh canvas and return the full pixel
+// data buffer (Uint8ClampedArray, RGBA interleaved).
+// ---------------------------------------------------------------------------
+function renderPixels(
+  gen: (ctx: CanvasRenderingContext2D, w: number, h: number, opts: { seed: number }) => void,
+  seed: number,
+): Uint8ClampedArray {
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+  gen(ctx, W, H, { seed });
+  return canvas.getContext("2d").getImageData(0, 0, W, H).data;
+}
+
+function countSolidPixels(data: Uint8ClampedArray): number {
+  let count = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    if ((data[i] ?? 0) > 0) count++;
+  }
+  return count;
+}
+
+describe("bridgesGenerator", () => {
+  it("bridges generator is deterministic given a seed", () => {
+    const a = renderPixels(bridgesGenerator, 1);
+    const b = renderPixels(bridgesGenerator, 1);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("bridges produces substantial solid terrain", () => {
+    const data = renderPixels(bridgesGenerator, 1);
+    const solid = countSolidPixels(data);
+    expect(solid / (W * H)).toBeGreaterThan(0.1);
+  });
+
+  it("bridges yields 4 valid spawn points on solid surface", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    bridgesGenerator(ctx, W, H, { seed: 1 });
+    const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
+    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
+    expect(spawnPoints.length).toBe(4);
+    const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+    expect(ids.size).toBe(4);
+    for (const { xPx, yPx } of spawnPoints) {
+      // yPx itself is solid (that is what findSpawnPoints returns)
+      const selfAlpha = imgData.data[(yPx * W + xPx) * 4 + 3] ?? 0;
+      expect(selfAlpha).toBeGreaterThan(0);
+      // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
+      const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
+      expect(clearAboveAlpha).toBe(0);
+    }
+  });
+});
+
+describe("spireGenerator", () => {
+  it("spire generator is deterministic given a seed", () => {
+    const a = renderPixels(spireGenerator, 1);
+    const b = renderPixels(spireGenerator, 1);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("spire produces substantial solid terrain", () => {
+    const data = renderPixels(spireGenerator, 1);
+    const solid = countSolidPixels(data);
+    expect(solid / (W * H)).toBeGreaterThan(0.1);
+  });
+
+  it("spire yields 4 valid spawn points on solid surface", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    spireGenerator(ctx, W, H, { seed: 1 });
+    const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
+    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
+    expect(spawnPoints.length).toBe(4);
+    const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+    expect(ids.size).toBe(4);
+    for (const { xPx, yPx } of spawnPoints) {
+      const selfAlpha = imgData.data[(yPx * W + xPx) * 4 + 3] ?? 0;
+      expect(selfAlpha).toBeGreaterThan(0);
+      // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
+      const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
+      expect(clearAboveAlpha).toBe(0);
+    }
+  });
+});
+
+describe("canyonGenerator", () => {
+  it("canyon generator is deterministic given a seed", () => {
+    const a = renderPixels(canyonGenerator, 1);
+    const b = renderPixels(canyonGenerator, 1);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("canyon produces substantial solid terrain", () => {
+    const data = renderPixels(canyonGenerator, 1);
+    const solid = countSolidPixels(data);
+    expect(solid / (W * H)).toBeGreaterThan(0.1);
+  });
+
+  it("canyon yields 4 valid spawn points on solid surface", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    canyonGenerator(ctx, W, H, { seed: 1 });
+    const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
+    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
+    expect(spawnPoints.length).toBe(4);
+    const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+    expect(ids.size).toBe(4);
+    for (const { xPx, yPx } of spawnPoints) {
+      const selfAlpha = imgData.data[(yPx * W + xPx) * 4 + 3] ?? 0;
+      expect(selfAlpha).toBeGreaterThan(0);
+      // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
+      const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
+      expect(clearAboveAlpha).toBe(0);
+    }
+  });
+});
+
+describe("plateauGenerator", () => {
+  it("plateau generator is deterministic given a seed", () => {
+    const a = renderPixels(plateauGenerator, 1);
+    const b = renderPixels(plateauGenerator, 1);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("plateau produces substantial solid terrain", () => {
+    const data = renderPixels(plateauGenerator, 1);
+    const solid = countSolidPixels(data);
+    expect(solid / (W * H)).toBeGreaterThan(0.1);
+  });
+
+  it("plateau yields 4 valid spawn points on solid surface", () => {
+    const canvas = createCanvas(W, H);
+    const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+    plateauGenerator(ctx, W, H, { seed: 1 });
+    const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
+    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
+    expect(spawnPoints.length).toBe(4);
+    const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+    expect(ids.size).toBe(4);
+    for (const { xPx, yPx } of spawnPoints) {
+      const selfAlpha = imgData.data[(yPx * W + xPx) * 4 + 3] ?? 0;
+      expect(selfAlpha).toBeGreaterThan(0);
+      // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
+      const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
+      expect(clearAboveAlpha).toBe(0);
     }
   });
 });
