@@ -236,4 +236,55 @@ describe("TurnArbiter", () => {
     arbiter.onTeamForfeit("red");
     expect(arbiter.isGameOver()).toBe(true);
   });
+
+  it("onFireCommitted shortens turnEndsAt to +5s", () => {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+
+    const before = room.state.turnEndsAt;
+    // turnEndsAt starts at now + 45s; +5s retreat window should shorten it.
+    arbiter.onFireCommitted();
+    const after = room.state.turnEndsAt;
+    expect(after).toBeLessThan(before); // shortened
+    expect(after - Date.now()).toBeLessThanOrEqual(5000 + 50); // within 5s window (+tolerance)
+  });
+
+  it("onFireCommitted is a no-op when paused", () => {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+
+    // Pause via owner disconnect; turnEndsAt becomes MAX_SAFE_INTEGER.
+    arbiter.onOwnerDisconnected("alice");
+    expect(room.state.turnEndsAt).toBe(Number.MAX_SAFE_INTEGER);
+
+    // onFireCommitted must not stomp the sentinel.
+    arbiter.onFireCommitted();
+    expect(room.state.turnEndsAt).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("onFireCommitted does not extend an already-short turnEndsAt", () => {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+
+    // Manually set turnEndsAt to 1s from now (already short).
+    room.state.turnEndsAt = Date.now() + 1_000;
+    const shortened = room.state.turnEndsAt;
+
+    arbiter.onFireCommitted();
+    // Should NOT have extended it - 1s < 5s so retreat window would extend it,
+    // but the guard prevents extension.
+    expect(room.state.turnEndsAt).toBe(shortened);
+  });
 });

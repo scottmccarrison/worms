@@ -217,6 +217,34 @@ describe("Simulation - movement", () => {
     expect(resetState.jetPackFuel).toBe(100);
     expect(resetState.jetPackActive).toBe(false);
   });
+
+  it("fall damage: worm takes damage on hard landing", () => {
+    // Let the worm settle, then teleport it well above the floor and release.
+    // Physics: threshold impulse = 8 * density (8 * 1.0 = 8).
+    // Worm mass ≈ pi * (0.4m)^2 * 1.0 ≈ 0.50 kg.
+    // Need v > 8 / 0.50 ≈ 16 m/s on impact -> h > v^2/(2g) = 256/20 = 12.8m.
+    // Use 20m drop to ensure we clear the threshold with margin.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+    const worm = requireWorm(sim, "Red-1");
+    const hpBefore = worm.health;
+    const pos = worm.body.getPosition();
+    worm.body.setPosition({ x: pos.x, y: pos.y - 20 }); // 20m above current position
+    worm.body.setLinearVelocity({ x: 0, y: 0 });
+    // Tick until it lands + fall damage applies (20m at g=10 takes ~2s, 40 ticks + buffer).
+    for (let i = 0; i < 80; i++) sim.tick(50, "Red-1");
+    const hpAfter = requireWorm(sim, "Red-1").health;
+    expect(hpAfter).toBeLessThan(hpBefore);
+  });
+
+  it("fall damage: resting worm takes no damage", () => {
+    // Settle + tick for a while - contact impulse from gravity each tick
+    // should NOT accumulate into phantom damage.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+    const hpBefore = requireWorm(sim, "Red-1").health;
+    for (let i = 0; i < 100; i++) sim.tick(50, "Red-1");
+    const hpAfter = requireWorm(sim, "Red-1").health;
+    expect(hpAfter).toBe(hpBefore);
+  });
 });
 
 describe("Simulation - fire / cut / damage", () => {

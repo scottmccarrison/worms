@@ -21,14 +21,19 @@
  * and drains them right before calling tick().
  */
 
-import type { Contact } from "planck";
+import type { Contact, ContactImpulse } from "planck";
 import {
   Projectile,
   type ProjectileRenderState,
   type ProjectileUserData,
 } from "../entities/projectile.js";
 import { Terrain } from "../entities/terrain.js";
-import { Worm, type WormFootUserData, type WormRenderState } from "../entities/worm.js";
+import {
+  Worm,
+  type WormFootUserData,
+  type WormRenderState,
+  type WormUserData,
+} from "../entities/worm.js";
 import { toPixels } from "../physics/scale.js";
 import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
@@ -149,6 +154,7 @@ export class Simulation {
   private events: SimEvent[] = [];
   /** Worms already marked dead this tick; dedupes worm_died events. */
   private readonly diedThisTick = new Set<string>();
+  private onPostSolve: ((contact: Contact, impulse: ContactImpulse) => void) | null = null;
 
   constructor(init: SimulationInit) {
     this.widthPx = init.widthPx;
@@ -178,6 +184,8 @@ export class Simulation {
     }
 
     this.world.on("begin-contact", this.onBeginContact);
+    this.onPostSolve = this.handlePostSolve.bind(this);
+    this.world.on("post-solve", this.onPostSolve);
   }
 
   /** Destroy listeners + free planck resources. */
@@ -186,6 +194,14 @@ export class Simulation {
       this.world.off("begin-contact", this.onBeginContact);
     } catch {
       // planck contract: off() may no-op after world is GC'd
+    }
+    if (this.onPostSolve) {
+      try {
+        this.world.off("post-solve", this.onPostSolve);
+      } catch {
+        // planck contract: off() may no-op after world is GC'd
+      }
+      this.onPostSolve = null;
     }
   }
 
@@ -330,6 +346,27 @@ export class Simulation {
     // 1. Step world. planck does fixed-step internally via the passed
     //    timestep; 50ms is a single step at 20Hz.
     this.world.step(dtMs / 1000, 8, 3);
+
+    // 1a. Fall damage: post-solve listeners have accumulated per-contact
+    //     impulses during world.step. Apply them now, before detonation
+    //     processing so we don't double-emit worm_died.
+    for (const worm of this.worms.values()) {
+      if (!worm.alive) continue;
+      const dmg = worm.applyPendingFallDamage();
+      if (dmg > 0) {
+        this.events.push({
+          type: "damage_event",
+          wormId: worm.id,
+          amount: dmg,
+          fromProjectileId: null,
+          impact: { x: 0, y: 0 },
+        });
+        if (!worm.alive && !this.diedThisTick.has(worm.id)) {
+          this.diedThisTick.add(worm.id);
+          this.events.push({ type: "worm_died", wormId: worm.id });
+        }
+      }
+    }
 
     // 2. Process pending contact detonations.
     for (const proj of this.pendingDetonate) {
@@ -593,6 +630,36 @@ export class Simulation {
       }
     }
   };
+
+  private handlePostSolve(contact: Contact, impulse: ContactImpulse): void {
+    const normalImpulse = impulse.normalImpulses[0] ?? 0;
+    if (normalImpulse <= 0) return;
+    const fA = contact.getFixtureA();
+    const fB = contact.getFixtureB();
+    // WormUserData is set on the body (this.body.setUserData) not the fixture.
+    // ProjectileUserData is also set on the body.
+    const bodyUdA = fA.getBody().getUserData() as
+      | WormUserData
+      | WormFootUserData
+      | { kind?: string }
+      | null;
+    const bodyUdB = fB.getBody().getUserData() as
+      | WormUserData
+      | WormFootUserData
+      | { kind?: string }
+      | null;
+    // Skip contacts involving projectiles (handled via detonation).
+    if (bodyUdA?.kind === "projectile" || bodyUdB?.kind === "projectile") return;
+    // Accumulate fall impulse on worm bodies. kind === "worm" is the main body
+    // userData set in the Worm constructor. The foot sensor fixture shares the
+    // same body so kind will also be "worm" - that's fine since we want the
+    // body-level tracking. Sensors don't participate in physics resolution so
+    // post-solve won't fire for them anyway.
+    if (bodyUdA?.kind === "worm")
+      (bodyUdA as WormUserData).worm.accumulateFallImpulse(normalImpulse);
+    if (bodyUdB?.kind === "worm")
+      (bodyUdB as WormUserData).worm.accumulateFallImpulse(normalImpulse);
+  }
 
   private snapshotWormPositions(): Map<string, { x: number; y: number }> {
     const out = new Map<string, { x: number; y: number }>();
