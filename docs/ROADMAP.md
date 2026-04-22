@@ -4,6 +4,20 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 
 > **Framework pivot 2026-04-20**: stack is now Phaser 3 + planck + Colyseus + Aseprite. See [ADR-001](decisions/001-framework-pivot.md). Epic descriptions below reflect the new approach; issue bodies were updated with pivot notes.
 
+## Playtest-ready MVP focus (2026-04-22)
+
+The core shell is playable end-to-end (rooms, reconnect, server-auth sim, 9 weapons, touch controls, PWA, jetpack). Next phase stops adding breadth and deepens the existing feature set so the game reads as a polished product, not a prototype. Once that's done, weapon/mode expansion drops in without friction.
+
+**Three epics to reach playtest-ready MVP, in order:**
+
+1. **Classic Worms Feel** (bundle of #19 wind + #20 water + #21 fall damage/retreat). Pure code, biggest gameplay-feel delta, ships as one integration PR.
+2. **Real arena maps** (#41, with #22 as a stretch). Replace procgen trig shapes with 3-5 hand-built pixel-mask arenas. No art dependency.
+3. **Sprites + audio** (#11 + #12). Asset-sourcing epic (OpenGameArt / Freesound / commission gaps). Concrete inventory will be filed alongside so sourcing is parallelizable.
+
+Deferred until after MVP lands: weapon expansion (#16/#17/#39), rope in networked mode (#82), game modes (#24), replay/bots (#25), team customization (#23), backflip on mobile (#75).
+
+Rationale: 15 more weapons on geometric shapes over trig-shape terrain is still a prototype. One tuned wind + rising water + real arenas + real sprites turns the existing nine weapons into a complete game.
+
 ## MVP epics
 
 | #  | Epic                                     | Status   | PR       | Plan                                               |
@@ -45,11 +59,13 @@ Source of truth: [GitHub issues](https://github.com/scottmccarrison/worms/issues
 ## Proposed build order
 
 - **M1 Foundation**: #1, #2 — **DONE** (PR #26)
-- **M2 Single-player playable** (Phaser + planck): #3 → #4 → #5 → #6 → #7 + #15 (tests along the way) + placeholder assets from #11/#12
-- **M3 Multiplayer** (Colyseus integration, collapsed): #8/#9/#10 in one or two PRs
-- **M4 Shipped**: #13 (Cloudflare Pages + Fly.io/EC2) + #14 done + real assets from #11, #12
+- **M2 Single-player playable** (Phaser + planck): #3 → #4 → #5 → #6 → #7 — **DONE**
+- **M3 Multiplayer** (Colyseus integration, collapsed; ultimately ported to Cloudflare DOs): #8/#9/#10 + #45 — **DONE**
+- **M4 Deployed**: #13 — **DONE** (mccarrison.me/worms)
+- **M5 Playtest-ready MVP** (current phase): Classic Worms Feel (#19/#20/#21) → real arena maps (#41) → sprites + audio (#11/#12)
+- **M6 Content expansion** (post-MVP): weapons (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23)
 
-Parallelization: assets (#11, #12) and infra (#13, #14) don't block game logic and can run in parallel with core work once foundation is done.
+Parallelization: asset sourcing (#11, #12) doesn't block code work and can run alongside M5 gameplay epics once an inventory is settled.
 
 ## Session log
 

@@ -4,7 +4,7 @@ Project-specific instructions for Claude sessions working in this repo. Override
 
 ## Mission
 
-Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.me/worms`, one hosts a room with a 4-letter code, others join. MVP: 9 weapons (8 classic + Bazooka) + multiplayer with room codes + reconnection. Post-MVP: ~30 weapons, game modes, procedural maps, team cosmetics.
+Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.me/worms`, one hosts a room with a 4-letter code, others join. The shell is done; the current phase is taking the nine-weapon core from "prototype that works" to "playtest-ready product that reads as a finished game". Content expansion (more weapons, modes, rope netcode) waits until that polish lands.
 
 ## Target platforms (first-class)
 
@@ -23,9 +23,14 @@ Browser-based multiplayer Worms-style artillery game. Friends visit `mccarrison.
 
 ## Status
 
-**Phase**: Foundation + alignment complete. PR #26 (build scaffolding) + PR #27 (orchestration docs) + PR #28 (plan-time resources) + the pivot PR (Phaser stack + server scaffold) all merged.
+**Phase**: Playtest-ready MVP (M5). Shell complete through Epic 13 (Cloudflare deploy) + Epic 45 (server-auth sim) + Epic 32 (mobile touch) + jetpack netcode. Shipped and live at mccarrison.me/worms.
 
-**Next**: Epic 3 (port destructible terrain algorithm, wrap in a Phaser Scene with planck physics).
+**Next, in order:**
+1. **Classic Worms Feel** epic — bundle of #19 wind + #20 water + #21 fall damage/retreat. Pure code, biggest feel-upgrade per hour.
+2. **Real arena maps** (#41). Replace procgen trig shapes with hand-built pixel-mask arenas.
+3. **Sprites + audio** (#11 + #12). Asset-sourcing epic; inventory filed separately. Can run in parallel with code work.
+
+**Deferred until MVP lands**: weapon expansion (#16/#17/#39), rope netcode (#82), game modes (#24), team customization (#23), backflip on mobile (#75).
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full state and [docs/decisions/](docs/decisions/) for architecture decision records.
 
