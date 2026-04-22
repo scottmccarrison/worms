@@ -790,7 +790,11 @@ export class Room implements DurableObject {
         this.pendingInputs.push({ kind: "fire", sessionId: senderSessionId });
         return;
       case "input_end_turn":
-        // No sim effect; the arbiter's settle-grace timeout handles it.
+        // Explicit end-turn press from the active player. Force-advance
+        // via the arbiter (validates ownership + pause state). Without
+        // this the End button was a no-op; server waited for the 45s
+        // turn timeout.
+        this.arbiter?.endTurnByPlayer(senderSessionId);
         return;
       default:
         return;
