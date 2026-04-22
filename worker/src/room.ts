@@ -577,7 +577,20 @@ export class Room implements DurableObject {
     if (!this.arbiter) return;
     const snap = sanitiseTurnSnapshot(msg);
     if (!snap) return;
-    this.arbiter.onSnapshot(snap);
+    // Security: the active player is authoritative ONLY over their own
+    // team's worms. Without this filter a malicious active player could
+    // send `alive: false` entries for opponent worms and force an
+    // instant win. Opponent worm state comes exclusively from earlier
+    // snapshots sent when those teams were active.
+    const lobby = this.ensureLobby();
+    const myTeamId = lobby.players[senderSessionId]?.ownerOfTeamId ?? "";
+    const myRoster = this.rosters.find((r) => r.id === myTeamId);
+    const myWormIds = new Set(myRoster?.wormIds ?? []);
+    const filtered = {
+      worms: snap.worms.filter((w) => myWormIds.has(w.id)),
+      terrainCuts: snap.terrainCuts,
+    };
+    this.arbiter.onSnapshot(filtered);
     this.broadcastState();
   }
 

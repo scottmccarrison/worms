@@ -295,6 +295,85 @@ describe("Room integration", () => {
     bob.close();
   });
 
+  it("turn_snapshot from active player cannot mark opponent worms dead", async () => {
+    // HIGH 1 regression: an active player used to be able to flip
+    // `alive: false` on opponent worm entries and trigger instant win.
+    // The room should filter snapshot entries to the sender's own team.
+    const code = await createRoom();
+    const alice = await joinRoom(code, "Alice", "#ff4444");
+    const aliceWelcome = (await alice.waitFor((m) => m.type === "welcome")) as unknown as {
+      sessionId: string;
+    };
+    const bob = await joinRoom(code, "Bob", "#4488ff");
+    await bob.waitFor((m) => m.type === "welcome");
+    await alice.waitFor(
+      (m) =>
+        m.type === "state" &&
+        Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
+    );
+
+    bob.send({ type: "set_ready", ready: true });
+    await alice.waitFor((m) => {
+      if (m.type !== "state") return false;
+      const players = (m.state as { players: Record<string, { ready: boolean; nickname: string }> })
+        .players;
+      return Object.values(players).some((p) => p.nickname === "Bob" && p.ready === true);
+    });
+
+    alice.send({ type: "start_game" });
+    const gameStarted = (await alice.waitFor((m) => m.type === "game_started")) as unknown as {
+      teams: Array<{ id: string; wormNames: string[]; ownerSessionId: string }>;
+    };
+    const playing = await alice.waitFor(
+      (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
+    );
+    const currentTeam = (playing.state as { currentTeamId: string }).currentTeamId;
+    const activeTeam = gameStarted.teams.find((t) => t.id === currentTeam);
+    const passiveTeam = gameStarted.teams.find((t) => t.id !== currentTeam);
+    expect(activeTeam).toBeDefined();
+    expect(passiveTeam).toBeDefined();
+
+    const active = activeTeam?.ownerSessionId === aliceWelcome.sessionId ? alice : bob;
+
+    // Malicious payload: mark BOTH opponent worms dead while leaving
+    // own worms alive. Pre-fix, arbiter would see 0 alive opponents
+    // and broadcast game_over.
+    const malicious = {
+      type: "turn_snapshot",
+      worms: [
+        ...(activeTeam?.wormNames ?? []).map((id) => ({
+          id,
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          hp: 100,
+          alive: true,
+        })),
+        ...(passiveTeam?.wormNames ?? []).map((id) => ({
+          id,
+          x: 0,
+          y: 0,
+          vx: 0,
+          vy: 0,
+          hp: 0,
+          alive: false,
+        })),
+      ],
+      terrainCuts: [],
+    };
+    active.send(malicious);
+
+    // Expect turn to advance to the opponent, NOT a game_over.
+    const resolved = await alice.waitFor((m) => m.type === "turn_resolved");
+    expect((resolved as unknown as { nextTeamId: string }).nextTeamId).toBe(passiveTeam?.id);
+    const gameOver = alice.messages.find((m) => m.type === "game_over");
+    expect(gameOver).toBeUndefined();
+
+    alice.close();
+    bob.close();
+  });
+
   it("relays input_walk from the active player to other sockets", async () => {
     const code = await createRoom();
     const alice = await joinRoom(code, "Alice", "#ff4444");
