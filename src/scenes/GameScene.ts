@@ -370,9 +370,7 @@ export class GameScene extends Phaser.Scene {
       // state.listen("currentTeamId", ...) / state.listen("turnEndsAt", ...)
       // / players.onChange(...) trio. We diff against the last-cached values
       // and dispatch synthetic field-level callbacks.
-      this.roomUnsubs.push(
-        this.room.onStateChange((state) => this.handleStateChange(state)),
-      );
+      this.roomUnsubs.push(this.room.onStateChange((state) => this.handleStateChange(state)));
 
       // Input relay handlers. Server broadcasts relayed messages to non-senders;
       // when we're the active player we should never receive our own inputs, so

@@ -51,10 +51,7 @@ export interface RoomHandle {
   /** Subscribe to state changes. Returns an unsub function. */
   onStateChange(cb: (state: LobbyState) => void): () => void;
   /** Subscribe to typed server messages by `type`. Returns an unsub function. */
-  onMessage<T extends ServerMsg["type"]>(
-    type: T,
-    cb: (msg: ServerMsgOf<T>) => void,
-  ): () => void;
+  onMessage<T extends ServerMsg["type"]>(type: T, cb: (msg: ServerMsgOf<T>) => void): () => void;
   /** Send a client message. Silently drops if the socket is not open. */
   send(msg: ClientMsg): void;
   /** Cleanly close the WebSocket. `onClose` subscribers fire with code 1000. */

@@ -1,21 +1,21 @@
 /**
  * Shared Worms room protocol (Epic 13).
  *
- * Imported by BOTH the Cloudflare Worker (`worker/src/messages.ts` re-exports
- * from this file) and the browser client (`src/net/protocol.ts` and
- * `src/net/types.ts` re-export from this file). Keeping the source of truth
- * at the repo root means both tsconfigs can include `../shared/**/*` without
- * cross-project path aliases.
+ * Imported by BOTH the Cloudflare Worker (worker/src/messages.ts re-exports
+ * from this file) and the browser client (src/net/protocol.ts and
+ * src/net/types.ts re-export from this file). Keeping the source of truth
+ * at the repo root means both tsconfigs can include the shared glob
+ * (../shared) without cross-project path aliases.
  *
  * Transport is hand-rolled JSON over a single hibernation-safe WebSocket per
  * client (no @colyseus/schema patch deltas). Full-state broadcast: every
- * lobby state change goes out as a `state` message with the complete
+ * lobby state change goes out as a "state" message with the complete
  * LobbyState snapshot. Total state is <1 KB so this is trivially cheap at
  * our scale.
  *
- * Unlike Colyseus MapSchema, `LobbyState.players` is a plain
- * `Record<string, LobbyPlayer>` keyed by sessionId. Iterate with
- * `Object.values(state.players)` on either side.
+ * Unlike Colyseus MapSchema, LobbyState.players is a plain
+ * Record<string, LobbyPlayer> keyed by sessionId. Iterate with
+ * Object.values(state.players) on either side.
  */
 
 // ---------------------------------------------------------------------------
