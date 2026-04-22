@@ -102,7 +102,11 @@ export function createGestureTracker(): {
       }
 
       // Off-worm, my turn, no utility -> WALK mode.
-      const side: -1 | 1 = input.downXPx < input.screenWidth / 2 ? -1 : 1;
+      // Walk direction is relative to the active worm's position: tap left of
+      // the worm walks left, tap right walks right. This reads as intuitive
+      // no matter where the worm is on the map (if the worm is far-right and
+      // you tap the left side of the screen, you meant "walk left toward me").
+      const side: -1 | 1 = input.downXPx < input.wormXPx ? -1 : 1;
       walkSide = side;
       mode = "walk";
 
