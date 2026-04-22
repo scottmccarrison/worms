@@ -76,6 +76,7 @@ export class TurnArbiter {
   private gameOver = false;
   private turnDurationMs = 0;
   private pausedRemainingMs: number | null = null;
+  private pendingAdvance = false;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -138,6 +139,11 @@ export class TurnArbiter {
     if (this.gameOver) return;
     this.checkGameOver();
     if (this.gameOver) return;
+    if (this.pendingAdvance) {
+      this.pendingAdvance = false;
+      if (this.pausedRemainingMs === null) this.advanceTurn();
+      return;
+    }
     if (this.pausedRemainingMs !== null) return;
     const now = Date.now();
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
@@ -164,9 +170,13 @@ export class TurnArbiter {
    * Called by the Room when a worm dies (either via explosion or the
    * off-map kill floor). Forces a game_over check on this tick.
    */
-  onWormDied(_wormId: string): void {
+  onWormDied(wormId: string): void {
     if (this.gameOver) return;
     this.checkGameOver();
+    if (this.gameOver) return;
+    if (wormId && wormId === this.room.state.currentWormId) {
+      this.pendingAdvance = true;
+    }
   }
 
   onPlayerLeft(sessionId: string): void {
