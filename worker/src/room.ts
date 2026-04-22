@@ -77,6 +77,7 @@ type PendingInput =
   | { kind: "backflip"; sessionId: string }
   | { kind: "aim_angle"; sessionId: string; angleRad: number }
   | { kind: "aim_power"; sessionId: string; power: number }
+  | { kind: "facing"; sessionId: string; dir: -1 | 1 }
   | { kind: "select_weapon"; sessionId: string; weaponId: string }
   | { kind: "fire"; sessionId: string }
   | { kind: "jetpack_toggle"; sessionId: string }
@@ -426,6 +427,7 @@ export class Room implements DurableObject {
       case "input_backflip":
       case "input_aim_angle":
       case "input_aim_power":
+      case "input_facing":
       case "input_select_weapon":
       case "input_fire":
       case "input_end_turn":
@@ -842,6 +844,16 @@ export class Room implements DurableObject {
         });
         return;
       }
+      case "input_facing": {
+        const dir = raw.dir;
+        if (dir !== -1 && dir !== 1) return;
+        this.pendingInputs.push({
+          kind: "facing",
+          sessionId: senderSessionId,
+          dir,
+        });
+        return;
+      }
       case "input_select_weapon": {
         const weaponId = raw.weaponId;
         if (typeof weaponId !== "string") return;
@@ -910,6 +922,9 @@ export class Room implements DurableObject {
           break;
         case "aim_power":
           this.sim.applyAimPower(activeWormId, input.power);
+          break;
+        case "facing":
+          this.sim.applyFacing(activeWormId, input.dir);
           break;
         case "select_weapon":
           this.sim.applySelectWeapon(activeWormId, input.weaponId);
