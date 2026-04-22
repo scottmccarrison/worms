@@ -1,4 +1,26 @@
-import type { Client, Room } from "colyseus.js";
+/**
+ * Client-side reconnect backoff loop (Epic 10 + 13).
+ *
+ * Pre-Epic-13 this called `client.reconnect(token)` against Colyseus. With
+ * Cloudflare Workers + Durable Objects we call `netClient.joinRoom(code,
+ * nickname, color, resumeToken)` - the DO side of the protocol matches
+ * the resume token against its storage and restores the player's session.
+ *
+ * Per-attempt flow:
+ *   1. sleep(backoff[i])
+ *   2. onAttempt(i + 1)
+ *   3. try netClient.joinRoom(...). Success -> return { ok: true, room }.
+ *   4. Failure -> keep looping.
+ *
+ * After all attempts fail, resolves { ok: false }. Caller decides whether
+ * to drop the token + send the user home.
+ *
+ * Does NOT touch localStorage directly. Does NOT show UI. Pure network
+ * choreography so it's trivially unit-testable and reusable across scenes.
+ */
+
+import type { NetClient } from "./client";
+import type { RoomHandle } from "./wsClient";
 
 /**
  * Default exponential-ish backoff used by LobbyScene + GameScene when an
@@ -11,10 +33,17 @@ export const DEFAULT_BACKOFFS_MS: readonly number[] = [
 ] as const;
 
 export interface RunReconnectLoopParams {
-  /** Colyseus Client used for the reconnect RPC. */
-  client: Client;
-  /** The cached `room.reconnectionToken` (Colyseus 0.15 composite string). */
-  token: string;
+  /** NetClient carrying bound joinRoom. */
+  netClient: NetClient;
+  /** 4-letter room code. */
+  code: string;
+  /** Nickname to send on reconnect. DO prefers the resume-token-backed
+   *  stored nickname, so this is effectively a placeholder. */
+  nickname: string;
+  /** Color fallback; same placeholder caveat as nickname. */
+  color: string;
+  /** Resume token stashed on the initial join (clientStorage.readRoomToken). */
+  resumeToken: string;
   /** Per-attempt backoff in ms. Defaults to DEFAULT_BACKOFFS_MS. */
   backoffs?: readonly number[];
   /** Called at the start of each attempt with 1-indexed attempt number. */
@@ -26,33 +55,18 @@ export interface RunReconnectLoopParams {
   sleep?: (ms: number) => Promise<void>;
 }
 
-export interface RunReconnectLoopResult<S> {
+export interface RunReconnectLoopResult {
   ok: boolean;
-  /** The newly-reconnected Room on success. */
-  room?: Room<S>;
+  /** The newly-joined RoomHandle on success. */
+  room?: RoomHandle;
 }
 
 const defaultSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Drive the client-side reconnect backoff loop.
- *
- * Per-attempt flow:
- *   1. sleep(backoff[i])
- *   2. onAttempt(i + 1)
- *   3. try client.reconnect(token). Success -> return { ok: true, room }.
- *   4. Failure -> keep looping.
- *
- * After all attempts fail, resolves { ok: false }. Caller decides whether
- * to drop the token + send the user home.
- *
- * Does NOT touch localStorage directly. Does NOT show UI. Pure network
- * choreography so it's trivially unit-testable and reusable across scenes.
- */
-export async function runReconnectLoop<S>(
+export async function runReconnectLoop(
   params: RunReconnectLoopParams,
-): Promise<RunReconnectLoopResult<S>> {
+): Promise<RunReconnectLoopResult> {
   const backoffs = params.backoffs ?? DEFAULT_BACKOFFS_MS;
   const sleep = params.sleep ?? defaultSleep;
 
@@ -64,7 +78,12 @@ export async function runReconnectLoop<S>(
     const attempt = i + 1;
     params.onAttempt?.(attempt);
     try {
-      const room = await params.client.reconnect<S>(params.token);
+      const room = await params.netClient.joinRoom(
+        params.code,
+        params.nickname,
+        params.color,
+        params.resumeToken,
+      );
       return { ok: true, room };
     } catch {
       // Keep trying. A definitive "room gone" error still re-enters the
