@@ -17,7 +17,7 @@
 
 import { Box, Circle } from "planck";
 import type { Body, Fixture, World } from "planck";
-import { toMeters } from "../physics/scale.js";
+import { toMeters, toPixels } from "../physics/scale.js";
 
 export const DEFAULT_MAX_HP = 100;
 export const DEFAULT_WORM_RADIUS_PX = 12;
@@ -213,15 +213,19 @@ export class Worm {
   // ---- Serialisation ----
 
   toRenderState(): WormRenderState {
+    // Render state is in PIXELS. Client multiplies nothing; it renders
+    // directly. Keeping physics in meters inside the world + converting
+    // at the serialisation boundary is simpler than threading units
+    // through every call site on both sides of the wire.
     const pos = this.body.getPosition();
     const vel = this.body.getLinearVelocity();
     return {
       id: this.id,
       teamId: this.teamId,
-      x: pos.x,
-      y: pos.y,
-      vx: vel.x,
-      vy: vel.y,
+      x: toPixels(pos.x),
+      y: toPixels(pos.y),
+      vx: toPixels(vel.x),
+      vy: toPixels(vel.y),
       facing: this.facing,
       aimAngle: this.aimAngle,
       aimPower: this.aimPower,

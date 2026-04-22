@@ -15,7 +15,7 @@
 
 import { Circle } from "planck";
 import type { Body, World } from "planck";
-import { toMeters } from "../physics/scale.js";
+import { toMeters, toPixels } from "../physics/scale.js";
 import type { WeaponConfig } from "../weapons/types.js";
 
 export interface ProjectileInit {
@@ -105,10 +105,10 @@ export class Projectile {
       id: this.id,
       ownerId: this.ownerId,
       type: this.config.id,
-      x: pos.x,
-      y: pos.y,
-      vx: vel.x,
-      vy: vel.y,
+      x: toPixels(pos.x),
+      y: toPixels(pos.y),
+      vx: toPixels(vel.x),
+      vy: toPixels(vel.y),
       fuseRemainingMs: this.fuseRemainingMs,
     };
   }

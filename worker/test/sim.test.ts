@@ -94,8 +94,9 @@ describe("Simulation - movement", () => {
     expect(red1?.teamId).toBe("red");
     expect(red1?.alive).toBe(true);
     expect(red1?.hp).toBe(100);
-    // Position in meters; spawn was 200px => ~6.66m
-    expect(red1?.x).toBeCloseTo(toMeters(200), 2);
+    // Render state is in pixels; spawn was 200px so x ≈ 200 (bodies
+    // drift a hair during world.step, tolerate ±5px).
+    expect(red1?.x).toBeCloseTo(200, 0);
   });
 
   it("walk input moves the worm horizontally", () => {
