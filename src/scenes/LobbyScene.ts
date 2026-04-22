@@ -363,9 +363,29 @@ export class LobbyScene extends Phaser.Scene {
     if (this.currentRoomCode && room.resumeToken) {
       saveRoomToken(this.currentRoomCode, room.resumeToken);
     }
+    // Defensive: if we reconnect into a live game, don't render the lobby UI.
+    // The game_started message (sent by the server on resume into phase=playing)
+    // will transition to GameScene momentarily.
+    if (room.state?.phase === "playing") {
+      this.showReconnectingPlaceholder();
+      return;
+    }
+
     // First render can run immediately; state has already arrived by the time
     // the join promise resolves (welcome message populates the handle).
     this.renderRoom();
+  }
+
+  private showReconnectingPlaceholder(): void {
+    this.clearRoom();
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    this.add
+      .text(cx, cy, "Reconnecting...", {
+        ...TEXT_STYLE_BODY,
+        fontSize: "24px",
+      })
+      .setOrigin(0.5);
   }
 
   /**
