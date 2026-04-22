@@ -48,6 +48,26 @@ export interface TeamRoster {
   wormIds: string[];
 }
 
+/**
+ * Serialised arbiter state, persisted by the Room DO so that in-memory
+ * state (aliveByTeam, teamWormCursor, lastSnapshot, pause window, etc.)
+ * survives DO hibernation. Without this, resurrecting a hibernated room
+ * would reset aliveByTeam from rosters - dead worms would come back
+ * alive and an active disconnect pause would be lost.
+ */
+export interface ArbiterPersistedState {
+  currentTeamIdx: number;
+  turnDurationMs: number;
+  gotSnapshotThisTurn: boolean;
+  gameOver: boolean;
+  pausedRemainingMs: number | null;
+  /** teamId -> alive worm count. Serialised as a plain object. */
+  aliveByTeam: Record<string, number>;
+  /** teamId -> next worm cursor index. Serialised as a plain object. */
+  teamWormCursor: Record<string, number>;
+  lastSnapshot: TurnSnapshot | null;
+}
+
 export class TurnArbiter {
   private readonly room: ArbiterRoomAdapter;
   private teamRosters = new Map<string, TeamRoster>();
@@ -62,6 +82,49 @@ export class TurnArbiter {
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
+  }
+
+  /**
+   * Snapshot the arbiter's mutable state for storage. The teamRosters
+   * map is re-populated from the persisted rosters on restore, so we
+   * don't serialise it here.
+   */
+  toJSON(): ArbiterPersistedState {
+    return {
+      currentTeamIdx: this.currentTeamIdx,
+      turnDurationMs: this.turnDurationMs,
+      gotSnapshotThisTurn: this.gotSnapshotThisTurn,
+      gameOver: this.gameOver,
+      pausedRemainingMs: this.pausedRemainingMs,
+      aliveByTeam: Object.fromEntries(this.aliveByTeam),
+      teamWormCursor: Object.fromEntries(this.teamWormCursor),
+      lastSnapshot: this.lastSnapshot,
+    };
+  }
+
+  /**
+   * Rebuild an arbiter from a stored snapshot. Unlike start(), this does
+   * NOT reset aliveByTeam / teamWormCursor / lastSnapshot; those are
+   * restored from `state` so mid-game progress survives DO hibernation.
+   * Rosters are passed in fresh (they were persisted separately by the
+   * Room DO as part of the rosters key) and mapped back by id.
+   */
+  static fromState(
+    room: ArbiterRoomAdapter,
+    rosters: TeamRoster[],
+    state: ArbiterPersistedState,
+  ): TurnArbiter {
+    const arbiter = new TurnArbiter(room);
+    for (const r of rosters) arbiter.teamRosters.set(r.id, r);
+    arbiter.currentTeamIdx = state.currentTeamIdx;
+    arbiter.turnDurationMs = state.turnDurationMs;
+    arbiter.gotSnapshotThisTurn = state.gotSnapshotThisTurn;
+    arbiter.gameOver = state.gameOver;
+    arbiter.pausedRemainingMs = state.pausedRemainingMs;
+    arbiter.aliveByTeam = new Map(Object.entries(state.aliveByTeam));
+    arbiter.teamWormCursor = new Map(Object.entries(state.teamWormCursor));
+    arbiter.lastSnapshot = state.lastSnapshot;
+    return arbiter;
   }
 
   start(teamOrder: string[], rosters: TeamRoster[], turnDurationMs: number): void {

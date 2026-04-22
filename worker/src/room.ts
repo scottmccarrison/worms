@@ -25,6 +25,7 @@ import {
 } from "./messages.js";
 import { isValidNickname, normaliseNickname, sanitiseTurnSnapshot } from "./sanitize.js";
 import {
+  type ArbiterPersistedState,
   type ArbiterRoomAdapter,
   DISCONNECT_GRACE_MS,
   TURN_DURATION_MS,
@@ -120,25 +121,32 @@ export class Room implements DurableObject {
       const stored = await this.state.storage.get<TeamRoster[]>("rosters");
       if (stored) this.rosters = stored;
     }
-    // Rebuild arbiter if we come out of hibernation mid-game.
+    // Rebuild arbiter if we come out of hibernation mid-game. Prefer
+    // the persisted arbiter state (aliveByTeam, teamWormCursor,
+    // lastSnapshot, pause window) so dead worms stay dead and an active
+    // disconnect pause carries over. Falls back to start() only if no
+    // persisted state exists (e.g. upgrade from a pre-persistence
+    // deployment).
     if (this.lobby?.phase === "playing" && this.arbiter === null && this.rosters.length > 0) {
-      this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
-      // Start populates teamOrder + currentTeamId again; to avoid that
-      // we only rebuild when the stored state already has those fields.
-      // Keep it simple: call start with the stored teamOrder so the
-      // internal roster map is populated. It will also reset
-      // turnEndsAt / turnSeq - which would lose wall clock progress.
-      // For now, accept this; the alarm() path will realign on the
-      // next snapshot. Playtests will tell us if this is a problem.
-      this.arbiter.start(this.lobby.teamOrder, this.rosters, TURN_DURATION_MS);
-      // Restore the persisted turn fields so the arbiter resumes mid-turn.
-      // start() just wrote fresh values; put the stored ones back.
-      const persisted = this.lobby;
-      this.lobby.turnSeq = persisted.turnSeq;
-      this.lobby.turnEndsAt = persisted.turnEndsAt;
-      this.lobby.currentTeamId = persisted.currentTeamId;
-      this.lobby.currentWormId = persisted.currentWormId;
+      const persisted = await this.state.storage.get<ArbiterPersistedState>("arbiterState");
+      if (persisted) {
+        this.arbiter = TurnArbiter.fromState(this.makeArbiterAdapter(), this.rosters, persisted);
+      } else {
+        this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
+        this.arbiter.start(this.lobby.teamOrder, this.rosters, TURN_DURATION_MS);
+        // start() wrote fresh turn fields; put the stored ones back.
+        const lobbyRef = this.lobby;
+        this.lobby.turnSeq = lobbyRef.turnSeq;
+        this.lobby.turnEndsAt = lobbyRef.turnEndsAt;
+        this.lobby.currentTeamId = lobbyRef.currentTeamId;
+        this.lobby.currentWormId = lobbyRef.currentWormId;
+      }
     }
+  }
+
+  private async persistArbiter(): Promise<void> {
+    if (!this.arbiter) return;
+    await this.state.storage.put("arbiterState", this.arbiter.toJSON());
   }
 
   private async persistLobby(): Promise<void> {
@@ -248,6 +256,7 @@ export class Room implements DurableObject {
 
         if (this.lobby?.phase === "playing" && this.arbiter) {
           this.arbiter.onOwnerReconnected(entry.sessionId);
+          await this.persistArbiter();
         }
       }
     }
@@ -367,7 +376,7 @@ export class Room implements DurableObject {
         await this.onStartGame(ws, player);
         break;
       case "turn_snapshot":
-        this.onTurnSnapshot(attachment.sessionId, msg);
+        await this.onTurnSnapshot(attachment.sessionId, msg);
         break;
       case "input_walk":
       case "input_jump":
@@ -412,6 +421,7 @@ export class Room implements DurableObject {
     player.disconnectGraceEndsAt = Date.now() + DISCONNECT_GRACE_MS;
     if (lobby.phase === "playing" && this.arbiter) {
       this.arbiter.onOwnerDisconnected(attachment.sessionId);
+      await this.persistArbiter();
     }
     await this.persistLobby();
     this.broadcastState();
@@ -451,6 +461,10 @@ export class Room implements DurableObject {
     if (lobby.phase === "playing" && this.arbiter) {
       this.arbiter.onTick(TICK_INTERVAL_MS);
     }
+
+    // Arbiter state may have mutated via handleFinalLeave (forfeit) or
+    // onTick (force-advance), so persist it before broadcasting.
+    if (this.arbiter) await this.persistArbiter();
 
     // Broadcast any state changes made above.
     this.broadcastState();
@@ -567,12 +581,13 @@ export class Room implements DurableObject {
 
     this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
     this.arbiter.start(teamOrder, rosters, TURN_DURATION_MS);
+    await this.persistArbiter();
 
     this.broadcastState();
     await this.maybeScheduleTickAlarm();
   }
 
-  private onTurnSnapshot(senderSessionId: string, msg: unknown): void {
+  private async onTurnSnapshot(senderSessionId: string, msg: unknown): Promise<void> {
     if (!this.validateActiveInput(senderSessionId)) return;
     if (!this.arbiter) return;
     const snap = sanitiseTurnSnapshot(msg);
@@ -591,6 +606,7 @@ export class Room implements DurableObject {
       terrainCuts: snap.terrainCuts,
     };
     this.arbiter.onSnapshot(filtered);
+    await this.persistArbiter();
     this.broadcastState();
   }
 

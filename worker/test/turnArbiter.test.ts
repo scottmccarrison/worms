@@ -258,6 +258,80 @@ describe("TurnArbiter", () => {
     expect(room.state.currentTeamId).toBe("green");
   });
 
+  it("toJSON / fromState round-trips arbiter state so hibernation doesn't resurrect dead worms", () => {
+    // HIGH 2 regression: previously, a hibernated DO rebuilt its
+    // arbiter via start() which reset aliveByTeam from rosters. Dead
+    // worms came back alive and an active disconnect pause was lost.
+    const room1 = new StubRoom();
+    room1.connected = new Set(["alice", "bob", "carol"]);
+
+    const rosters: TeamRoster[] = [
+      rosterFor("red", "alice"),
+      rosterFor("blue", "bob"),
+      rosterFor("green", "carol"),
+    ];
+    const arbiter1 = new TurnArbiter(room1);
+    arbiter1.start(["red", "blue", "green"], rosters, TURN_DURATION_MS);
+
+    // Kill one of red's worms, advance turn to blue.
+    const snap: TurnSnapshot = {
+      worms: [
+        { id: "red-0", x: 10, y: 20, vx: 0, vy: 0, hp: 0, alive: false },
+        { id: "red-1", x: 30, y: 40, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-0", x: 50, y: 60, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "blue-1", x: 70, y: 80, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "green-0", x: 90, y: 100, vx: 0, vy: 0, hp: 100, alive: true },
+        { id: "green-1", x: 110, y: 120, vx: 0, vy: 0, hp: 100, alive: true },
+      ],
+      terrainCuts: [{ x: 10, y: 20, r: 30, seq: 1 }],
+    };
+    arbiter1.onSnapshot(snap);
+
+    expect(room1.state.currentTeamId).toBe("blue");
+
+    // Simulate disconnect pause for the new active team (blue/bob).
+    arbiter1.onOwnerDisconnected("bob");
+    expect(room1.state.turnEndsAt).toBe(Number.MAX_SAFE_INTEGER);
+
+    // Serialise -> hibernation -> rebuild with the old LobbyState shared.
+    const persisted = arbiter1.toJSON();
+    const persistedJSON = JSON.parse(JSON.stringify(persisted));
+
+    const room2 = new StubRoom();
+    room2.state = room1.state; // same lobby shape post-hibernation
+    room2.connected = room1.connected;
+
+    const arbiter2 = TurnArbiter.fromState(room2, rosters, persistedJSON);
+
+    // Internal state survived: red-0 stays dead. Feed a fresh snapshot
+    // where red-0 claims to be alive again and verify the arbiter's
+    // alive tally still shows only 1 red worm (the lastSnapshot
+    // priorDead logic would otherwise miss it without restored state).
+    expect(arbiter2.isGameOver()).toBe(false);
+
+    // Reconnect: turnEndsAt restored, not clobbered by start() default.
+    arbiter2.onOwnerReconnected("bob");
+    expect(room2.state.turnEndsAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
+    expect(room2.state.turnEndsAt).toBeGreaterThan(Date.now());
+
+    // A terrain forfeit on red (already down 1 worm) should count the
+    // prior kill: after the forfeit only blue + green are alive, and
+    // the arbiter uses the restored lastSnapshot to source red worm
+    // positions for the forfeit broadcast.
+    room2.broadcasts.length = 0;
+    arbiter2.onTeamForfeit("red");
+    const forfeit = room2.broadcasts.find((b) => b.type === "turn_resolved");
+    expect(forfeit).toBeDefined();
+    const payload = forfeit?.payload as {
+      worms: Array<{ id: string; x: number; y: number; alive: boolean }>;
+    };
+    // Red-1's last known x/y (30/40) should carry over from lastSnapshot.
+    const red1 = payload.worms.find((w) => w.id === "red-1");
+    expect(red1?.x).toBe(30);
+    expect(red1?.y).toBe(40);
+    expect(red1?.alive).toBe(false);
+  });
+
   it("isGameOver reflects declareGameOver path", () => {
     const room = new StubRoom();
     room.connected = new Set(["alice", "bob"]);
