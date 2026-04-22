@@ -55,10 +55,14 @@ interface WsAttachment {
   ownerOfTeamId: string;
 }
 
-/** Resume-token entry, stored in DO storage keyed by the token. */
+/**
+ * Resume-token entry, stored in DO storage keyed by the token. The
+ * token maps to a sessionId; the player row is always looked up fresh
+ * from LobbyState so nickname / color / ready-state changes don't need
+ * to chase the token entry.
+ */
 interface ResumeEntry {
   sessionId: string;
-  player: LobbyPlayer;
 }
 
 export class Room implements DurableObject {
@@ -202,25 +206,26 @@ export class Room implements DurableObject {
 
     // Resume path: if the token matches a stored session, restore the
     // old sessionId + player row and rotate the token so a replayed
-    // URL can't be reused.
+    // URL can't be reused. The ResumeEntry only stores sessionId; the
+    // player row is always read fresh from LobbyState.players so
+    // mid-lobby field edits don't need to chase the token entry.
     if (resumeTokenParam) {
       const entry = await this.state.storage.get<ResumeEntry>(`resumeToken:${resumeTokenParam}`);
-      if (entry) {
+      const lobby = this.ensureLobby();
+      const restored = entry ? lobby.players[entry.sessionId] : undefined;
+      if (entry && restored) {
         isResume = true;
-        const restored = entry.player;
         // Clear disconnect flags on resume.
         restored.disconnected = false;
         restored.disconnectGraceEndsAt = 0;
         // Restore nickname + color the client asked for, if valid.
-        const reqColor = colorRaw;
         if (
-          (ALLOWED_COLORS as readonly string[]).includes(reqColor) &&
-          !this.isColorTakenBySomeoneElse(reqColor, entry.sessionId)
+          (ALLOWED_COLORS as readonly string[]).includes(colorRaw) &&
+          !this.isColorTakenBySomeoneElse(colorRaw, entry.sessionId)
         ) {
-          restored.color = reqColor;
+          restored.color = colorRaw;
         }
         restored.nickname = nickname;
-        this.ensureLobby().players[entry.sessionId] = restored;
         player = restored;
 
         const newToken = generateResumeToken();
@@ -230,19 +235,17 @@ export class Room implements DurableObject {
           joinedAt: restored.joinedAt,
           ownerOfTeamId: restored.ownerOfTeamId,
         };
-        // Delete the old token + write the new one.
+        // Rotate: delete old token, write new.
         await this.state.storage.delete(`resumeToken:${resumeTokenParam}`);
         await this.state.storage.put(`resumeToken:${newToken}`, {
           sessionId: entry.sessionId,
-          player: restored,
         } satisfies ResumeEntry);
 
         // If we were holding an alarm for this player's grace expiry,
-        // cancel it - we can't surgically cancel just this player, but
-        // the alarm() handler is idempotent: it rechecks every player
-        // on fire, so leaving it is fine.
+        // the alarm() handler is idempotent (rechecks every player on
+        // fire) so leaving it scheduled is fine - it will see the
+        // cleared flags and skip.
 
-        // Tell the arbiter the active owner is back.
         if (this.lobby?.phase === "playing" && this.arbiter) {
           this.arbiter.onOwnerReconnected(entry.sessionId);
         }
@@ -280,7 +283,6 @@ export class Room implements DurableObject {
 
       await this.state.storage.put(`resumeToken:${resumeToken}`, {
         sessionId,
-        player,
       } satisfies ResumeEntry);
 
       attachment = {
@@ -470,7 +472,6 @@ export class Room implements DurableObject {
       return;
     }
     player.nickname = nickname;
-    this.rewriteResumeTokenFor(player);
     this.broadcastState();
   }
 
@@ -487,7 +488,6 @@ export class Room implements DurableObject {
       return;
     }
     player.color = color;
-    this.rewriteResumeTokenFor(player);
     this.broadcastState();
   }
 
@@ -495,7 +495,6 @@ export class Room implements DurableObject {
     const lobby = this.ensureLobby();
     if (lobby.phase !== "lobby") return;
     player.ready = Boolean((msg as { ready?: unknown }).ready);
-    this.rewriteResumeTokenFor(player);
     this.broadcastState();
   }
 
@@ -627,30 +626,6 @@ export class Room implements DurableObject {
     return null;
   }
 
-  /**
-   * Keep the stored resume entry in sync with the latest player row so
-   * a reconnect replays the current nickname / color / ready state.
-   * Does a storage scan for the sessionId's token, which is fine at
-   * the per-room scale (<=8 tokens).
-   */
-  private async rewriteResumeTokenFor(player: LobbyPlayer): Promise<void> {
-    // Find the token for this sessionId. Tokens are stored under
-    // `resumeToken:{token}`. This is a rare-mutation path; scanning
-    // with list() keeps code simple.
-    const entries = await this.state.storage.list<ResumeEntry>({
-      prefix: "resumeToken:",
-    });
-    for (const [key, entry] of entries) {
-      if (entry.sessionId === player.sessionId) {
-        await this.state.storage.put(key, {
-          sessionId: player.sessionId,
-          player,
-        } satisfies ResumeEntry);
-        return;
-      }
-    }
-  }
-
   private sendError(ws: WebSocket, code: string, message: string): void {
     try {
       ws.send(JSON.stringify({ type: "error", code, message }));
@@ -707,6 +682,13 @@ export class Room implements DurableObject {
 
     delete lobby.players[sessionId];
 
+    // Best-effort purge of any resume tokens pointing at this session.
+    // Fire-and-forget is fine here: tokens only match a live player
+    // row, and we just deleted that row, so even if deletion lags any
+    // resume attempt with the old token will fall through to the
+    // fresh-join path.
+    void this.purgeResumeTokensFor(sessionId);
+
     // Forfeit if mid-game.
     if (lobby.phase === "playing" && this.arbiter && player.ownerOfTeamId) {
       this.arbiter.onTeamForfeit(player.ownerOfTeamId);
@@ -728,6 +710,17 @@ export class Room implements DurableObject {
         if (next) next.isHost = true;
       } else {
         lobby.hostSessionId = "";
+      }
+    }
+  }
+
+  private async purgeResumeTokensFor(sessionId: string): Promise<void> {
+    const entries = await this.state.storage.list<ResumeEntry>({
+      prefix: "resumeToken:",
+    });
+    for (const [key, entry] of entries) {
+      if (entry.sessionId === sessionId) {
+        await this.state.storage.delete(key);
       }
     }
   }
