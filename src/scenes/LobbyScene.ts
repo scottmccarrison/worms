@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { packMask } from "../../shared/maskPack";
 import { loadMap } from "../maps/loadMap";
 import { allIds, getById } from "../maps/registry";
 import type { NetClient } from "../net/client";
@@ -822,9 +823,21 @@ export class LobbyScene extends Phaser.Scene {
     // Workers runtime. Host generates the mask + spawn points locally and
     // ships them in start_game; server uses for physics + forwards them
     // in game_started so every client renders pixel-identical terrain.
+
+    const loadingText = this.add
+      .text(CANVAS_W / 2, this.scale.height / 2, "Generating world...", {
+        fontSize: "32px",
+        color: "#ffffff",
+        fontFamily: "system-ui, sans-serif",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(1000);
+
     try {
-      const WORLD_W = 1280;
-      const WORLD_H = 720;
+      const WORLD_W = 2560;
+      const WORLD_H = 1024;
       const loaded = loadMap(mapId, WORLD_W, WORLD_H);
       const ctx = loaded.mask.getContext("2d");
       if (!ctx) throw new Error("mask canvas has no 2d context");
@@ -832,12 +845,15 @@ export class LobbyScene extends Phaser.Scene {
       const bytes = new Uint8Array(WORLD_W * WORLD_H);
       // Alpha > 0 means solid terrain.
       for (let i = 0; i < bytes.length; i++) bytes[i] = img.data[i * 4 + 3] > 0 ? 1 : 0;
-      const mask = bytesToBase64(bytes);
+      const packed = packMask(bytes);
+      const mask = bytesToBase64(packed);
       const spawnPoints = loaded.spawnPoints.map((s) => ({ xPx: s.xPx, yPx: s.yPx }));
       room.send({ type: "start_game", mask, spawnPoints });
     } catch (err) {
       console.warn("[start_game] host could not generate mask, sending without:", err);
       room.send({ type: "start_game" });
+    } finally {
+      loadingText.destroy();
     }
   }
 

@@ -1,37 +1,40 @@
 import type { MapGenerator } from "../types";
 import { xorshift } from "../xorshift";
 
-export const canyonGenerator: MapGenerator = (ctx, _width, height, opts) => {
+export const canyonGenerator: MapGenerator = (ctx, width, height, opts) => {
   const rng = xorshift(opts.seed);
   ctx.fillStyle = "#6a5a3c";
 
-  // Left cliff: x=0..500, y=300..720
-  // With seeded variation on cliff top (±10px bumps at 40px intervals)
+  // Proportional landmark positions (designed for 1280x720 baseline).
+  const leftEdge = Math.floor(width * 0.3906); // ~500 at 1280
+  const rightEdge = Math.floor(width * 0.6094); // ~780 at 1280
+  const cliffY = Math.floor(height * 0.417); // ~300 at 720
+
+  // Left cliff
   ctx.beginPath();
   ctx.moveTo(0, height);
-  ctx.lineTo(0, 300);
-  for (let x = 0; x <= 500; x += 40) {
+  ctx.lineTo(0, cliffY);
+  for (let x = 0; x <= leftEdge; x += 40) {
     const bump = rng() * 20 - 10;
-    ctx.lineTo(x, 300 + bump);
+    ctx.lineTo(x, cliffY + bump);
   }
-  ctx.lineTo(500, 300);
-  ctx.lineTo(500, height);
+  ctx.lineTo(leftEdge, cliffY);
+  ctx.lineTo(leftEdge, height);
   ctx.closePath();
   ctx.fill();
 
-  // Right cliff: x=780..1280, y=300..720
-  // With seeded variation on cliff top (±10px bumps at 40px intervals)
+  // Right cliff
   ctx.beginPath();
-  ctx.moveTo(780, height);
-  ctx.lineTo(780, 300);
-  for (let x = 780; x <= 1280; x += 40) {
+  ctx.moveTo(rightEdge, height);
+  ctx.lineTo(rightEdge, cliffY);
+  for (let x = rightEdge; x <= width; x += 40) {
     const bump = rng() * 20 - 10;
-    ctx.lineTo(x, 300 + bump);
+    ctx.lineTo(x, cliffY + bump);
   }
-  ctx.lineTo(1280, 300);
-  ctx.lineTo(1280, height);
+  ctx.lineTo(width, cliffY);
+  ctx.lineTo(width, height);
   ctx.closePath();
   ctx.fill();
 
-  // Canyon gap x=500..780 is entirely air - no geometry drawn there
+  // Canyon gap between leftEdge..rightEdge is entirely air - no geometry drawn there
 };

@@ -126,6 +126,11 @@ export class Worm {
     this.drawWorm(init.spawnXPx, init.spawnYPx);
   }
 
+  /** Expose the graphics object for camera follow targets. */
+  get graphicsObject(): Phaser.GameObjects.Graphics {
+    return this.graphics;
+  }
+
   // ------ Movement ------
 
   walk(direction: -1 | 0 | 1): void {

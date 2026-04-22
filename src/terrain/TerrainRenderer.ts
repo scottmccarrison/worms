@@ -48,6 +48,45 @@ export class TerrainRenderer {
     this.ctx = ctx;
     this.ctx.drawImage(init.sourceMask, 0, 0);
 
+    // Stratum paint: scan each column top-down for the first solid pixel
+    // (the surface), then paint each pixel's RGB by depth-from-surface.
+    // Grass for the first 6px, dirt for the next 54px, stone below. Alpha
+    // is preserved from the mask so destruction (destination-out) still
+    // works correctly.
+    const img = this.ctx.getImageData(0, 0, this.widthPx, this.heightPx);
+    const data = img.data;
+    for (let x = 0; x < this.widthPx; x++) {
+      let surfaceY = -1;
+      for (let y = 0; y < this.heightPx; y++) {
+        const i = (y * this.widthPx + x) * 4;
+        if (data[i + 3] === 0) continue;
+        if (surfaceY === -1) surfaceY = y;
+        const depth = y - surfaceY;
+        let r: number;
+        let g: number;
+        let b: number;
+        if (depth < 6) {
+          r = 58;
+          g = 122;
+          b = 60;
+        } // grass
+        else if (depth < 60) {
+          r = 122;
+          g = 74;
+          b = 44;
+        } // dirt
+        else {
+          r = 90;
+          g = 90;
+          b = 90;
+        } // stone
+        data[i] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+      }
+    }
+    this.ctx.putImageData(img, 0, 0);
+
     const canvasTexture = init.scene.textures.addCanvas(this.textureKey, this.buffer);
     if (!canvasTexture) {
       throw new Error(`TerrainRenderer: addCanvas failed for key "${this.textureKey}"`);

@@ -1,45 +1,56 @@
 import type { MapGenerator } from "../types";
 import { xorshift } from "../xorshift";
 
-export const plateauGenerator: MapGenerator = (ctx, _width, _height, opts) => {
+export const plateauGenerator: MapGenerator = (ctx, width, height, opts) => {
   const rng = xorshift(opts.seed);
   ctx.fillStyle = "#5a4a2c";
 
-  // Left low ground: x=0..320, y=530..720
-  ctx.fillRect(0, 530, 320, 190);
+  // Proportional positions (designed for 1280x720 baseline).
+  const lowY = Math.round(height * 0.7361); // 530 at 720
+  const plateauY = Math.floor(height * 0.417); // ~300 at 720
+  const leftEdge = Math.floor(width * 0.25); // ~320 at 1280
+  const rightEdge = Math.floor(width * 0.75); // ~960 at 1280
 
-  // Right low ground: x=960..1280, y=530..720
-  ctx.fillRect(960, 530, 320, 190);
+  // Left low ground
+  ctx.fillRect(0, lowY, leftEdge, height - lowY);
 
-  // Central plateau: x=320..960, y=300..720
-  ctx.fillRect(320, 300, 640, 420);
+  // Right low ground
+  ctx.fillRect(rightEdge, lowY, width - rightEdge, height - lowY);
 
-  // Left ramp polygon (sloped): (260, 530) -> (320, 300) -> (320, 530) close
+  // Central plateau
+  ctx.fillRect(leftEdge, plateauY, rightEdge - leftEdge, height - plateauY);
+
+  // Left ramp polygon
+  const leftRampBase = Math.round(width * 0.203125); // 260 at 1280
   ctx.beginPath();
-  ctx.moveTo(260, 530);
-  ctx.lineTo(320, 300);
-  ctx.lineTo(320, 530);
+  ctx.moveTo(leftRampBase, lowY);
+  ctx.lineTo(leftEdge, plateauY);
+  ctx.lineTo(leftEdge, lowY);
   ctx.closePath();
   ctx.fill();
 
-  // Right ramp polygon (sloped): (1020, 530) -> (960, 300) -> (960, 530) close
+  // Right ramp polygon
+  const rightRampBase = Math.round(width * 0.796875); // 1020 at 1280
   ctx.beginPath();
-  ctx.moveTo(1020, 530);
-  ctx.lineTo(960, 300);
-  ctx.lineTo(960, 530);
+  ctx.moveTo(rightRampBase, lowY);
+  ctx.lineTo(rightEdge, plateauY);
+  ctx.lineTo(rightEdge, lowY);
   ctx.closePath();
   ctx.fill();
 
-  // Plateau top peaks: 3 peaks centered at x=420, x=640, x=860
-  // Each 60px wide, height seeded between 40 and 80px, pointing up from y=300
-  const peakCenters = [420, 640, 860];
+  // Plateau top peaks at proportional positions (420, 640, 860 at width=1280).
+  const peakCenters = [
+    Math.round(width * 0.328125),
+    Math.round(width * 0.5),
+    Math.round(width * 0.671875),
+  ];
   for (const cx of peakCenters) {
     const peakHeight = 40 + Math.floor(rng() * 41); // 40..80
-    const peakTop = 300 - peakHeight;
+    const peakTop = plateauY - peakHeight;
     ctx.beginPath();
-    ctx.moveTo(cx - 30, 300);
+    ctx.moveTo(cx - 30, plateauY);
     ctx.lineTo(cx, peakTop);
-    ctx.lineTo(cx + 30, 300);
+    ctx.lineTo(cx + 30, plateauY);
     ctx.closePath();
     ctx.fill();
   }

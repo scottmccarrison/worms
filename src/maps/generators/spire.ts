@@ -1,17 +1,24 @@
 import type { MapGenerator } from "../types";
 
-export const spireGenerator: MapGenerator = (ctx, _width, _height, _opts) => {
+export const spireGenerator: MapGenerator = (ctx, width, height, _opts) => {
   ctx.fillStyle = "#3c5a6a";
 
-  // Floor: x=0..1280, y=660..720 (60px thick)
-  ctx.fillRect(0, 660, 1280, 60);
+  // Proportional positions (designed for 1280x720 baseline).
+  const floorThick = 60;
+  const floorY = height - floorThick;
+  const spireLeft = Math.floor(width * 0.398); // ~510 at 1280
+  const spireRight = Math.floor(width * 0.602); // ~770 at 1280
+  const spireTop = Math.floor(height * 0.167); // ~120 at 720
 
-  // Central spire: x=510..770, y=120..660
-  ctx.fillRect(510, 120, 260, 540);
+  // Floor: full width
+  ctx.fillRect(0, floorY, width, floorThick);
 
-  // Left ledge on spire: x=470..510, y=290..310 (juts left)
-  ctx.fillRect(470, 290, 40, 20);
+  // Central spire
+  ctx.fillRect(spireLeft, spireTop, spireRight - spireLeft, floorY - spireTop);
 
-  // Right ledge on spire: x=770..810, y=440..460 (juts right)
-  ctx.fillRect(770, 440, 40, 20);
+  // Left ledge on spire (juts left)
+  ctx.fillRect(spireLeft - 40, Math.floor(height * 0.403), 40, 20);
+
+  // Right ledge on spire (juts right)
+  ctx.fillRect(spireRight, Math.floor(height * 0.611), 40, 20);
 };
