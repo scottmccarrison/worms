@@ -29,7 +29,7 @@ import {
 } from "../entities/projectile.js";
 import { Terrain } from "../entities/terrain.js";
 import { Worm, type WormFootUserData, type WormRenderState } from "../entities/worm.js";
-import { toPixels } from "../physics/scale.js";
+import { toMeters, toPixels } from "../physics/scale.js";
 import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
 import { type ExplodeResult, explode } from "../weapons/explode.js";
@@ -81,6 +81,8 @@ export interface SimState {
   tick: number;
   worms: WormRenderState[];
   projectiles: ProjectileRenderState[];
+  wind: number;
+  waterLevelPx: number;
 }
 
 export interface SimTeamInit {
@@ -132,6 +134,8 @@ export interface SerializedSim {
     fuseRemainingMs: number | null;
   }>;
   terrainCutSeq: number;
+  wind: number;
+  waterLevelPx: number;
 }
 
 export class Simulation {
@@ -149,6 +153,10 @@ export class Simulation {
   private events: SimEvent[] = [];
   /** Worms already marked dead this tick; dedupes worm_died events. */
   private readonly diedThisTick = new Set<string>();
+  /** Wind strength -1..1. Applied as horizontal force on in-flight projectiles each tick. */
+  private wind = 0;
+  /** Water level in pixels. Number.MAX_SAFE_INTEGER = no water (sentinel). */
+  private waterLevelPx = Number.MAX_SAFE_INTEGER;
 
   constructor(init: SimulationInit) {
     this.widthPx = init.widthPx;
@@ -187,6 +195,16 @@ export class Simulation {
     } catch {
       // planck contract: off() may no-op after world is GC'd
     }
+  }
+
+  // ---- Wind + water controls ----
+
+  setWind(w: number): void {
+    this.wind = Math.max(-1, Math.min(1, w));
+  }
+
+  setWaterLevel(yPx: number): void {
+    this.waterLevelPx = Math.max(0, yPx);
   }
 
   // ---- Input application (called after validating active player) ----
@@ -341,6 +359,16 @@ export class Simulation {
     for (const proj of this.projectiles) {
       if (proj.detonated) continue;
       proj.tick(dtMs);
+      // Wind: apply horizontal force per tick to in-flight projectiles.
+      // WIND_FORCE is Newtons per unit wind; tunable in src/tuning.ts.
+      if (this.wind !== 0) {
+        const WIND_FORCE = 2; // Mirror of tuning.wind.forceNewtonsPerUnit.
+        proj.body.applyForce(
+          { x: this.wind * WIND_FORCE, y: 0 },
+          proj.body.getWorldCenter(),
+          true, // wake
+        );
+      }
       if (proj.shouldDetonate()) {
         this.detonateProjectile(proj, "fuse");
       }
@@ -375,15 +403,42 @@ export class Simulation {
       }
     }
 
-    // 6. Drain terrain cut log. Currently every cut is authored via
+    // 6. Water drown: rising water level kills worms below the surface.
+    //    Shares diedThisTick with the off-map floor so a worm at the
+    //    corner doesn't double-emit worm_died.
+    if (this.waterLevelPx !== Number.MAX_SAFE_INTEGER) {
+      const waterY = toMeters(this.waterLevelPx);
+      for (const worm of this.worms.values()) {
+        if (!worm.alive) continue;
+        const pos = worm.body.getPosition();
+        if (pos.y > waterY) {
+          worm.kill();
+          if (!this.diedThisTick.has(worm.id)) {
+            this.diedThisTick.add(worm.id);
+            this.events.push({ type: "worm_died", wormId: worm.id });
+            this.events.push({
+              type: "damage_event",
+              wormId: worm.id,
+              amount: 999,
+              fromProjectileId: null,
+              impact: { x: toPixels(pos.x), y: toPixels(pos.y) },
+            });
+          }
+        }
+      }
+    }
+
+    // 7. Drain terrain cut log. Currently every cut is authored via
     //    explode() which also emits its own terrain_cut SimEvent, so
     //    the log entries are redundant. Drain to keep the log from
     //    growing unbounded.
     this.terrain.consumeCutLog();
 
     // stateChanged: always true when playing (worms + projectiles
-    // move). Cheap heuristic: events non-empty OR any worm moved.
-    const stateChanged = this.events.length > 0 || this.wormsMoved(beforeWormPositions);
+    // move). Cheap heuristic: events non-empty OR any worm moved OR
+    // projectiles in flight (they drift under gravity + wind each tick).
+    const stateChanged =
+      this.events.length > 0 || this.wormsMoved(beforeWormPositions) || this.projectiles.length > 0;
 
     this.tickCount += 1;
     const emittedEvents = this.events;
@@ -402,7 +457,13 @@ export class Simulation {
     for (const w of this.worms.values()) worms.push(w.toRenderState());
     const projectiles: ProjectileRenderState[] = [];
     for (const p of this.projectiles) projectiles.push(p.toRenderState());
-    return { tick: this.tickCount, worms, projectiles };
+    return {
+      tick: this.tickCount,
+      worms,
+      projectiles,
+      wind: this.wind,
+      waterLevelPx: this.waterLevelPx,
+    };
   }
 
   serialize(): SerializedSim {
@@ -445,6 +506,8 @@ export class Simulation {
         fuseRemainingMs: p.fuseRemainingMs,
       })),
       terrainCutSeq: 0,
+      wind: this.wind,
+      waterLevelPx: this.waterLevelPx,
     };
   }
 
@@ -475,6 +538,8 @@ export class Simulation {
       worm.jetPackThrustV = ws.jetPackThrustV ?? false;
       worm.jetPackThrustH = ws.jetPackThrustH ?? 0;
     }
+    this.wind = state.wind ?? 0;
+    this.waterLevelPx = state.waterLevelPx ?? Number.MAX_SAFE_INTEGER;
     // Clear any bodies we pre-created for projectiles (we didn't).
     for (const ps of state.projectiles) {
       const weapon = getById(ps.weaponId);

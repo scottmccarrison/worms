@@ -43,6 +43,8 @@ export interface ArbiterRoomAdapter {
   getPlayerDisconnected(sessionId: string): boolean;
   /** Source of authoritative alive counts. Set when the Simulation is ready. */
   getAliveCountsProvider(): AliveCountsProvider | null;
+  /** Called when a new turn starts (first turn via start(), subsequent via advanceTurn()). */
+  onTurnStart?: () => void;
 }
 
 /** One roster entry per team. Populated at start_game, immutable after. */
@@ -65,6 +67,8 @@ export interface ArbiterPersistedState {
   pausedRemainingMs: number | null;
   /** teamId -> next worm cursor index. */
   teamWormCursor: Record<string, number>;
+  /** True once sudden-death water has been triggered. */
+  suddenDeathStarted: boolean;
 }
 
 export class TurnArbiter {
@@ -77,6 +81,7 @@ export class TurnArbiter {
   private turnDurationMs = 0;
   private pausedRemainingMs: number | null = null;
   private pendingAdvance = false;
+  private suddenDeathStarted = false;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -89,6 +94,7 @@ export class TurnArbiter {
       gameOver: this.gameOver,
       pausedRemainingMs: this.pausedRemainingMs,
       teamWormCursor: Object.fromEntries(this.teamWormCursor),
+      suddenDeathStarted: this.suddenDeathStarted,
     };
   }
 
@@ -104,6 +110,7 @@ export class TurnArbiter {
     arbiter.gameOver = state.gameOver;
     arbiter.pausedRemainingMs = state.pausedRemainingMs;
     arbiter.teamWormCursor = new Map(Object.entries(state.teamWormCursor));
+    arbiter.suddenDeathStarted = state.suddenDeathStarted ?? false;
     return arbiter;
   }
 
@@ -127,6 +134,7 @@ export class TurnArbiter {
     this.room.state.currentWormId = this.pickNextWormInTeam(firstTeamId);
     this.room.state.turnSeq = 1;
     this.room.state.turnEndsAt = Date.now() + turnDurationMs;
+    this.fireTurnStart();
   }
 
   /**
@@ -240,6 +248,10 @@ export class TurnArbiter {
 
   // ---- private ----
 
+  private fireTurnStart(): void {
+    this.room.onTurnStart?.();
+  }
+
   private teamAliveCount(teamId: string): number {
     if (this.forfeitedTeams.has(teamId)) return 0;
     const provider = this.room.getAliveCountsProvider();
@@ -292,6 +304,7 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.pausedRemainingMs = null;
+    this.fireTurnStart();
   }
 
   private pickNextWormInTeam(teamId: string): string {
