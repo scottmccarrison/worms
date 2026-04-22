@@ -514,11 +514,16 @@ export class Room implements DurableObject {
       if (this.sim) await this.persistSim();
 
       // Broadcast sim_state + events, then lobby state.
+      // Order: sim_state first so clients have the updated positions
+      // in hand when the event messages (which reference worm ids +
+      // impact points) arrive. The lobby state goes last so the
+      // client's lobby view reflects any turn / game_over change
+      // triggered by the tick.
       if (simTickState) {
         this.broadcast({ type: "sim_state", ...simTickState });
       }
       for (const ev of simTickEvents) {
-        this.broadcast(ev as unknown as ServerMsg);
+        this.broadcastSimEvent(ev);
       }
       this.broadcastState();
       await this.persistLobby();
@@ -825,6 +830,42 @@ export class Room implements DurableObject {
   private broadcastState(): void {
     const lobby = this.ensureLobby();
     this.broadcast({ type: "state", state: lobby });
+  }
+
+  private broadcastSimEvent(ev: SimEvent): void {
+    switch (ev.type) {
+      case "terrain_cut":
+        this.broadcast({
+          type: "terrain_cut",
+          x: ev.x,
+          y: ev.y,
+          r: ev.r,
+          seq: ev.seq,
+        });
+        return;
+      case "fire_event":
+        this.broadcast({
+          type: "fire_event",
+          wormId: ev.wormId,
+          weaponId: ev.weaponId,
+          angleRad: ev.angleRad,
+          power: ev.power,
+          facing: ev.facing,
+        });
+        return;
+      case "damage_event":
+        this.broadcast({
+          type: "damage_event",
+          wormId: ev.wormId,
+          amount: ev.amount,
+          fromProjectileId: ev.fromProjectileId,
+          impact: ev.impact,
+        });
+        return;
+      case "worm_died":
+        this.broadcast({ type: "worm_died", wormId: ev.wormId });
+        return;
+    }
   }
 
   private makeArbiterAdapter(): ArbiterRoomAdapter {

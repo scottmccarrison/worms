@@ -147,6 +147,8 @@ export class Simulation {
   private tickCount = 0;
   /** Tick-scoped events appended during world step / apply passes. */
   private events: SimEvent[] = [];
+  /** Worms already marked dead this tick; dedupes worm_died events. */
+  private readonly diedThisTick = new Set<string>();
 
   constructor(init: SimulationInit) {
     this.widthPx = init.widthPx;
@@ -293,6 +295,7 @@ export class Simulation {
 
   tick(dtMs: number): SimTickResult {
     this.events = [];
+    this.diedThisTick.clear();
     const beforeWormPositions = this.snapshotWormPositions();
 
     // 1. Step world. planck does fixed-step internally via the passed
@@ -334,7 +337,10 @@ export class Simulation {
       const pos = worm.body.getPosition();
       if (pos.y > killY) {
         worm.kill();
-        this.events.push({ type: "worm_died", wormId: worm.id });
+        if (!this.diedThisTick.has(worm.id)) {
+          this.diedThisTick.add(worm.id);
+          this.events.push({ type: "worm_died", wormId: worm.id });
+        }
       }
     }
 
@@ -489,7 +495,8 @@ export class Simulation {
         fromProjectileId,
         impact: { x: ex.cut.x, y: ex.cut.y },
       });
-      if (d.died) {
+      if (d.died && !this.diedThisTick.has(d.wormId)) {
+        this.diedThisTick.add(d.wormId);
         this.events.push({ type: "worm_died", wormId: d.wormId });
       }
     }
