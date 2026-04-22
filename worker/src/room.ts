@@ -422,6 +422,9 @@ export class Room implements DurableObject {
       case "start_game":
         await this.onStartGame(ws, player, msg);
         break;
+      case "input_return_to_lobby":
+        await this.onReturnToLobby(ws, player);
+        break;
       case "input_walk":
       case "input_jump":
       case "input_backflip":
@@ -647,6 +650,55 @@ export class Room implements DurableObject {
       return;
     }
     lobby.selectedMapId = mapId;
+    this.broadcastState();
+  }
+
+  /**
+   * Host-only: after game_over, tear down the sim/arbiter and flip phase back
+   * to "lobby" so everyone lands on the ready-up screen. Clients see the
+   * phase change and transition their scene; non-host players auto-unready
+   * so a new game requires explicit re-confirmation.
+   */
+  private async onReturnToLobby(ws: WebSocket, player: LobbyPlayer): Promise<void> {
+    const lobby = this.ensureLobby();
+    if (!player.isHost) {
+      this.sendError(ws, "not_host", "Only the host may return to the lobby.");
+      return;
+    }
+    // Only meaningful from a playing / ended state; ignore if already in lobby.
+    if (lobby.phase === "lobby") return;
+
+    // Tear down game state.
+    if (this.sim) {
+      try {
+        this.sim.destroy();
+      } catch {
+        // ignore
+      }
+      this.sim = null;
+    }
+    this.arbiter = null;
+    this.simBootstrap = null;
+    this.rosters = [];
+    await this.state.storage.delete("simState");
+    await this.state.storage.delete("simBootstrap");
+    await this.state.storage.delete("arbiterState");
+    await this.state.storage.delete("rosters");
+
+    // Flip the lobby back to pre-start state. Keep players + nicknames +
+    // colors + selectedMapId (host's last choice). Un-ready every non-host
+    // so the next start_game requires explicit re-confirmation from each.
+    lobby.phase = "lobby";
+    lobby.currentTeamId = "";
+    lobby.currentWormId = "";
+    lobby.turnSeq = 0;
+    lobby.turnEndsAt = 0;
+    lobby.teamOrder = [];
+    for (const p of Object.values(lobby.players)) {
+      p.ownerOfTeamId = "";
+      if (!p.isHost) p.ready = false;
+    }
+    await this.persistLobby();
     this.broadcastState();
   }
 

@@ -122,6 +122,7 @@ export class GameScene extends Phaser.Scene {
   private currentRoomCode = "";
   private disconnectTick: Phaser.Time.TimerEvent | null = null;
   private roomUnsubs: Array<() => void> = [];
+  private returnToLobbyObjects: Phaser.GameObjects.GameObject[] = [];
 
   // ---- Offline-mode WeaponManager map (built per-team) ----
   // Networked mode: ammo + select state arrive via sim_state.worms[].ammoLeft.
@@ -547,6 +548,60 @@ export class GameScene extends Phaser.Scene {
     this.spectatorHUD?.hide();
     const winner = this.sim.teams.find((t) => t.id === winnerTeamId) ?? null;
     this.turnHUD?.showGameOver(winner?.name ?? null);
+    if (this.isNetworked) this.showReturnToLobbyControl();
+  }
+
+  /**
+   * After game_over in networked mode, show a "Back to lobby" affordance:
+   * the host sees a clickable button that sends input_return_to_lobby;
+   * non-host players see a waiting line. Phase transition back to LobbyScene
+   * is driven by the server's state broadcast (handled elsewhere).
+   */
+  private showReturnToLobbyControl(): void {
+    if (!this.room) return;
+    const mySid = this.mySessionId;
+    const me = mySid ? this.room.state?.players?.[mySid] : undefined;
+    const iAmHost = !!me?.isHost;
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2 + 60;
+
+    if (!iAmHost) {
+      const waitText = this.add
+        .text(cx, cy, "Waiting for host to return to lobby...", {
+          fontSize: "16px",
+          color: "#ffffff",
+          fontFamily: "system-ui, sans-serif",
+          stroke: "#000000",
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5)
+        .setDepth(200)
+        .setScrollFactor(0);
+      this.returnToLobbyObjects.push(waitText);
+      return;
+    }
+
+    const gfx = this.add.graphics().setDepth(200).setScrollFactor(0);
+    gfx.fillStyle(0x2266cc, 1);
+    gfx.fillRoundedRect(cx - 110, cy - 22, 220, 44, 8);
+    gfx.lineStyle(2, 0x88aaff, 1);
+    gfx.strokeRoundedRect(cx - 110, cy - 22, 220, 44, 8);
+    const btnText = this.add
+      .text(cx, cy, "Back to lobby", {
+        fontSize: "18px",
+        color: "#ffffff",
+        fontFamily: "system-ui, sans-serif",
+        stroke: "#000000",
+        strokeThickness: 2,
+      })
+      .setOrigin(0.5)
+      .setDepth(201)
+      .setScrollFactor(0);
+    const hit = this.add.zone(cx, cy, 220, 44).setOrigin(0.5).setScrollFactor(0).setInteractive();
+    hit.on("pointerdown", () => {
+      this.room?.send({ type: "input_return_to_lobby", seq: 0 });
+    });
+    this.returnToLobbyObjects.push(gfx, btnText, hit);
   }
 
   private handleTurnChanged(teamId: string, _wormId: string): void {
@@ -700,6 +755,17 @@ export class GameScene extends Phaser.Scene {
       this.room.onClose((code) => {
         if (code === 1000) return;
         void this.startReconnectionLoop();
+      }),
+    );
+
+    // Phase change: if the server flips back to "lobby" (after host presses
+    // Back to lobby from the game-over overlay), return to LobbyScene with
+    // the existing room handle so players re-ready in place.
+    this.roomUnsubs.push(
+      this.room.onStateChange((state) => {
+        if (state.phase === "lobby" && this.scene.key === "GameScene") {
+          this.scene.start("LobbyScene", { netClient: this.netClient, room: this.room });
+        }
       }),
     );
 
