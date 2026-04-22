@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
+import { type GestureInput, createGestureTracker } from "../input/touchGestures";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, nextId } from "../maps/registry";
 import type { NetClient } from "../net/client";
@@ -68,9 +69,22 @@ export class GameScene extends Phaser.Scene {
   private weaponDrawer!: WeaponDrawer;
   private aimHUD!: AimHUD;
 
-  // ---- Drag-to-aim state (primary pointer only) ----
-  private dragStart: { x: number; y: number } | null = null;
-  private dragPointerId: number | null = null;
+  // ---- Pointer-gesture state (primary pointer only) ----
+  /** Gesture state machine shared across pointer events. Stores last-release
+   * timestamps across gestures for double-tap detection. */
+  private gestureTracker = createGestureTracker();
+  /** Which gesture flavor the current (single) pointer is driving.
+   * - "aim": drag-to-aim (existing behavior)
+   * - "walk": tap-hold on a screen half, walking left/right
+   * - null: no pointer is being tracked
+   */
+  private activeGestureKind: "aim" | "walk" | null = null;
+  /** Pointer id that opened the active gesture. Only this id's move/up events
+   * are honored; other pointers (multi-touch) are routed to their own buttons. */
+  private activePointerId: number | null = null;
+  /** Origin of the active aim drag in screen px. Used by pointermove to compute
+   * drag length vs dead-zone for fire-on-release. */
+  private aimDragStart: { x: number; y: number } | null = null;
 
   // ---- Init-time data ----
   private mapId: string = firstId();
@@ -715,18 +729,60 @@ export class GameScene extends Phaser.Scene {
 
   private wirePointerInput(): void {
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      // Button hit-tests first: the drawer / HUDs / touch controls own their
+      // own pointerdown handlers, so the scene-level gesture layer gates on
+      // them to avoid double-triggering.
       if (this.turnHUD.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
       if (this.weaponDrawer.hitsIcon(p)) return;
-      if (this.dragPointerId !== null) return;
-      this.dragStart = { x: p.x, y: p.y };
-      this.dragPointerId = p.id;
+      // Already tracking a gesture on a different pointer: ignore. Multi-touch
+      // secondary fingers should route to buttons (above), not the gesture layer.
+      if (this.activePointerId !== null) return;
+
+      const worm = this.getActiveWormAdapter();
+      const myTurn = this.isInputAllowed();
+      const utilityActive = !!worm && (worm.isRoped() || worm.isJetPacking());
+      const input: GestureInput = {
+        downXPx: p.x,
+        downYPx: p.y,
+        nowMs: Date.now(),
+        screenWidth: this.scale.width,
+        wormXPx: worm?.xPx ?? null,
+        wormYPx: worm?.yPx ?? null,
+        myTurn,
+        utilityActive,
+        wormHitRadiusPx: tuning.touch.wormHitRadiusPx,
+        doubleTapMaxMs: tuning.touch.doubleTapMaxMs,
+        longPressMs: tuning.touch.longPressMs,
+      };
+      const outcomes = this.gestureTracker.processDown(input);
+      for (const o of outcomes) {
+        if (o.kind === "aim_start") {
+          this.activeGestureKind = "aim";
+          this.activePointerId = p.id;
+          this.aimDragStart = { x: o.xPx, y: o.yPx };
+        } else if (o.kind === "walk") {
+          this.activeGestureKind = "walk";
+          this.activePointerId = p.id;
+          // Face the side being walked so offline mode's setFacing gate does
+          // not fight the walk. Networked mode server handles facing from the
+          // walk message directly.
+          this.sim.setFacing(o.dir);
+          this.sim.walk(o.dir);
+        }
+        // "ignored": no-op. pointermove / pointerup for this pointer won't
+        // match activePointerId (null), so they short-circuit.
+      }
     });
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart || p.id !== this.dragPointerId) return;
+      if (p.id !== this.activePointerId) return;
+      if (this.activeGestureKind !== "aim") return;
       const worm = this.getActiveWormAdapter();
       if (!worm || !this.isInputAllowed()) return;
+      // Existing drag-to-aim math: vector from pointer to worm sets angle,
+      // distance (capped) sets power. Facing flips when dragging across the
+      // worm's center.
       const dx = worm.xPx - p.x;
       const dy = worm.yPx - p.y;
       const mag = Math.hypot(dx, dy);
@@ -738,22 +794,38 @@ export class GameScene extends Phaser.Scene {
         this.sim.setFacing(-worm.facing as -1 | 1);
       }
       const aimRad = Math.atan2(dy, Math.abs(dx));
-      // Single path: adapter decides whether to mutate locally (offline)
-      // or forward to the room with throttling (networked). The scene no
-      // longer duplicates the aim send.
       this.sim.setAimAngle(aimRad);
       this.sim.setAimPower(power);
     });
 
     this.input.on("pointerup", (p: Phaser.Input.Pointer) => {
-      if (!this.dragStart || p.id !== this.dragPointerId) return;
-      const dragDist = Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y);
-      this.dragStart = null;
-      this.dragPointerId = null;
-      if (dragDist < tuning.weapons.dragDeadZonePx) return;
-      // sim.fire() flushes any pending aim before the fire message lands,
-      // so the server sees the exact release angle + power.
-      this.sim.fire();
+      if (p.id !== this.activePointerId) return;
+      const gestureKind = this.activeGestureKind;
+      const aimStart = this.aimDragStart;
+      // Reset per-pointer state BEFORE dispatching so the next gesture starts
+      // clean, even if a handler below throws.
+      this.activeGestureKind = null;
+      this.activePointerId = null;
+      this.aimDragStart = null;
+
+      const outcomes = this.gestureTracker.processUp(Date.now());
+      for (const o of outcomes) {
+        if (o.kind === "aim_end") {
+          // Fire-on-release, gated by the dead-zone so a stray tap doesn't
+          // fire a zero-power shot.
+          if (!aimStart) continue;
+          const dragDist = Math.hypot(p.x - aimStart.x, p.y - aimStart.y);
+          if (dragDist < tuning.weapons.dragDeadZonePx) continue;
+          this.sim.fire();
+        } else if (o.kind === "walk_release") {
+          this.sim.walk(0);
+        } else if (o.kind === "jump") {
+          this.sim.jump();
+        } else if (o.kind === "backflip") {
+          this.sim.backflip();
+        }
+      }
+      void gestureKind; // retained for future metrics / debug.
     });
   }
 }
