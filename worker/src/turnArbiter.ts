@@ -79,6 +79,7 @@ export class TurnArbiter {
   private turnDurationMs = 0;
   private pausedRemainingMs: number | null = null;
   private pendingAdvance = false;
+  private hasFiredThisTurn = false;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -176,12 +177,27 @@ export class TurnArbiter {
     // Never touch turnEndsAt while paused; the sentinel is MAX_SAFE_INTEGER
     // and pausedRemainingMs is the source of truth.
     if (this.pausedRemainingMs !== null) return;
+    this.hasFiredThisTurn = true;
     const RETREAT_WINDOW_MS = 5_000; // mirrors tuning.retreat.windowMs
     const retreatEnd = Date.now() + RETREAT_WINDOW_MS;
     // Only shorten - never extend.
     if (retreatEnd < this.room.state.turnEndsAt) {
       this.room.state.turnEndsAt = retreatEnd;
     }
+  }
+
+  /**
+   * Gate for the Room's fire input drain. Rejects if the game is over, the
+   * turn is paused, the active worm already fired this turn (one-shot per
+   * turn), or the turn timer has elapsed (past settle-grace inputs are
+   * ignored so the player can't sneak another fire after the timer hits 0).
+   */
+  canFire(): boolean {
+    if (this.gameOver) return false;
+    if (this.pausedRemainingMs !== null) return false;
+    if (this.hasFiredThisTurn) return false;
+    if (Date.now() > this.room.state.turnEndsAt) return false;
+    return true;
   }
 
   /**
@@ -259,6 +275,7 @@ export class TurnArbiter {
   // ---- private ----
 
   private fireTurnStart(): void {
+    this.hasFiredThisTurn = false;
     this.room.onTurnStart?.();
   }
 

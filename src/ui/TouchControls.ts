@@ -53,17 +53,20 @@ export class TouchControls {
 
     const { getActiveWorm } = init;
     const radius = tuning.touch.buttonRadiusPx;
-    const sw = this.scene.scale.width;
+    // End-turn button occupies the top-right 80px square (TurnHUD). Stack rope
+    // + jet along the LEFT edge so neither their tap areas nor the End button's
+    // hit area overlap.
+    const leftX = 60;
 
     if (ropeEnabled) {
-      // --- Rope button (top-right, inboard) ---
+      // --- Rope button (top-left) ---
       const ropeBtn = this._makeButton({
         fillColor: 0x2266cc,
         strokeColor: 0x88aaff,
         label: "R",
         radius,
       });
-      ropeBtn.setPosition(sw - 60 - (radius * 2 + 10), 60);
+      ropeBtn.setPosition(leftX, 60);
       this.ropeBtn = ropeBtn;
       this.container.add(ropeBtn);
 
@@ -81,14 +84,16 @@ export class TouchControls {
     }
 
     if (jetPackEnabled) {
-      // --- JetPack button (top-right corner) ---
+      // --- JetPack button (top-left, right of rope) ---
       const jetBtn = this._makeButton({
         fillColor: 0xcc6600,
         strokeColor: 0xff9933,
         label: "J",
         radius,
       });
-      jetBtn.setPosition(sw - 60, 60);
+      // Offset by rope's footprint (+10px gap) even if rope is disabled, so
+      // the jet button sits at the same absolute position in both modes.
+      jetBtn.setPosition(leftX + radius * 2 + 10, 60);
       this.jetBtn = jetBtn;
       this.container.add(jetBtn);
 
