@@ -424,6 +424,17 @@ export class Room implements DurableObject {
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
 
+    // Race: a late close event can arrive for the OLD socket AFTER the
+    // client already reconnected on a NEW socket. Without this guard we
+    // would flip the (now-live) player back to disconnected and kick
+    // off a grace alarm, eventually forfeiting a connected player.
+    const liveForSession = this.state.getWebSockets().some((other) => {
+      if (other === ws) return false;
+      const a = other.deserializeAttachment() as WsAttachment | undefined;
+      return a?.sessionId === attachment.sessionId;
+    });
+    if (liveForSession) return;
+
     // Mark disconnected + kick off a grace alarm.
     player.disconnected = true;
     player.disconnectGraceEndsAt = Date.now() + DISCONNECT_GRACE_MS;
