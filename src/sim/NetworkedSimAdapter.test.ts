@@ -153,6 +153,8 @@ function makeSimState(overrides: Partial<SimStateMessage> = {}): SimStateMessage
     activeTeamId: "red",
     activeWormId: "red-1",
     turnEndsAt: Date.now() + 30000,
+    wind: 0,
+    waterLevelPx: Number.MAX_SAFE_INTEGER,
     ...overrides,
   };
 }

@@ -1,5 +1,12 @@
 interface Tuning {
   world: { gravityY: number };
+  retreat: {
+    windowMs: number;
+  };
+  water: {
+    suddenDeathTurn: number;
+    risePxPerTurn: number;
+  };
   weapons: {
     testCutRadiusPx: number;
     dragMaxLengthPx: number;
@@ -72,10 +79,15 @@ interface Tuning {
     /** Default map id used on first load. Must be a valid registry key. */
     defaultId: string;
   };
+  wind: {
+    forceNewtonsPerUnit: number;
+  };
 }
 
 export const tuning: Tuning = {
   world: { gravityY: 10 },
+  retreat: { windowMs: 5000 },
+  water: { suddenDeathTurn: 15, risePxPerTurn: 50 },
   weapons: {
     testCutRadiusPx: 40,
     dragMaxLengthPx: 200,
@@ -129,4 +141,5 @@ export const tuning: Tuning = {
   maps: {
     defaultId: "hills", // registry lookup; falls back to firstId() if invalid
   },
+  wind: { forceNewtonsPerUnit: 2 },
 };

@@ -43,6 +43,8 @@ export interface ArbiterRoomAdapter {
   getPlayerDisconnected(sessionId: string): boolean;
   /** Source of authoritative alive counts. Set when the Simulation is ready. */
   getAliveCountsProvider(): AliveCountsProvider | null;
+  /** Called when a new turn starts (first turn via start(), subsequent via advanceTurn()). */
+  onTurnStart?: () => void;
 }
 
 /** One roster entry per team. Populated at start_game, immutable after. */
@@ -127,6 +129,7 @@ export class TurnArbiter {
     this.room.state.currentWormId = this.pickNextWormInTeam(firstTeamId);
     this.room.state.turnSeq = 1;
     this.room.state.turnEndsAt = Date.now() + turnDurationMs;
+    this.fireTurnStart();
   }
 
   /**
@@ -158,12 +161,27 @@ export class TurnArbiter {
 
   /**
    * Called by the Room immediately after a fire input is processed.
-   * Advances the turn on the next alarm tick (the projectile needs
-   * to land + settle first). For now this is a no-op - the settle
-   * grace check in onTick will handle it.
+   * Shortens turnEndsAt to +5s so players can reposition (retreat window)
+   * before the full 45s turn timer expires.
+   *
+   * Guarded against the paused state (pausedRemainingMs !== null): a fire
+   * during owner-disconnect grace must not stomp the MAX_SAFE_INTEGER
+   * sentinel - pausedRemainingMs is the source of truth during pause.
+   *
+   * Only shortens, never extends: if somehow turnEndsAt is already closer
+   * than 5s (e.g. rapid fire at end of turn), we leave it alone.
    */
   onFireCommitted(): void {
-    // Placeholder; v1 relies on the settle grace timeout.
+    if (this.gameOver) return;
+    // Never touch turnEndsAt while paused; the sentinel is MAX_SAFE_INTEGER
+    // and pausedRemainingMs is the source of truth.
+    if (this.pausedRemainingMs !== null) return;
+    const RETREAT_WINDOW_MS = 5_000; // mirrors tuning.retreat.windowMs
+    const retreatEnd = Date.now() + RETREAT_WINDOW_MS;
+    // Only shorten - never extend.
+    if (retreatEnd < this.room.state.turnEndsAt) {
+      this.room.state.turnEndsAt = retreatEnd;
+    }
   }
 
   /**
@@ -240,6 +258,10 @@ export class TurnArbiter {
 
   // ---- private ----
 
+  private fireTurnStart(): void {
+    this.room.onTurnStart?.();
+  }
+
   private teamAliveCount(teamId: string): number {
     if (this.forfeitedTeams.has(teamId)) return 0;
     const provider = this.room.getAliveCountsProvider();
@@ -292,6 +314,7 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.pausedRemainingMs = null;
+    this.fireTurnStart();
   }
 
   private pickNextWormInTeam(teamId: string): string {
