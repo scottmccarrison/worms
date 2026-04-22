@@ -289,12 +289,21 @@ export class Simulation {
 
   // ---- Main tick ----
 
-  tick(dtMs: number): SimTickResult {
+  tick(dtMs: number, activeWormId: string | null = null): SimTickResult {
     // Keep any events that applyFire / other pre-tick inputs pushed;
     // they are logically part of this tick. Reset diedThisTick so
     // the dedup guard only spans the current tick.
     this.diedThisTick.clear();
     const beforeWormPositions = this.snapshotWormPositions();
+
+    // 0. Sustain the active worm's walking velocity. Clients send
+    //    input_walk edge-triggered, so without this step ground friction
+    //    would damp the worm to a halt between inputs. Non-active worms
+    //    with stale walkingDir are skipped, which also means turn
+    //    advance implicitly stops the previous walker.
+    if (activeWormId) {
+      this.worms.get(activeWormId)?.applyWalking();
+    }
 
     // 1. Step world. planck does fixed-step internally via the passed
     //    timestep; 50ms is a single step at 20Hz.

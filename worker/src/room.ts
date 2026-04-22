@@ -514,7 +514,7 @@ export class Room implements DurableObject {
       let simTickState: Pick<SimState, "tick" | "worms" | "projectiles"> | null = null;
       if (lobby.phase === "playing" && this.sim) {
         this.drainInputs();
-        const result = this.sim.tick(SIM_TICK_MS);
+        const result = this.sim.tick(SIM_TICK_MS, lobby.currentWormId || null);
         simTickEvents = result.events;
         simTickState = this.sim.toSimState();
 
