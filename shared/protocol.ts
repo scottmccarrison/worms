@@ -121,27 +121,90 @@ export interface CircleCut {
 // Server -> client messages (discriminated by `type`)
 // ---------------------------------------------------------------------------
 
+/**
+ * Epic 45 sim state broadcast. `tick` is a monotonic server tick
+ * counter; `worms[]` + `projectiles[]` are full snapshots. Sent every
+ * ~50ms (20Hz) while the game is in progress.
+ *
+ * Positions are meters (converted from physics body.getPosition()),
+ * not pixels. Clients multiply by PX_PER_M (30) for rendering.
+ */
+export interface SimWormState {
+  id: string;
+  teamId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  facing: -1 | 1;
+  aimAngle: number;
+  aimPower: number;
+  hp: number;
+  alive: boolean;
+  activeWeapon: string;
+  ammoLeft: number;
+}
+
+export interface SimProjectileState {
+  id: string;
+  ownerId: string;
+  type: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  fuseRemainingMs: number | null;
+}
+
+export interface SimState {
+  tick: number;
+  worms: SimWormState[];
+  projectiles: SimProjectileState[];
+}
+
+/** Epic 45 VFX/audio trigger events, broadcast alongside sim_state. */
+export interface TerrainCutEvent {
+  type: "terrain_cut";
+  x: number;
+  y: number;
+  r: number;
+  seq: number;
+}
+export interface FireEvent {
+  type: "fire_event";
+  wormId: string;
+  weaponId: string;
+  angleRad: number;
+  power: number;
+  facing: -1 | 1;
+}
+export interface DamageEvent {
+  type: "damage_event";
+  wormId: string;
+  amount: number;
+  fromProjectileId: string | null;
+  impact: { x: number; y: number };
+}
+export interface WormDiedEvent {
+  type: "worm_died";
+  wormId: string;
+}
+
 export type ServerMsg =
   | { type: "welcome"; sessionId: string; resumeToken: string; state: LobbyState }
   | { type: "state"; state: LobbyState }
   | { type: "game_started"; mapId: string; seed: number; teams: TeamInit[] }
   | { type: "game_over"; winnerTeamId: string | null }
-  | {
-      type: "turn_resolved";
-      turnSeq: number;
-      worms: WormSnapshot[];
-      terrainCuts: CircleCut[];
-      nextTeamId: string;
-      nextWormId: string;
-    }
-  | { type: "error"; code: string; message: string }
-  | { type: "input_walk"; dir: -1 | 0 | 1; seq: number }
-  | { type: "input_jump"; seq: number }
-  | { type: "input_backflip"; seq: number }
-  | { type: "input_aim_angle"; angleRad: number; seq: number }
-  | { type: "input_aim_power"; power: number; seq: number }
-  | { type: "input_select_weapon"; weaponId: string; seq: number }
-  | { type: "input_fire"; seq: number };
+  | ({ type: "sim_state" } & SimState)
+  | TerrainCutEvent
+  | FireEvent
+  | DamageEvent
+  | WormDiedEvent
+  | { type: "error"; code: string; message: string };
+
+// DEPRECATED post-Epic-45: turn_resolved + input_* relays removed.
+// Server owns sim authoritatively and broadcasts sim_state at 20Hz.
+// Clients no longer see echoed inputs; they render from sim_state.
 
 // ---------------------------------------------------------------------------
 // Client -> server messages
@@ -153,6 +216,9 @@ export type ClientMsg =
   | { type: "set_ready"; ready: boolean }
   | { type: "select_map"; mapId: string }
   | { type: "start_game" }
+  // Input messages: server-authoritative. Post-Epic-45 these are NOT
+  // relayed back to other clients; the server applies them to the
+  // authoritative sim and everyone sees the result via sim_state.
   | { type: "input_walk"; dir: -1 | 0 | 1; seq: number }
   | { type: "input_jump"; seq: number }
   | { type: "input_backflip"; seq: number }
@@ -161,5 +227,4 @@ export type ClientMsg =
   | { type: "input_select_weapon"; weaponId: string; seq: number }
   | { type: "input_fire"; seq: number }
   | { type: "input_end_turn"; seq: number }
-  | { type: "turn_snapshot"; worms: WormSnapshot[]; terrainCuts: CircleCut[] }
   | { type: "leave" };
