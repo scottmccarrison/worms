@@ -139,9 +139,9 @@ export class TurnArbiter {
     if (this.gameOver) return;
     this.checkGameOver();
     if (this.gameOver) return;
-    if (this.pendingAdvance) {
+    if (this.pendingAdvance && this.pausedRemainingMs === null) {
       this.pendingAdvance = false;
-      if (this.pausedRemainingMs === null) this.advanceTurn();
+      this.advanceTurn();
       return;
     }
     if (this.pausedRemainingMs !== null) return;

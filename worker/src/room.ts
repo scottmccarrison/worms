@@ -772,13 +772,13 @@ export class Room implements DurableObject {
     });
     return {
       type: "game_started",
-      mapId: bootstrap.mapId,
+      mapId: bootstrap.mapId ?? this.lobby?.selectedMapId ?? "flat",
       seed: bootstrap.seed,
       teams,
       widthPx: bootstrap.widthPx,
       heightPx: bootstrap.heightPx,
       mask: bootstrap.maskBase64,
-      spawnPoints: bootstrap.spawnPoints,
+      spawnPoints: bootstrap.spawnPoints ?? [],
     };
   }
 

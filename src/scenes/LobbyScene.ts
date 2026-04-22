@@ -380,12 +380,13 @@ export class LobbyScene extends Phaser.Scene {
     this.clearRoom();
     const cx = this.scale.width / 2;
     const cy = this.scale.height / 2;
-    this.add
+    const placeholder = this.add
       .text(cx, cy, "Reconnecting...", {
         ...TEXT_STYLE_BODY,
         fontSize: "24px",
       })
       .setOrigin(0.5);
+    this.roomObjects.push(placeholder);
   }
 
   /**
