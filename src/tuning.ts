@@ -79,6 +79,16 @@ interface Tuning {
     /** Default map id used on first load. Must be a valid registry key. */
     defaultId: string;
   };
+  caves: {
+    /** Cell size in pixels; larger = broader chambers, cheaper CA. */
+    cellSizePx: number;
+    /** Initial probability a cell is solid before smoothing. 0.45 gives balanced cave density. */
+    initialFillRatio: number;
+    /** Cellular automata smoothing passes. 4 is the classic Terraria-style value. */
+    iterations: number;
+    /** Pixels of solid crust preserved below each column's surface. Prevents skylights. */
+    surfaceBufferPx: number;
+  };
   wind: {
     forceNewtonsPerUnit: number;
   };
@@ -140,6 +150,19 @@ export const tuning: Tuning = {
   },
   maps: {
     defaultId: "terraworld", // registry lookup; falls back to firstId() if invalid
+  },
+  caves: {
+    // 24 gives 2560x1024 a ~107x43 grid. Each cell is ~1 worm tall, so
+    // a single void cell is a small pocket; groups of adjacent cells
+    // form real chambers. Smaller values (8-16) read as pixel-dust.
+    cellSizePx: 24,
+    // 0.50 is the edge between "stable mostly-solid" and "collapse
+    // toward void" under B5/S4. Biasing very slightly toward void
+    // lets chambers coalesce while keeping the subsurface mostly
+    // stone. Stabilizes around 50-55% solid cells after 4 iters.
+    initialFillRatio: 0.5,
+    iterations: 4,
+    surfaceBufferPx: 80,
   },
   wind: { forceNewtonsPerUnit: 2 },
 };
