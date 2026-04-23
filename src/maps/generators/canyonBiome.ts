@@ -20,16 +20,16 @@ export const canyonBiomeGenerator: MapGenerator = (ctx, width, height, opts) => 
   const rng = xorshift(opts.seed);
 
   // Gap geometry
-  const gapWidth = Math.floor(width * (0.18 + rng() * 0.07));
+  const gapWidth = Math.floor(width * (0.22 + rng() * 0.1));
   const centerX = Math.floor(width / 2 + (rng() - 0.5) * width * 0.08);
   const leftEdge = centerX - Math.floor(gapWidth / 2);
   const rightEdge = centerX + Math.ceil(gapWidth / 2);
 
   // Heightmap samples for left cliff top
-  const stride = 128;
-  const amp = height * 0.05;
-  const baseTopLeft = height * (0.4 + rng() * 0.1);
-  const baseTopRight = height * (0.4 + rng() * 0.1);
+  const stride = 192;
+  const amp = height * 0.02;
+  const baseTopLeft = height * (0.28 + rng() * 0.1);
+  const baseTopRight = height * (0.28 + rng() * 0.1);
 
   // Generate left cliff samples (covers x = 0..leftEdge)
   const leftSampleCount = Math.ceil(leftEdge / stride) + 2;
