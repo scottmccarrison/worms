@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import { packMask } from "../../shared/maskPack";
 import { loadMap } from "../maps/loadMap";
-import { allIds, getById } from "../maps/registry";
+import { firstId, getById, lobbyIds } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import {
   clearRoomToken,
@@ -136,6 +136,11 @@ export class LobbyScene extends Phaser.Scene {
   // handler can look up the resume token without reading stale
   // room state (state may have been freed by the time the close fires).
   private currentRoomCode = "";
+
+  // Last hidden selectedMapId we normalized away from. Prevents repeat
+  // select_map sends while the server echoes stale state before applying
+  // our correction (renderRoom fires on every state update).
+  private lastNormalizedHiddenMapId: string | null = null;
 
   init(data: LobbySceneData): void {
     this.netClient = data.netClient;
@@ -556,6 +561,29 @@ export class LobbyScene extends Phaser.Scene {
     const mySessionId = this.room.sessionId;
     const vm = toViewModel(state, mySessionId);
 
+    // If we reconnected into a room whose selectedMapId is now hidden
+    // (e.g. a legacy map after ADR-003 deprecation), ask the host to
+    // switch to the first visible biome so the picker shows a valid state.
+    const visibleIds = lobbyIds();
+    if (state.selectedMapId && !visibleIds.includes(state.selectedMapId)) {
+      const fallback = visibleIds[0] ?? firstId();
+      // Only the host can change the map; guest clients surface the stale
+      // name and wait for the host to cycle. Safe no-op for non-hosts.
+      // Gate on lastNormalizedHiddenMapId so we only send select_map once
+      // per distinct hidden id, even if the server echoes stale state
+      // across multiple renderRoom ticks before applying our correction.
+      if (
+        vm.iAmHost &&
+        fallback !== state.selectedMapId &&
+        this.lastNormalizedHiddenMapId !== state.selectedMapId
+      ) {
+        this.lastNormalizedHiddenMapId = state.selectedMapId;
+        this.room.send({ type: "select_map", mapId: fallback });
+      }
+    } else {
+      this.lastNormalizedHiddenMapId = null;
+    }
+
     const cx = CANVAS_W / 2;
 
     // Header: code + leave button.
@@ -725,7 +753,7 @@ export class LobbyScene extends Phaser.Scene {
 
   private cycleMap(dir: 1 | -1): void {
     if (!this.room) return;
-    const ids = allIds();
+    const ids = lobbyIds();
     if (ids.length === 0) return;
     const current = this.room.state.selectedMapId;
     const idx = ids.indexOf(current);

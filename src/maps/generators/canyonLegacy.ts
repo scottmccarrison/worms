@@ -1,7 +1,15 @@
 import type { MapGenerator } from "../types";
 import { xorshift } from "../xorshift";
 
-export const canyonGenerator: MapGenerator = (ctx, width, height, opts) => {
+/**
+ * Original handcrafted canyon map kept for regression testing.
+ *
+ * Two cliff masses separated by a fixed proportional gap, designed for a
+ * 1280x720 baseline. This map is superseded by canyonBiomeGenerator but
+ * is retained under the canyon_legacy registry key so existing tests and
+ * regression suites continue to run against the original geometry.
+ */
+export const canyonLegacyGenerator: MapGenerator = (ctx, width, height, opts) => {
   const rng = xorshift(opts.seed);
   ctx.fillStyle = "#6a5a3c";
 

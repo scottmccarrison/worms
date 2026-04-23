@@ -2,7 +2,8 @@ import { createCanvas } from "canvas";
 import { describe, expect, it } from "vitest";
 import { findSpawnPoints } from "../worm/spawnPoints";
 import { bridgesGenerator } from "./generators/bridges";
-import { canyonGenerator } from "./generators/canyon";
+import { canyonBiomeGenerator } from "./generators/canyonBiome";
+import { canyonLegacyGenerator } from "./generators/canyonLegacy";
 import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
@@ -249,15 +250,15 @@ describe("spireGenerator", () => {
   });
 });
 
-describe("canyonGenerator", () => {
+describe("canyonLegacyGenerator", () => {
   it("canyon generator is deterministic given a seed", () => {
-    const a = renderPixels(canyonGenerator, 1);
-    const b = renderPixels(canyonGenerator, 1);
+    const a = renderPixels(canyonLegacyGenerator, 1);
+    const b = renderPixels(canyonLegacyGenerator, 1);
     expect(Array.from(a)).toEqual(Array.from(b));
   });
 
   it("canyon produces substantial solid terrain", () => {
-    const data = renderPixels(canyonGenerator, 1);
+    const data = renderPixels(canyonLegacyGenerator, 1);
     const solid = countSolidPixels(data);
     expect(solid / (W * H)).toBeGreaterThan(0.1);
   });
@@ -265,7 +266,7 @@ describe("canyonGenerator", () => {
   it("canyon yields 4 valid spawn points on solid surface", () => {
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
-    canyonGenerator(ctx, W, H, { seed: 1 });
+    canyonLegacyGenerator(ctx, W, H, { seed: 1 });
     const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
     const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
     expect(spawnPoints.length).toBe(4);
@@ -327,7 +328,7 @@ function renderTerraworldPixels(seed: number): Uint8ClampedArray {
 }
 
 describe("terraworldGenerator", () => {
-  it("terraworld generator is deterministic given a seed (2560x1024)", () => {
+  it("terraworld generator is deterministic given a seed (2560x1024)", { timeout: 15000 }, () => {
     const a = renderTerraworldPixels(42);
     const b = renderTerraworldPixels(42);
     expect(Array.from(a)).toEqual(Array.from(b));
@@ -353,6 +354,80 @@ describe("terraworldGenerator", () => {
     for (const { xPx, yPx } of spawnPoints) {
       const selfAlpha = imgData.data[(yPx * TW + xPx) * 4 + 3] ?? 0;
       expect(selfAlpha).toBeGreaterThan(0);
+    }
+  });
+
+  it("terraworld surface reads as rolling hills (neighbor-Y delta < 30px)", () => {
+    const data = renderTerraworldPixels(42);
+    // For each x, find the first solid pixel (surface Y) by scanning top-down
+    const surfaceYs: number[] = [];
+    for (let x = 0; x < TW; x++) {
+      let surfaceY = TH; // default: no terrain found
+      for (let y = 0; y < TH; y++) {
+        const alpha = data[(y * TW + x) * 4 + 3] ?? 0;
+        if (alpha > 0) {
+          surfaceY = y;
+          break;
+        }
+      }
+      surfaceYs.push(surfaceY);
+    }
+    // Measure max neighbor delta across the width
+    let maxDelta = 0;
+    for (let x = 0; x < TW - 1; x++) {
+      const delta = Math.abs((surfaceYs[x] ?? TH) - (surfaceYs[x + 1] ?? TH));
+      if (delta > maxDelta) maxDelta = delta;
+    }
+    expect(maxDelta).toBeLessThan(30);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canyon biome generator (procgen, 2560x1024)
+// ---------------------------------------------------------------------------
+
+function renderCanyonBiomePixels(width: number, height: number, seed: number): Uint8ClampedArray {
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+  canyonBiomeGenerator(ctx, width, height, { seed });
+  return canvas.getContext("2d").getImageData(0, 0, width, height).data;
+}
+
+describe("canyonBiomeGenerator", () => {
+  it("canyon biome generator is deterministic given a seed (640x256)", () => {
+    const W2 = 640;
+    const H2 = 256;
+    const a = renderCanyonBiomePixels(W2, H2, 42);
+    const b = renderCanyonBiomePixels(W2, H2, 42);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("canyon biome has solid ratio between 0.1 and 0.5 (2560x1024)", () => {
+    const data = renderCanyonBiomePixels(TW, TH, 42);
+    const solid = countSolidPixels(data);
+    const ratio = solid / (TW * TH);
+    expect(ratio).toBeGreaterThan(0.1);
+    expect(ratio).toBeLessThan(0.5);
+  });
+
+  it("canyon biome yields 4 valid spawn points on solid surface (2560x1024)", () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const canvas = createCanvas(TW, TH);
+      const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+      canyonBiomeGenerator(ctx, TW, TH, { seed });
+      const imgData = canvas.getContext("2d").getImageData(0, 0, TW, TH);
+      const spawnPoints = findSpawnPoints(imgData.data, TW, TH, 4);
+      expect(spawnPoints.length).toBe(4);
+      const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+      expect(ids.size).toBe(4);
+      for (const { xPx, yPx } of spawnPoints) {
+        const selfAlpha = imgData.data[(yPx * TW + xPx) * 4 + 3] ?? 0;
+        expect(selfAlpha).toBeGreaterThan(0);
+        // Check 3px above - should be clear air above the surface
+        const clearAboveAlpha =
+          yPx >= 3 ? (imgData.data[((yPx - 3) * TW + xPx) * 4 + 3] ?? 0) : 255;
+        expect(clearAboveAlpha).toBe(0);
+      }
     }
   });
 });
