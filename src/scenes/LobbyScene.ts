@@ -1,5 +1,6 @@
 import * as Phaser from "phaser";
 import { packMask } from "../../shared/maskPack";
+import { dlogUnthrottled } from "../debug/logger";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, lobbyIds } from "../maps/registry";
 import type { NetClient } from "../net/client";
@@ -153,6 +154,13 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   create(): void {
+    dlogUnthrottled("scene", "LobbyScene.create", {
+      hasPendingRoom: this.pendingReconnectedRoom !== null,
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      dlogUnthrottled("scene", "LobbyScene.shutdown", { unsubCount: this.roomUnsubs.length });
+    });
+
     if (this.pendingReconnectedRoom) {
       // Epic 13: BootScene already did the hard work. Slide straight into
       // the room view with the live RoomHandle.
@@ -361,6 +369,10 @@ export class LobbyScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private onRoomJoined(room: RoomHandle): void {
+    dlogUnthrottled("scene", "LobbyScene.onRoomJoined", {
+      roomCode: room.state?.code,
+      phase: room.state?.phase,
+    });
     this.tearDownRoomListeners();
     this.room = room;
     this.currentRoomCode = room.state?.code ?? room.code ?? "";
@@ -415,6 +427,9 @@ export class LobbyScene extends Phaser.Scene {
    * it up via this.room.state.
    */
   private wireRoomListeners(room: RoomHandle): void {
+    dlogUnthrottled("scene", "LobbyScene.wireRoomListeners", {
+      existingUnsubs: this.roomUnsubs.length,
+    });
     let pending = false;
     const rerender = () => {
       if (pending || this.view !== "room") return;
@@ -443,6 +458,7 @@ export class LobbyScene extends Phaser.Scene {
 
     this.roomUnsubs.push(
       room.onMessage("game_started", (msg: GameStartedMessage) => {
+        dlogUnthrottled("scene", "LobbyScene.gameStarted", { mapId: msg.mapId });
         // Host clicked Start. Server includes the authoritative mask +
         // spawn points so every client renders pixel-identical terrain
         // (server's physics and client's visuals match).
@@ -478,6 +494,9 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private tearDownRoomListeners(): void {
+    dlogUnthrottled("scene", "LobbyScene.tearDownRoomListeners", {
+      unsubCount: this.roomUnsubs.length,
+    });
     for (const unsub of this.roomUnsubs) {
       try {
         unsub();
@@ -554,6 +573,10 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private renderRoom(): void {
+    dlogUnthrottled("scene", "LobbyScene.renderRoom", {
+      phase: this.room?.state.phase,
+      playerCount: Object.keys(this.room?.state.players ?? {}).length,
+    });
     this.clearRoom();
     if (!this.room) return;
 

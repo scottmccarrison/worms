@@ -27,6 +27,7 @@
  */
 
 import type { ClientMsg, LobbyState, ServerMsg } from "../../shared/protocol";
+import { dlog } from "../debug/logger";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -149,6 +150,10 @@ export async function joinRoom(
 
   const dispatchStateChange = (): void => {
     if (!currentState) return;
+    dlog("net", "state received", {
+      phase: currentState?.phase,
+      playerCount: currentState ? Object.keys(currentState.players).length : 0,
+    });
     for (const cb of stateSubs) {
       try {
         cb(currentState);
@@ -289,6 +294,7 @@ export async function joinRoom(
     },
     send(msg) {
       if (socket.readyState !== WebSocket.OPEN) return;
+      dlog("net", "send", { type: msg.type });
       socket.send(JSON.stringify(msg));
     },
     leave() {

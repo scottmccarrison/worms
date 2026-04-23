@@ -24,6 +24,13 @@ import {
   packedMaskByteLength,
   unpackMask,
 } from "../../shared/maskPack.js";
+
+const DEBUG = true;
+function dlog(event: string, data?: unknown): void {
+  if (!DEBUG) return;
+  if (data !== undefined) console.log(`[room] ${event}`, data);
+  else console.log(`[room] ${event}`);
+}
 import {
   ALLOWED_COLORS,
   type LobbyPlayer,
@@ -431,6 +438,8 @@ export class Room implements DurableObject {
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
 
+    dlog("webSocketMessage", { type, sid: attachment.sessionId, phase: lobby.phase });
+
     switch (type) {
       case "set_nickname":
         this.onSetNickname(ws, player, msg);
@@ -525,6 +534,11 @@ export class Room implements DurableObject {
     try {
       await this.loadState();
       const lobby = this.ensureLobby();
+      dlog("alarm fire", {
+        phase: lobby.phase,
+        tickInProgress: this.tickInProgress,
+        hasSim: this.sim !== null,
+      });
       const now = Date.now();
 
       // Capture the active worm BEFORE any mutation points in this alarm
@@ -655,6 +669,11 @@ export class Room implements DurableObject {
 
   private onSetReady(player: LobbyPlayer, msg: unknown): void {
     const lobby = this.ensureLobby();
+    dlog("onSetReady", {
+      sid: player.sessionId ?? "?",
+      ready: Boolean((msg as { ready?: unknown }).ready),
+      phase: lobby.phase,
+    });
     if (lobby.phase !== "lobby") return;
     player.ready = Boolean((msg as { ready?: unknown }).ready);
     this.broadcastState();
@@ -686,6 +705,7 @@ export class Room implements DurableObject {
    */
   private async onReturnToLobby(ws: WebSocket, player: LobbyPlayer): Promise<void> {
     const lobby = this.ensureLobby();
+    dlog("onReturnToLobby entry", { sid: player.sessionId ?? "?", phase: lobby.phase });
     if (!player.isHost) {
       this.sendError(ws, "not_host", "Only the host may return to the lobby.");
       return;
@@ -724,6 +744,7 @@ export class Room implements DurableObject {
       if (!p.isHost) p.ready = false;
     }
     await this.persistLobby();
+    dlog("onReturnToLobby exit", { phase: this.ensureLobby().phase });
     this.broadcastState();
   }
 
@@ -1094,6 +1115,11 @@ export class Room implements DurableObject {
 
   private broadcastState(): void {
     const lobby = this.ensureLobby();
+    dlog("broadcastState", {
+      phase: lobby.phase,
+      sockets: this.state.getWebSockets().length,
+      players: Object.keys(lobby.players).length,
+    });
     this.broadcast({ type: "state", state: lobby });
   }
 
