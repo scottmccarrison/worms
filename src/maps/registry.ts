@@ -1,5 +1,6 @@
 import { bridgesGenerator } from "./generators/bridges";
-import { canyonGenerator } from "./generators/canyon";
+import { canyonBiomeGenerator } from "./generators/canyonBiome";
+import { canyonLegacyGenerator } from "./generators/canyonLegacy";
 import { caveGenerator } from "./generators/cave";
 import { flatGenerator } from "./generators/flat";
 import { hillsGenerator } from "./generators/hills";
@@ -83,11 +84,21 @@ export const MAPS: Record<string, RegistryEntry> = {
     config: {
       id: "canyon",
       name: "Canyon",
-      description: "Two cliffs split by an impassable gap. Fire across.",
+      description: "Procedural canyon with randomized cliffs.",
       maxWorms: 4,
       generator: { id: "canyon", seed: 0 },
     },
-    generator: canyonGenerator,
+    generator: canyonBiomeGenerator,
+  },
+  canyon_legacy: {
+    config: {
+      id: "canyon_legacy",
+      name: "Canyon (legacy)",
+      description: "Original handcrafted canyon. Kept for regression testing.",
+      maxWorms: 4,
+      generator: { id: "canyon_legacy", seed: 0 },
+    },
+    generator: canyonLegacyGenerator,
   },
   plateau: {
     config: {

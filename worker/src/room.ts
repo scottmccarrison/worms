@@ -53,6 +53,7 @@ const MAP_WHITELIST = [
   "bridges",
   "spire",
   "canyon",
+  "canyon_legacy",
   "plateau",
   "terraworld",
 ] as const;
@@ -146,7 +147,8 @@ export class Room implements DurableObject {
       code: this.code ?? "",
       phase: "lobby",
       hostSessionId: "",
-      selectedMapId: "flat",
+      // ADR-003: default to the procgen world as the canonical starting biome
+      selectedMapId: "terraworld",
       players: {},
       teamOrder: [],
       currentTeamId: "",
