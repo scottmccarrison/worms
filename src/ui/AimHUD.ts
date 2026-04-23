@@ -27,7 +27,9 @@ export class AimHUD {
     this.isInputAllowed = init.isInputAllowed;
 
     this.gfx = init.scene.add.graphics();
-    this.gfx.setDepth(20).setScrollFactor(0);
+    // No setScrollFactor(0): drawing uses world coords (worm.xPx/yPx),
+    // so the HUD must scroll with the camera like the worm does.
+    this.gfx.setDepth(20);
   }
 
   /** Call each frame from GameScene.update. Clears and redraws. */
