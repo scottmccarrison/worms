@@ -1,6 +1,7 @@
 import * as Phaser from "phaser";
 import { unpackMask } from "../../shared/maskPack";
 import { WORLD_HEIGHT_PX, WORLD_WIDTH_PX } from "../../shared/worldConfig";
+import { dlogUnthrottled } from "../debug/logger";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
 import { InputController } from "../input/InputController";
 import { type GestureInput, createGestureTracker } from "../input/touchGestures";
@@ -184,6 +185,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
+    dlogUnthrottled("scene", "GameScene.create", { isNetworked: this.isNetworked });
     // Build the team roster once; both adapters use the same shape.
     const teamsForAdapter = this.buildAdapterTeams(this.teamsInit);
 
@@ -251,6 +253,7 @@ export class GameScene extends Phaser.Scene {
     // on SHUTDOWN to tear down adapter + unsubs.
     // ------------------------------------------------------------------
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      dlogUnthrottled("scene", "GameScene.shutdown");
       // Tear down room listeners FIRST so a throw in any of the downstream
       // destroys can't leave an active onStateChange listener that keeps
       // firing (and attempting scene.start) after we've moved on.
@@ -662,6 +665,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleTurnChanged(teamId: string, _wormId: string): void {
+    dlogUnthrottled("scene", "GameScene.handleTurnChanged", { teamId, wormId: _wormId });
     if (!teamId) return;
     const team = this.sim.teams.find((t) => t.id === teamId);
     if (team) this.turnHUD?.showTurnBanner(team.name, team.color);
@@ -823,8 +827,10 @@ export class GameScene extends Phaser.Scene {
     let phaseSub: (() => void) | null = null;
     phaseSub = this.room.onStateChange((state) => {
       if (state.phase !== "lobby") return;
+      dlogUnthrottled("scene", "GameScene.phaseSub fired", { phase: state.phase });
       phaseSub?.();
       phaseSub = null;
+      dlogUnthrottled("scene", "GameScene -> LobbyScene transition", { reason: "phase=lobby" });
       this.scene.start("LobbyScene", { netClient: this.netClient, room: this.room });
     });
     this.roomUnsubs.push(() => phaseSub?.());
