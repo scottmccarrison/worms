@@ -397,6 +397,7 @@ export class Simulation {
     for (const proj of this.projectiles) {
       if (proj.detonated) continue;
       proj.tick(dtMs);
+      proj.tickTunnel(dtMs, this.terrain);
       // Wind: apply horizontal force per tick to in-flight projectiles.
       // WIND_FORCE is Newtons per unit wind; tunable in src/tuning.ts.
       if (this.wind !== 0) {

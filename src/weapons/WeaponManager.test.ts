@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Team } from "../worm/Team";
 import { WeaponManager } from "./WeaponManager";
-import { defaultAmmoForMatch } from "./registry";
+import { allWeapons, defaultAmmoForMatch } from "./registry";
 
 // Minimal Team stub
 function makeTeam(id: string): Team {
@@ -78,5 +78,30 @@ describe("WeaponManager", () => {
     const result = manager.selectByKey(3);
     expect(result).toBe(true);
     expect(manager.getSelected().id).toBe("handgrenade");
+  });
+});
+
+describe("weapon registry", () => {
+  it("has exactly 7 weapons registered", () => {
+    expect(allWeapons().length).toBe(7);
+  });
+
+  it("all selectKeys are unique", () => {
+    const keys = allWeapons().map((w) => w.selectKey);
+    const unique = new Set(keys);
+    expect(unique.size).toBe(keys.length);
+  });
+
+  it("selectKeys cover 1-7 with no gaps", () => {
+    const keys = allWeapons()
+      .map((w) => w.selectKey)
+      .sort((a, b) => a - b);
+    expect(keys).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("all weapon ids are unique", () => {
+    const ids = allWeapons().map((w) => w.id);
+    const unique = new Set(ids);
+    expect(unique.size).toBe(ids.length);
   });
 });

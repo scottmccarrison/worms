@@ -17,6 +17,7 @@ import { Circle } from "planck";
 import type { Body, World } from "planck";
 import { toMeters, toPixels } from "../physics/scale.js";
 import type { WeaponConfig } from "../weapons/types.js";
+import type { Terrain } from "./terrain.js";
 
 export interface ProjectileInit {
   id: string;
@@ -51,6 +52,8 @@ export class Projectile {
   readonly config: WeaponConfig;
   fuseRemainingMs: number | null;
   detonated = false;
+  /** Accumulator for tunnel carving cadence. Only used when config.tunnel is set. */
+  msSinceLastCut = 0;
 
   constructor(init: ProjectileInit) {
     this.id = init.id;
@@ -91,6 +94,22 @@ export class Projectile {
   shouldDetonate(): boolean {
     if (this.detonated) return false;
     return this.fuseRemainingMs === 0;
+  }
+
+  /**
+   * Tick tunnel carving. Accumulates dtMs and cuts terrain at the configured
+   * cadence. No-op if the weapon has no tunnel config.
+   */
+  tickTunnel(dtMs: number, terrain: Terrain): void {
+    if (this.detonated) return;
+    const tunnel = this.config.tunnel;
+    if (!tunnel) return;
+    this.msSinceLastCut += dtMs;
+    if (this.msSinceLastCut >= tunnel.cutIntervalMs) {
+      const pos = this.body.getPosition();
+      terrain.cutCircle(toPixels(pos.x), toPixels(pos.y), tunnel.cutRadiusPx);
+      this.msSinceLastCut = 0;
+    }
   }
 
   /** Mark for destruction. The Simulation removes the body. */

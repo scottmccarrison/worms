@@ -66,17 +66,23 @@ export function fire(ctx: FireContext): FireResult {
 function fireHitscan(ctx: FireContext): FireResult {
   const { world, terrain, worms, firer, weapon, aimRadians, shotsFiredBefore } = ctx;
   const shotsAllowed = weapon.shotsPerActivation ?? 1;
+
+  // Apply per-shot angle jitter if weapon has hitscanSpreadRad set (e.g. Minigun).
+  const spread = weapon.hitscanSpreadRad ?? 0;
+  const jitter = spread > 0 ? (Math.random() * 2 - 1) * spread : 0;
+  const shotAngle = aimRadians + jitter;
+
   const wormRadiusPx = DEFAULT_WORM_RADIUS_PX;
   const xPx = toPixels(firer.body.getPosition().x);
   const yPx = toPixels(firer.body.getPosition().y);
   const originPx = {
-    x: xPx + Math.cos(aimRadians) * firer.facing * wormRadiusPx * 1.5,
-    y: yPx + Math.sin(aimRadians) * wormRadiusPx * 1.5,
+    x: xPx + Math.cos(shotAngle) * firer.facing * wormRadiusPx * 1.5,
+    y: yPx + Math.sin(shotAngle) * wormRadiusPx * 1.5,
   };
   const rayLengthPx = 2000;
   const endPx = {
-    x: originPx.x + Math.cos(aimRadians) * firer.facing * rayLengthPx,
-    y: originPx.y + Math.sin(aimRadians) * rayLengthPx,
+    x: originPx.x + Math.cos(shotAngle) * firer.facing * rayLengthPx,
+    y: originPx.y + Math.sin(shotAngle) * rayLengthPx,
   };
 
   const explodeResults: ExplodeResult[] = [];
@@ -130,7 +136,7 @@ function fireProjectile(ctx: FireContext): FireResult {
       ownerId: firer.id,
       originPx,
       velocityMps,
-      fuseMs: null,
+      fuseMs: weapon.fuseMs ?? null, // null = contact-only; set for timed projectiles like Drill
     },
   };
 }
