@@ -79,6 +79,16 @@ interface Tuning {
     /** Default map id used on first load. Must be a valid registry key. */
     defaultId: string;
   };
+  caves: {
+    /** Cell size in pixels; larger = broader chambers, cheaper CA. */
+    cellSizePx: number;
+    /** Initial probability a cell is solid before smoothing. 0.45 gives balanced cave density. */
+    initialFillRatio: number;
+    /** Cellular automata smoothing passes. 4 is the classic Terraria-style value. */
+    iterations: number;
+    /** Pixels of solid crust preserved below each column's surface. Prevents skylights. */
+    surfaceBufferPx: number;
+  };
   wind: {
     forceNewtonsPerUnit: number;
   };
@@ -140,6 +150,12 @@ export const tuning: Tuning = {
   },
   maps: {
     defaultId: "terraworld", // registry lookup; falls back to firstId() if invalid
+  },
+  caves: {
+    cellSizePx: 8,
+    initialFillRatio: 0.45,
+    iterations: 4,
+    surfaceBufferPx: 80,
   },
   wind: { forceNewtonsPerUnit: 2 },
 };

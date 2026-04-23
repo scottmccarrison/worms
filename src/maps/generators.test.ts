@@ -1,5 +1,6 @@
 import { createCanvas } from "canvas";
 import { describe, expect, it } from "vitest";
+import { tuning } from "../tuning";
 import { findSpawnPoints } from "../worm/spawnPoints";
 import { bridgesGenerator } from "./generators/bridges";
 import { canyonBiomeGenerator } from "./generators/canyonBiome";
@@ -334,11 +335,11 @@ describe("terraworldGenerator", () => {
     expect(Array.from(a)).toEqual(Array.from(b));
   });
 
-  it("terraworld has solid ratio between 20% and 60%", () => {
+  it("terraworld has solid ratio between 8% and 60%", () => {
     const data = renderTerraworldPixels(42);
     const solid = countSolidPixels(data);
     const ratio = solid / (TW * TH);
-    expect(ratio).toBeGreaterThan(0.2);
+    expect(ratio).toBeGreaterThan(0.08);
     expect(ratio).toBeLessThan(0.6);
   });
 
@@ -427,6 +428,97 @@ describe("canyonBiomeGenerator", () => {
         const clearAboveAlpha =
           yPx >= 3 ? (imgData.data[((yPx - 3) * TW + xPx) * 4 + 3] ?? 0) : 255;
         expect(clearAboveAlpha).toBe(0);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Terraworld with caves (Phase 2)
+// ---------------------------------------------------------------------------
+
+function renderTerraworldSmall(seed: number): Uint8ClampedArray {
+  const W2 = 640;
+  const H2 = 256;
+  const canvas = createCanvas(W2, H2);
+  const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+  terraworldGenerator(ctx, W2, H2, { seed });
+  return canvas.getContext("2d").getImageData(0, 0, W2, H2).data;
+}
+
+describe("terraworld with caves", () => {
+  it("is deterministic with caves (640x256)", () => {
+    const a = renderTerraworldSmall(42);
+    const b = renderTerraworldSmall(42);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+
+  it("caves reduce solid ratio (2560x1024, seed 42)", { timeout: 15000 }, () => {
+    const data = renderTerraworldPixels(42);
+    const solid = countSolidPixels(data);
+    const ratio = solid / (TW * TH);
+    expect(ratio).toBeGreaterThan(0.05);
+    expect(ratio).toBeLessThan(0.55);
+  });
+
+  it("surface crust is preserved (2560x1024, seed 42)", { timeout: 15000 }, () => {
+    const data = renderTerraworldPixels(42);
+    // Find surface Y per column
+    const surfaceYs: number[] = [];
+    for (let x = 0; x < TW; x++) {
+      let surfY = TH;
+      for (let y = 0; y < TH; y++) {
+        if ((data[(y * TW + x) * 4 + 3] ?? 0) > 0) {
+          surfY = y;
+          break;
+        }
+      }
+      surfaceYs.push(surfY);
+    }
+    // Check 60px of crust below surface (< surfaceBufferPx=80, giving slack)
+    const crustDepth = 60;
+    let failX = -1;
+    let failSurfY = -1;
+    let failOffset = -1;
+    outer: for (let x = 0; x < TW; x += 4) {
+      const surfY = surfaceYs[x] ?? TH;
+      if (surfY >= TH) continue; // no terrain in this column
+      for (let offset = 1; offset <= crustDepth; offset++) {
+        const py = surfY + offset;
+        if (py >= TH) break;
+        const alpha = data[(py * TW + x) * 4 + 3] ?? 0;
+        if (alpha === 0) {
+          failX = x;
+          failSurfY = surfY;
+          failOffset = offset;
+          break outer;
+        }
+      }
+    }
+    if (failX !== -1) {
+      throw new Error(
+        `Crust punched through at x=${failX}, surfaceY=${failSurfY}, offset=${failOffset} (pixel y=${failSurfY + failOffset}) - tuning.caves.surfaceBufferPx=${tuning.caves.surfaceBufferPx}`,
+      );
+    }
+  });
+
+  it("spawn points remain valid across 5 seeds", { timeout: 15000 }, () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const canvas = createCanvas(TW, TH);
+      const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+      terraworldGenerator(ctx, TW, TH, { seed });
+      const imgData = canvas.getContext("2d").getImageData(0, 0, TW, TH);
+      const spawnPoints = findSpawnPoints(imgData.data, TW, TH, 4);
+      expect(spawnPoints.length).toBe(4);
+      const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
+      expect(ids.size).toBe(4);
+      for (const { xPx, yPx } of spawnPoints) {
+        // Spawn point itself is on opaque pixel
+        const selfAlpha = imgData.data[(yPx * TW + xPx) * 4 + 3] ?? 0;
+        expect(selfAlpha).toBeGreaterThan(0);
+        // Air above (findSpawnPoints already guarantees this via skipCeiling logic, but double-check)
+        const aboveAlpha = yPx >= 1 ? (imgData.data[((yPx - 1) * TW + xPx) * 4 + 3] ?? 0) : 255;
+        expect(aboveAlpha).toBe(0);
       }
     }
   });
