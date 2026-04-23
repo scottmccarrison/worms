@@ -2,6 +2,7 @@ import { findSpawnPoints } from "../worm/spawnPoints";
 import type { SurfacePoint } from "../worm/spawnPoints";
 import { getById } from "./registry";
 import type { LoadedMap } from "./types";
+import { xorshift } from "./xorshift";
 
 export function loadMap(
   id: string,
@@ -34,7 +35,13 @@ export function loadMap(
     spawnPoints = entry.config.spawnPoints;
   } else {
     const imgData = ctx.getImageData(0, 0, widthPx, heightPx);
-    spawnPoints = findSpawnPoints(imgData.data, widthPx, heightPx, entry.config.maxWorms);
+    // Derive a separate rng for spawn selection. XOR the seed with a constant
+    // so the spawn stream doesn't collide with the generator's stream (which
+    // may or may not share the same seed).
+    const spawnRng = xorshift(seed ^ 0x5a5a5a5a);
+    spawnPoints = findSpawnPoints(imgData.data, widthPx, heightPx, entry.config.maxWorms, {
+      rng: spawnRng,
+    });
   }
 
   return { config: entry.config, mask: canvas, spawnPoints };

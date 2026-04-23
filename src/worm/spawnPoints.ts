@@ -3,47 +3,77 @@ export interface SurfacePoint {
   yPx: number; // top of terrain at this X (pixel coord)
 }
 
+export interface FindSpawnPointsOpts {
+  rng?: () => number; // default: Math.random
+  minSpacingPx?: number; // default: 200
+  edgeMarginPx?: number; // default: 60
+  alphaSolid?: number; // default: 255
+}
+
 /**
- * Find N spawn points evenly distributed across the terrain's surface.
- * Scans each selected column top-down for the first opaque pixel.
- * Returns however many points were found (may be fewer than count if some slots had no terrain).
+ * Find N spawn points on the terrain surface using a random + minimum-spacing
+ * algorithm. Scans every column for surface candidates, shuffles via the
+ * provided rng (seeded = deterministic), then greedy-picks with minimum
+ * spacing. If not enough candidates satisfy the spacing, it retries at
+ * progressively relaxed spacings until fallback (spacing 0).
+ *
+ * Returns however many points were found (may be fewer than count if the
+ * terrain is very sparse or narrow).
  */
 export function findSpawnPoints(
   data: Uint8ClampedArray,
   widthPx: number,
   heightPx: number,
   count: number,
-  alphaSolid = 255,
+  opts?: FindSpawnPointsOpts,
 ): SurfacePoint[] {
   if (count <= 0 || widthPx <= 0 || heightPx <= 0) return [];
 
-  const results: SurfacePoint[] = [];
+  const rng = opts?.rng ?? Math.random;
+  const minSpacingPx = opts?.minSpacingPx ?? 200;
+  const edgeMarginPx = opts?.edgeMarginPx ?? 60;
+  const alphaSolid = opts?.alphaSolid ?? 255;
 
-  // Divide width into `count` equal slots; scan near the center of each slot
-  for (let slot = 0; slot < count; slot++) {
-    const slotStart = Math.floor((slot * widthPx) / count);
-    const slotEnd = Math.floor(((slot + 1) * widthPx) / count);
-    const slotCenter = Math.floor((slotStart + slotEnd) / 2);
-
-    // Try columns near the center of this slot
-    const columnsToTry = [slotCenter, slotCenter - 1, slotCenter + 1, slotStart, slotEnd - 1];
-
-    let found: SurfacePoint | null = null;
-    for (const col of columnsToTry) {
-      if (col < 0 || col >= widthPx) continue;
-      const pt = scanColumnTopDown(data, widthPx, heightPx, col, alphaSolid);
-      if (pt !== null) {
-        found = pt;
-        break;
-      }
-    }
-
-    if (found !== null) {
-      results.push(found);
+  // Collect all valid surface candidates (skip edge margin columns)
+  const candidates: SurfacePoint[] = [];
+  for (let col = edgeMarginPx; col < widthPx - edgeMarginPx; col++) {
+    const pt = scanColumnTopDown(data, widthPx, heightPx, col, alphaSolid);
+    if (pt !== null) {
+      candidates.push(pt);
     }
   }
 
-  return results; // May return fewer than `count` if some slots had no terrain
+  if (candidates.length === 0) return [];
+
+  // Fisher-Yates shuffle
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = candidates[i] as SurfacePoint;
+    (candidates[i] as SurfacePoint) = candidates[j] as SurfacePoint;
+    (candidates[j] as SurfacePoint) = tmp;
+  }
+
+  // Greedy-pick with spacing relaxation
+  const spacingFactors = [1.0, 0.8, 0.6, 0.4, 0.2, 0];
+  for (const factor of spacingFactors) {
+    const currentSpacing = minSpacingPx * factor;
+    const picked: SurfacePoint[] = [];
+
+    for (const candidate of candidates) {
+      if (picked.length >= count) break;
+      const tooClose = picked.some((p) => Math.abs(p.xPx - candidate.xPx) < currentSpacing);
+      if (!tooClose) {
+        picked.push(candidate);
+      }
+    }
+
+    if (picked.length >= count) {
+      return picked.slice(0, count);
+    }
+  }
+
+  // Return whatever we found at spacing 0 (all candidates up to count)
+  return candidates.slice(0, count);
 }
 
 function scanColumnTopDown(
