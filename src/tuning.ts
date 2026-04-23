@@ -92,6 +92,13 @@ interface Tuning {
   wind: {
     forceNewtonsPerUnit: number;
   };
+  camera: {
+    turnZoomOutMs: number;
+    turnHoldMinMs: number;
+    turnHoldMaxMs: number;
+    turnZoomInMs: number;
+    networkStabilityFrames: number;
+  };
 }
 
 export const tuning: Tuning = {
@@ -165,4 +172,11 @@ export const tuning: Tuning = {
     surfaceBufferPx: 80,
   },
   wind: { forceNewtonsPerUnit: 2 },
+  camera: {
+    turnZoomOutMs: 800,
+    turnHoldMinMs: 700,
+    turnHoldMaxMs: 3000,
+    turnZoomInMs: 500,
+    networkStabilityFrames: 3,
+  },
 };
