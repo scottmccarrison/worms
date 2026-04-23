@@ -908,9 +908,13 @@ export class GameScene extends Phaser.Scene {
       const worm = this.getActiveWormAdapter();
       const myTurn = this.isInputAllowed();
       const utilityActive = !!worm && (worm.isRoped() || worm.isJetPacking());
+      // worldX/worldY are camera-adjusted pointer coords. We use these
+      // throughout the gesture path so downXPx/downYPx are in the same
+      // coord system as worm.xPx/worm.yPx (world) - the on-worm hit test
+      // and drag-to-aim math depend on both being in the same system.
       const input: GestureInput = {
-        downXPx: p.x,
-        downYPx: p.y,
+        downXPx: p.worldX,
+        downYPx: p.worldY,
         nowMs: Date.now(),
         screenWidth: this.scale.width,
         wormXPx: worm?.xPx ?? null,
@@ -948,9 +952,10 @@ export class GameScene extends Phaser.Scene {
       if (!worm || !this.isInputAllowed()) return;
       // Existing drag-to-aim math: vector from pointer to worm sets angle,
       // distance (capped) sets power. Facing flips when dragging across the
-      // worm's center.
-      const dx = worm.xPx - p.x;
-      const dy = worm.yPx - p.y;
+      // worm's center. Pointer coords must be worldX/worldY so they share
+      // the same space as worm.xPx/worm.yPx once the camera has scrolled.
+      const dx = worm.xPx - p.worldX;
+      const dy = worm.yPx - p.worldY;
       const mag = Math.hypot(dx, dy);
       const cap = tuning.weapons.dragMaxLengthPx;
       const power = Math.min(1, mag / cap);
@@ -980,7 +985,9 @@ export class GameScene extends Phaser.Scene {
           // Fire-on-release, gated by the dead-zone so a stray tap doesn't
           // fire a zero-power shot.
           if (!aimStart) continue;
-          const dragDist = Math.hypot(p.x - aimStart.x, p.y - aimStart.y);
+          // aimStart is in world coords (see pointerdown path), so compare
+          // against worldX/worldY for a consistent drag distance check.
+          const dragDist = Math.hypot(p.worldX - aimStart.x, p.worldY - aimStart.y);
           if (dragDist < tuning.weapons.dragDeadZonePx) continue;
           this.sim.fire();
         } else if (o.kind === "walk_release") {
