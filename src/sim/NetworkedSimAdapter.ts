@@ -15,6 +15,7 @@
  * Calls log a warning and drop.
  */
 
+import { dlogUnthrottled } from "../debug/logger";
 import type {
   ClientMsg,
   DamageEventMessage,
@@ -177,6 +178,7 @@ export class NetworkedSimAdapter implements SimAdapter {
     }
 
     this.wireRoom();
+    dlogUnthrottled("sim", "NetworkedSimAdapter.created");
   }
 
   // -------------------------------------------------------------------------
@@ -302,6 +304,9 @@ export class NetworkedSimAdapter implements SimAdapter {
   }
 
   destroy(): void {
+    dlogUnthrottled("sim", "NetworkedSimAdapter.destroy", {
+      subs: this.turnChangedSubs.size + this.eventSubs.size + this.gameOverSubs.size,
+    });
     for (const unsub of this.unsubs) {
       try {
         unsub();
@@ -451,6 +456,10 @@ export class NetworkedSimAdapter implements SimAdapter {
       this.stableFiredThisTurn = false;
       this.stableTurnTeamId = state.activeTeamId;
       this.stableTurnWormId = state.activeWormId;
+      dlogUnthrottled("sim", "NetworkedSimAdapter.turn_changed", {
+        teamId: state.activeTeamId,
+        wormId: state.activeWormId,
+      });
       for (const sub of this.turnChangedSubs) sub(state.activeTeamId, state.activeWormId);
     }
 
