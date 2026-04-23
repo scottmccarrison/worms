@@ -98,6 +98,9 @@ interface Tuning {
     turnHoldMaxMs: number;
     turnZoomInMs: number;
     networkStabilityFrames: number;
+    wormLerp: number;
+    projectileLerp: number;
+    postImpactLingerMs: number;
   };
 }
 
@@ -178,5 +181,8 @@ export const tuning: Tuning = {
     turnHoldMaxMs: 3000,
     turnZoomInMs: 500,
     networkStabilityFrames: 3,
+    wormLerp: 0.08,
+    projectileLerp: 0.05,
+    postImpactLingerMs: 1200,
   },
 };
