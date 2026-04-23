@@ -294,26 +294,30 @@ export class Worm {
     const r = tuning.worm.radiusPx;
     const color = this.team.color;
 
+    // Position the Graphics transform at the worm's world pos so
+    // camera.startFollow(graphics) tracks the worm. Shapes are drawn
+    // origin-relative below.
+    this.graphics.setPosition(xPx, yPx);
     this.graphics.clear();
 
     if (this.isActivePlayer) {
       this.graphics.lineStyle(3, 0xffff00, 1);
-      this.graphics.strokeCircle(xPx, yPx, r + 4);
+      this.graphics.strokeCircle(0, 0, r + 4);
     }
 
     this.graphics.fillStyle(color, 1);
-    this.graphics.fillCircle(xPx, yPx, r);
+    this.graphics.fillCircle(0, 0, r);
 
     this.graphics.lineStyle(1.5, 0xffffff, 0.6);
-    this.graphics.strokeCircle(xPx, yPx, r);
+    this.graphics.strokeCircle(0, 0, r);
 
     if (this.isActivePlayer) {
       const aimLen = r * 2.2;
-      const ax = xPx + Math.cos(this.aimAngle) * this.facing * aimLen;
-      const ay = yPx + Math.sin(this.aimAngle) * aimLen;
+      const ax = Math.cos(this.aimAngle) * this.facing * aimLen;
+      const ay = Math.sin(this.aimAngle) * aimLen;
       this.graphics.lineStyle(2, 0xffffff, 0.8);
       this.graphics.beginPath();
-      this.graphics.moveTo(xPx, yPx);
+      this.graphics.moveTo(0, 0);
       this.graphics.lineTo(ax, ay);
       this.graphics.strokePath();
     }

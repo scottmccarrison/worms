@@ -62,6 +62,10 @@ export class WormSprite {
     const r = tuning.worm.radiusPx;
     const color = snapshot.team.color;
 
+    // Position the Graphics transform at the worm's world pos so
+    // camera.startFollow(graphics) tracks the worm. Shapes are drawn
+    // origin-relative below.
+    this.graphics.setPosition(snapshot.xPx, snapshot.yPx);
     this.graphics.clear();
 
     if (!snapshot.isAlive) {
@@ -74,21 +78,21 @@ export class WormSprite {
 
     if (this.isActive && snapshot.isAlive) {
       this.graphics.lineStyle(3, 0xffff00, 1);
-      this.graphics.strokeCircle(snapshot.xPx, snapshot.yPx, r + 4);
+      this.graphics.strokeCircle(0, 0, r + 4);
     }
 
     this.graphics.fillStyle(color, 1);
-    this.graphics.fillCircle(snapshot.xPx, snapshot.yPx, r);
+    this.graphics.fillCircle(0, 0, r);
     this.graphics.lineStyle(1.5, 0xffffff, 0.6);
-    this.graphics.strokeCircle(snapshot.xPx, snapshot.yPx, r);
+    this.graphics.strokeCircle(0, 0, r);
 
     if (this.isActive && snapshot.isAlive) {
       const aimLen = r * 2.2;
-      const ax = snapshot.xPx + Math.cos(snapshot.aimAngle) * snapshot.facing * aimLen;
-      const ay = snapshot.yPx + Math.sin(snapshot.aimAngle) * aimLen;
+      const ax = Math.cos(snapshot.aimAngle) * snapshot.facing * aimLen;
+      const ay = Math.sin(snapshot.aimAngle) * aimLen;
       this.graphics.lineStyle(2, 0xffffff, 0.8);
       this.graphics.beginPath();
-      this.graphics.moveTo(snapshot.xPx, snapshot.yPx);
+      this.graphics.moveTo(0, 0);
       this.graphics.lineTo(ax, ay);
       this.graphics.strokePath();
     }
