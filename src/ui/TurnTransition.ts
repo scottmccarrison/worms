@@ -39,6 +39,15 @@ export class TurnTransition {
   private stableObserved = false;
   private minHoldTimer: ReturnType<typeof setTimeout> | null = null;
   private maxHoldTimer: ReturnType<typeof setTimeout> | null = null;
+  // Monotonic id for the current transition. Incremented on every begin()
+  // and cancel(). Tween callbacks and delayedCalls capture this value in
+  // closure and compare before acting, so a stale callback from a
+  // superseded transition can't flip state on a live one.
+  private generation = 0;
+  // Handle for the delayedCall scheduled in the null-target path of
+  // enterZoomingIn. Must be cleared on cancel(); otherwise a late fire
+  // could drop the live transition back to IDLE.
+  private zoomInDelayed: Phaser.Time.TimerEvent | null = null;
 
   constructor(init: TurnTransitionInit) {
     this.scene = init.scene;
@@ -53,6 +62,8 @@ export class TurnTransition {
   /** Kick off a new transition. Cancels any in-flight animation. */
   begin(_teamId: string, wormId: string): void {
     this.cancel();
+    this.generation += 1;
+    const gen = this.generation;
     this.pendingWormId = wormId;
     this.stableObserved = false;
     this.setState("ZOOMING_OUT");
@@ -73,7 +84,7 @@ export class TurnTransition {
       "Sine.easeInOut",
       true,
       (_c: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-        if (progress >= 1 && this.state === "ZOOMING_OUT") {
+        if (progress >= 1 && this.state === "ZOOMING_OUT" && gen === this.generation) {
           this.enterHolding();
         }
       },
@@ -83,6 +94,9 @@ export class TurnTransition {
   /** Cancel any in-flight animation and return to IDLE. */
   cancel(): void {
     if (this.state === "IDLE") return;
+    // Bump generation so any pending tween / delayedCall callback is
+    // invalidated and becomes a no-op when it eventually fires.
+    this.generation += 1;
     const camera = this.scene.cameras.main;
     // Stop in-flight tweens by issuing an instantaneous pan/zoom at current state.
     camera.pan(
@@ -95,8 +109,10 @@ export class TurnTransition {
     camera.zoomTo(camera.zoom, 0, "Linear", true);
     if (this.minHoldTimer) clearTimeout(this.minHoldTimer);
     if (this.maxHoldTimer) clearTimeout(this.maxHoldTimer);
+    if (this.zoomInDelayed) this.zoomInDelayed.remove(false);
     this.minHoldTimer = null;
     this.maxHoldTimer = null;
+    this.zoomInDelayed = null;
     this.pendingWormId = null;
     this.stableObserved = false;
     this.setState("IDLE");
@@ -158,6 +174,7 @@ export class TurnTransition {
     if (this.maxHoldTimer) clearTimeout(this.maxHoldTimer);
     this.maxHoldTimer = null;
     this.setState("ZOOMING_IN");
+    const gen = this.generation;
 
     const camera = this.scene.cameras.main;
     const target = this.pendingWormId ? this.resolveFollowTarget(this.pendingWormId) : null;
@@ -165,7 +182,10 @@ export class TurnTransition {
     if (!target) {
       // No target - fail gracefully back to idle without a zoom-in.
       camera.zoomTo(1, tuning.camera.turnZoomInMs, "Sine.easeInOut", true);
-      this.scene.time.delayedCall(tuning.camera.turnZoomInMs, () => this.finishToIdle(null));
+      this.zoomInDelayed = this.scene.time.delayedCall(tuning.camera.turnZoomInMs, () => {
+        this.zoomInDelayed = null;
+        if (gen === this.generation) this.finishToIdle(null);
+      });
       return;
     }
 
@@ -179,7 +199,7 @@ export class TurnTransition {
       "Sine.easeInOut",
       true,
       (_c: Phaser.Cameras.Scene2D.Camera, progress: number) => {
-        if (progress >= 1 && this.state === "ZOOMING_IN") {
+        if (progress >= 1 && this.state === "ZOOMING_IN" && gen === this.generation) {
           this.finishToIdle(target);
         }
       },

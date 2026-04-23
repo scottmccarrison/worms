@@ -464,7 +464,9 @@ export class NetworkedSimAdapter implements SimAdapter {
       this.framesSinceTurnChange >= tuning.camera.networkStabilityFrames
     ) {
       this.stableFiredThisTurn = true;
-      for (const sub of this.stableSubs) sub();
+      // Iterate a copy so a subscriber that unsubs itself mid-fire
+      // doesn't cause us to skip the next entry.
+      for (const sub of [...this.stableSubs]) sub();
     }
 
     this.lastTurnEndsAt = state.turnEndsAt;
