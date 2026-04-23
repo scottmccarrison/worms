@@ -496,6 +496,174 @@ describe("Simulation - serialize/restore", () => {
   });
 });
 
+describe("Simulation - drill worm contact", () => {
+  it("drill fired directly at a worm detonates quickly and deals damage", () => {
+    // Place red worm and blue worm close together so drill hits the target
+    // worm before its 3500ms fuse expires.
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 200, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          // Place Blue-1 directly in front of the drill's trajectory:
+          // Red-1 faces right (facing = 1), aim angle = 0 (horizontal),
+          // so fire to the right. 100px gap is close enough to collide
+          // well within the 3500ms fuse.
+          spawns: [{ xPx: 350, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 42,
+    });
+
+    // Settle physics.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+
+    const blue = sim.getWorm("Blue-1");
+    expect(blue).toBeDefined();
+    const hpBefore = blue?.health ?? 100;
+
+    // Aim right, full power, select drill.
+    sim.applyAimAngle("Red-1", 0);
+    sim.applyAimPower("Red-1", 1.0);
+    sim.applySelectWeapon("Red-1", "drill");
+    sim.applyFire("Red-1");
+
+    // Tick until we either see damage or run out of ticks (well under fuse limit).
+    // 70 ticks * 50ms = 3500ms = exactly the fuse - the drill must hit the nearby
+    // worm long before this.
+    const { events } = tickUntil(sim, (evs) => evs.some((e) => e.type === "damage_event"), 70);
+
+    const dmgEvent = events.find((e) => e.type === "damage_event");
+    expect(dmgEvent).toBeDefined();
+    // Blue worm should have taken damage.
+    expect(blue?.health).toBeLessThan(hpBefore);
+  });
+});
+
+describe("Simulation - Holy Grenade ammo enforcement", () => {
+  it("Holy Grenade is rejected after ammo is exhausted", () => {
+    // holygrenade has ammoPerMatch: 2, so after 2 fires the 3rd should return null.
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 300, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          spawns: [{ xPx: 900, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 99,
+    });
+
+    for (let i = 0; i < 10; i++) sim.tick(50);
+
+    sim.applyAimAngle("Red-1", -Math.PI / 3); // aim up-right so projectile doesn't hit the floor immediately
+    sim.applyAimPower("Red-1", 0.3);
+    sim.applySelectWeapon("Red-1", "holygrenade");
+
+    // First fire: should succeed.
+    const r1 = sim.applyFire("Red-1");
+    expect(r1).not.toBeNull();
+    expect(sim.getTeamAmmo("red", "holygrenade")).toBe(1);
+
+    // Second fire: should succeed.
+    const r2 = sim.applyFire("Red-1");
+    expect(r2).not.toBeNull();
+    expect(sim.getTeamAmmo("red", "holygrenade")).toBe(0);
+
+    // Third fire: should be rejected (returns null).
+    const r3 = sim.applyFire("Red-1");
+    expect(r3).toBeNull();
+    expect(sim.getTeamAmmo("red", "holygrenade")).toBe(0);
+  });
+
+  it("bazooka ammo is infinite and never blocked", () => {
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 300, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          spawns: [{ xPx: 900, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 1,
+    });
+
+    for (let i = 0; i < 10; i++) sim.tick(50);
+
+    sim.applyAimAngle("Red-1", -Math.PI / 3);
+    sim.applyAimPower("Red-1", 0.3);
+    sim.applySelectWeapon("Red-1", "bazooka");
+
+    // Fire several times - all should succeed.
+    // (MAX_PROJECTILES cap applies, but bazooka ammo is -1 / infinite.)
+    expect(sim.applyFire("Red-1")).not.toBeNull();
+    expect(sim.getTeamAmmo("red", "bazooka")).toBe(-1);
+  });
+
+  it("resetTeamAmmo restores Holy Grenade to full after depletion", () => {
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 300, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          spawns: [{ xPx: 900, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 2,
+    });
+
+    for (let i = 0; i < 10; i++) sim.tick(50);
+    sim.applyAimAngle("Red-1", -Math.PI / 3);
+    sim.applyAimPower("Red-1", 0.3);
+    sim.applySelectWeapon("Red-1", "holygrenade");
+
+    // Exhaust ammo.
+    sim.applyFire("Red-1");
+    sim.applyFire("Red-1");
+    expect(sim.getTeamAmmo("red", "holygrenade")).toBe(0);
+
+    // Reset (match restart).
+    sim.resetTeamAmmo();
+    expect(sim.getTeamAmmo("red", "holygrenade")).toBe(2);
+
+    // Can fire again.
+    const r = sim.applyFire("Red-1");
+    expect(r).not.toBeNull();
+  });
+});
+
 describe("Simulation - aim input", () => {
   it("applyAimAngle clamps to [-PI/2, PI/2]", () => {
     const sim = makeSim(twoTeams());

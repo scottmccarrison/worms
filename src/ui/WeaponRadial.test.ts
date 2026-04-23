@@ -373,6 +373,84 @@ describe("WeaponRadial", () => {
     expect(events).toContain("pointerup");
   });
 
+  it("quick click (no drag) leaves radial OPEN in sticky mode instead of collapsing", () => {
+    const { scene, sim, radial } = makeRadial();
+    const trigX = 1200;
+    const trigY = 640;
+
+    // Open radial with a pointerdown on the trigger.
+    const downPtr = { x: trigX, y: trigY, id: 3 } as Phaser.Input.Pointer;
+    (radial as unknown as { onTriggerDown: (p: Phaser.Input.Pointer) => void }).onTriggerDown(
+      downPtr,
+    );
+
+    // Immediately release at the trigger position (no drag, no highlight).
+    // Simulate a fast release by setting pointerDownAt to just now
+    // (the threshold check is < 200ms, so releasing immediately qualifies).
+    const upPtr = { x: trigX, y: trigY, id: 3 } as Phaser.Input.Pointer;
+    scene._fireInput("pointerup", upPtr);
+
+    // Radial should still be OPEN (sticky mode) - hitsRadial returns true.
+    expect(radial.hitsRadial(downPtr)).toBe(true);
+    // selectWeapon must NOT have been called.
+    expect(sim.selectWeapon).not.toHaveBeenCalled();
+  });
+
+  it("in sticky mode, second pointerdown on an icon commits selection and closes", () => {
+    const { scene, sim, radial } = makeRadial();
+    const trigX = 1200;
+    const trigY = 640;
+
+    // Open + quick-release to enter sticky mode.
+    const downPtr = { x: trigX, y: trigY, id: 4 } as Phaser.Input.Pointer;
+    (radial as unknown as { onTriggerDown: (p: Phaser.Input.Pointer) => void }).onTriggerDown(
+      downPtr,
+    );
+    scene._fireInput("pointerup", { x: trigX, y: trigY, id: 4 } as Phaser.Input.Pointer);
+
+    // Verify sticky is set.
+    const priv = radial as unknown as { stickyOpen: boolean };
+    expect(priv.stickyOpen).toBe(true);
+
+    // The icons fan out to positions based on arc math. With 7 weapons the
+    // first icon is at 90 deg (straight up), so its target position is:
+    //   targetX = ORBIT_RADIUS * cos(90deg) = ~0
+    //   targetY = -ORBIT_RADIUS * sin(90deg) = -130
+    // Absolute screen position: (trigX + 0, trigY - 130) = (1200, 510).
+    // Fire a global pointerdown near that icon position.
+    const iconPtr = { x: trigX, y: trigY - 130, id: 7 } as Phaser.Input.Pointer;
+    scene._fireInput("pointerdown", iconPtr);
+
+    // selectWeapon should have been called with a weapon id string.
+    expect(sim.selectWeapon).toHaveBeenCalledOnce();
+    expect(typeof (sim.selectWeapon.mock.calls[0] as [string])[0]).toBe("string");
+    // Radial should now be closing / closed.
+    expect(priv.stickyOpen).toBe(false);
+  });
+
+  it("in sticky mode, second pointerdown outside icons closes without selection", () => {
+    const { scene, sim, radial } = makeRadial();
+    const trigX = 1200;
+    const trigY = 640;
+
+    // Open + quick-release to enter sticky mode.
+    const downPtr = { x: trigX, y: trigY, id: 8 } as Phaser.Input.Pointer;
+    (radial as unknown as { onTriggerDown: (p: Phaser.Input.Pointer) => void }).onTriggerDown(
+      downPtr,
+    );
+    scene._fireInput("pointerup", { x: trigX, y: trigY, id: 8 } as Phaser.Input.Pointer);
+
+    const priv = radial as unknown as { stickyOpen: boolean };
+    expect(priv.stickyOpen).toBe(true);
+
+    // Click far away from any icon.
+    scene._fireInput("pointerdown", { x: 100, y: 100, id: 9 } as Phaser.Input.Pointer);
+
+    // No weapon selection.
+    expect(sim.selectWeapon).not.toHaveBeenCalled();
+    expect(priv.stickyOpen).toBe(false);
+  });
+
   it("hitsRadial returns true for the active pointer id while OPEN", () => {
     const { radial } = makeRadial();
 

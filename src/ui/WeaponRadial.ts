@@ -22,6 +22,8 @@ const ARC_SPAN_DEG = 90; // 90-degree fan to the left
 const EXPAND_MS = 160;
 const COLLAPSE_MS = 140;
 const TRIGGER_HIT_RADIUS = 40; // gating radius for hitsRadial when CLOSED
+/** Maximum ms between pointerdown and pointerup to be treated as a quick click. */
+const QUICK_CLICK_THRESHOLD_MS = 200;
 
 interface IconNode {
   weaponId: string;
@@ -65,6 +67,17 @@ export class WeaponRadial {
   private activePointerId: number | null = null;
   private highlightedIdx = -1;
   private lastSelectedId = "";
+  /**
+   * Timestamp (ms) when the current pointerdown opened the radial.
+   * Used to detect quick-tap (click) vs hold-and-drag.
+   */
+  private pointerDownAt = 0;
+  /**
+   * Sticky mode: set true when a quick click opens the radial so it does not
+   * collapse on the same pointerup. The radial stays open until the user
+   * clicks an icon (commit + close) or clicks elsewhere (close without select).
+   */
+  private stickyOpen = false;
 
   constructor(init: WeaponRadialInit) {
     this.scene = init.scene;
@@ -124,9 +137,10 @@ export class WeaponRadial {
     // --- Icon nodes ---
     this.buildIconNodes();
 
-    // --- Global pointer events for drag handling ---
+    // --- Global pointer events for drag handling + sticky-click ---
     this.scene.input.on("pointermove", this.onPointerMove, this);
     this.scene.input.on("pointerup", this.onPointerUp, this);
+    this.scene.input.on("pointerdown", this.onGlobalPointerDown, this);
 
     this.updateTriggerDisplay();
   }
@@ -158,6 +172,7 @@ export class WeaponRadial {
   destroy(): void {
     this.scene.input.off("pointermove", this.onPointerMove, this);
     this.scene.input.off("pointerup", this.onPointerUp, this);
+    this.scene.input.off("pointerdown", this.onGlobalPointerDown, this);
     this.container.destroy();
   }
 
@@ -254,9 +269,52 @@ export class WeaponRadial {
     if (this.state !== "CLOSED") return;
     this.activePointerId = p.id;
     this.highlightedIdx = -1;
+    this.pointerDownAt = Date.now();
+    this.stickyOpen = false;
     this.state = "OPEN";
     this.openRadial();
   }
+
+  /**
+   * In sticky-open mode a second pointerdown (on an icon or anywhere else)
+   * resolves the pending selection. This is a global listener so it captures
+   * taps that land outside the trigger zone.
+   *
+   * In normal (non-sticky) OPEN mode, the drag interaction is already handled
+   * by onPointerMove + onPointerUp, so we only act here when stickyOpen is set.
+   */
+  private onGlobalPointerDown = (p: Phaser.Input.Pointer): void => {
+    if (!this.stickyOpen || this.state !== "OPEN") return;
+
+    // Check whether the tap lands on a weapon icon. Use the target positions
+    // (where icons are meant to be when fully expanded) rather than the
+    // animated container positions, which may still be en-route during the
+    // tween. In practice the user waits for the icons to appear before
+    // clicking, so targetX/targetY is the right reference.
+    const cx = this.container.x;
+    const cy = this.container.y;
+    let hitIdx = -1;
+    for (let i = 0; i < this.iconNodes.length; i++) {
+      const node = this.iconNodes[i];
+      if (!node) continue;
+      const dx = p.x - (cx + node.targetX);
+      const dy = p.y - (cy + node.targetY);
+      const hitR = ICON_RADIUS + 8; // slightly generous touch target
+      if (dx * dx + dy * dy <= hitR * hitR) {
+        hitIdx = i;
+        break;
+      }
+    }
+
+    this.stickyOpen = false;
+    this.activePointerId = p.id;
+
+    if (hitIdx >= 0) {
+      const node = this.iconNodes[hitIdx];
+      if (node) this.sim.selectWeapon(node.weaponId);
+    }
+    this.collapseToIdle();
+  };
 
   private onPointerMove(p: Phaser.Input.Pointer): void {
     if (this.state !== "OPEN") return;
@@ -269,12 +327,27 @@ export class WeaponRadial {
     if (p.id !== this.activePointerId) return;
 
     if (this.highlightedIdx >= 0) {
+      // An icon is highlighted: commit selection + close regardless of mode.
       const node = this.iconNodes[this.highlightedIdx];
       if (node) {
         this.sim.selectWeapon(node.weaponId);
       }
+      this.stickyOpen = false;
+      this.collapseToIdle();
+      return;
     }
 
+    // No icon highlighted. Decide whether to stay open (sticky) or collapse.
+    const heldMs = Date.now() - this.pointerDownAt;
+    if (!this.stickyOpen && heldMs < QUICK_CLICK_THRESHOLD_MS) {
+      // Quick click with no drag: enter sticky-open mode. The radial stays
+      // open so the user can click an icon on a second interaction.
+      this.stickyOpen = true;
+      return;
+    }
+
+    // Slow release or already sticky - collapse without selection.
+    this.stickyOpen = false;
     this.collapseToIdle();
   }
 
