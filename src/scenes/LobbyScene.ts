@@ -137,6 +137,11 @@ export class LobbyScene extends Phaser.Scene {
   // room state (state may have been freed by the time the close fires).
   private currentRoomCode = "";
 
+  // Last hidden selectedMapId we normalized away from. Prevents repeat
+  // select_map sends while the server echoes stale state before applying
+  // our correction (renderRoom fires on every state update).
+  private lastNormalizedHiddenMapId: string | null = null;
+
   init(data: LobbySceneData): void {
     this.netClient = data.netClient;
     if ("room" in data) {
@@ -564,9 +569,19 @@ export class LobbyScene extends Phaser.Scene {
       const fallback = visibleIds[0] ?? firstId();
       // Only the host can change the map; guest clients surface the stale
       // name and wait for the host to cycle. Safe no-op for non-hosts.
-      if (vm.iAmHost && fallback !== state.selectedMapId) {
+      // Gate on lastNormalizedHiddenMapId so we only send select_map once
+      // per distinct hidden id, even if the server echoes stale state
+      // across multiple renderRoom ticks before applying our correction.
+      if (
+        vm.iAmHost &&
+        fallback !== state.selectedMapId &&
+        this.lastNormalizedHiddenMapId !== state.selectedMapId
+      ) {
+        this.lastNormalizedHiddenMapId = state.selectedMapId;
         this.room.send({ type: "select_map", mapId: fallback });
       }
+    } else {
+      this.lastNormalizedHiddenMapId = null;
     }
 
     const cx = CANVAS_W / 2;
