@@ -21,6 +21,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "Wide flat terrain. Good for weapon testing.",
       maxWorms: 4,
       generator: { id: "flat", seed: 0 }, // 0 triggers Date.now() default
+      visibleInLobby: false,
     },
     generator: flatGenerator,
   },
@@ -31,6 +32,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "Sine-wave hills with a rocky ceiling for rope play.",
       maxWorms: 4,
       generator: { id: "hills", seed: 0 },
+      visibleInLobby: false,
     },
     generator: hillsGenerator,
   },
@@ -47,6 +49,7 @@ export const MAPS: Record<string, RegistryEntry> = {
         { xPx: 768, yPx: 380 },
       ],
       generator: { id: "island", seed: 0 },
+      visibleInLobby: false,
     },
     generator: islandGenerator,
   },
@@ -57,6 +60,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "Ceiling with stalactites + bumpy floor. Great for rope play.",
       maxWorms: 4,
       generator: { id: "cave", seed: 0 },
+      visibleInLobby: false,
     },
     generator: caveGenerator,
   },
@@ -67,6 +71,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "Two plateaus connected by a narrow central bridge.",
       maxWorms: 4,
       generator: { id: "bridges", seed: 0 },
+      visibleInLobby: false,
     },
     generator: bridgesGenerator,
   },
@@ -77,6 +82,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "A tall central spire rising from a continuous floor.",
       maxWorms: 4,
       generator: { id: "spire", seed: 0 },
+      visibleInLobby: false,
     },
     generator: spireGenerator,
   },
@@ -87,6 +93,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "Procedural canyon with randomized cliffs.",
       maxWorms: 4,
       generator: { id: "canyon", seed: 0 },
+      visibleInLobby: false,
     },
     generator: canyonBiomeGenerator,
   },
@@ -107,6 +114,7 @@ export const MAPS: Record<string, RegistryEntry> = {
       description: "A raised central plateau with stepped slopes on each side.",
       maxWorms: 4,
       generator: { id: "plateau", seed: 0 },
+      visibleInLobby: false,
     },
     generator: plateauGenerator,
   },
@@ -140,4 +148,13 @@ export function nextId(current: string): string {
   const ids = allIds();
   const i = ids.indexOf(current);
   return ids[(i + 1) % ids.length] ?? firstId();
+}
+
+/**
+ * Map ids visible in the multiplayer lobby's map cycle. Excludes
+ * entries where `config.visibleInLobby === false`. Undefined treated
+ * as visible so new maps default to showing in the picker.
+ */
+export function lobbyIds(): string[] {
+  return allIds().filter((id) => MAPS[id]?.config.visibleInLobby !== false);
 }

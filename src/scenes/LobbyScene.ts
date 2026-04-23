@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import { packMask } from "../../shared/maskPack";
 import { loadMap } from "../maps/loadMap";
-import { allIds, getById } from "../maps/registry";
+import { firstId, getById, lobbyIds } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import {
   clearRoomToken,
@@ -556,6 +556,19 @@ export class LobbyScene extends Phaser.Scene {
     const mySessionId = this.room.sessionId;
     const vm = toViewModel(state, mySessionId);
 
+    // If we reconnected into a room whose selectedMapId is now hidden
+    // (e.g. a legacy map after ADR-003 deprecation), ask the host to
+    // switch to the first visible biome so the picker shows a valid state.
+    const visibleIds = lobbyIds();
+    if (state.selectedMapId && !visibleIds.includes(state.selectedMapId)) {
+      const fallback = visibleIds[0] ?? firstId();
+      // Only the host can change the map; guest clients surface the stale
+      // name and wait for the host to cycle. Safe no-op for non-hosts.
+      if (vm.iAmHost && fallback !== state.selectedMapId) {
+        this.room.send({ type: "select_map", mapId: fallback });
+      }
+    }
+
     const cx = CANVAS_W / 2;
 
     // Header: code + leave button.
@@ -725,7 +738,7 @@ export class LobbyScene extends Phaser.Scene {
 
   private cycleMap(dir: 1 | -1): void {
     if (!this.room) return;
-    const ids = allIds();
+    const ids = lobbyIds();
     if (ids.length === 0) return;
     const current = this.room.state.selectedMapId;
     const idx = ids.indexOf(current);
