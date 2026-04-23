@@ -16,6 +16,12 @@ export interface MapConfig {
   };
   /** Optional solid sky color override. Defaults to Phaser scene backgroundColor. */
   backgroundColor?: string;
+  /**
+   * When false, the map is hidden from the multiplayer lobby's map cycle.
+   * Still reachable via `?offline=1&map=<id>` for regression testing. Per
+   * ADR-003 (procgen-first) legacy handcrafted maps are hidden here.
+   */
+  readonly visibleInLobby?: boolean;
 }
 
 export type MapGenerator = (
