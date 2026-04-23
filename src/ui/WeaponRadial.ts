@@ -62,6 +62,7 @@ export class WeaponRadial {
   private readonly container: Phaser.GameObjects.Container;
   private readonly trigger: Phaser.GameObjects.Container;
   private readonly iconNodes: IconNode[] = [];
+  private hitZone!: Phaser.GameObjects.Zone;
 
   private state: State = "CLOSED";
   private activePointerId: number | null = null;
@@ -125,12 +126,19 @@ export class WeaponRadial {
     this.container.add(this.trigger);
 
     // --- Hit zone for the trigger (generous for thumb) ---
-    const hit = this.scene.add
-      .zone(0, 0, 80, 80)
+    // IMPORTANT: do NOT add this zone to the radial container. Phaser 3's
+    // input hit test on an interactive child of a Container with
+    // setScrollFactor(0) has frame-coord issues in some configurations
+    // (the visual renders at the transformed position but the hit region
+    // uses local coords). Living at the scene root with explicit
+    // setScrollFactor(0) keeps the hit region exactly where the visual is.
+    this.hitZone = this.scene.add
+      .zone(triggerX, triggerY, 80, 80)
       .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(101)
       .setInteractive({ useHandCursor: true });
-    this.container.add(hit);
-    hit.on("pointerdown", (p: Phaser.Input.Pointer) => {
+    this.hitZone.on("pointerdown", (p: Phaser.Input.Pointer) => {
       this.onTriggerDown(p);
     });
 
@@ -173,6 +181,7 @@ export class WeaponRadial {
     this.scene.input.off("pointermove", this.onPointerMove, this);
     this.scene.input.off("pointerup", this.onPointerUp, this);
     this.scene.input.off("pointerdown", this.onGlobalPointerDown, this);
+    this.hitZone.destroy();
     this.container.destroy();
   }
 

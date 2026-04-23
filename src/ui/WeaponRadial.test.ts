@@ -84,7 +84,10 @@ function makeScene() {
     const listeners: Map<string, Array<(...args: unknown[]) => void>> = new Map();
     const obj = {
       setOrigin: vi.fn(() => obj),
+      setScrollFactor: vi.fn(() => obj),
+      setDepth: vi.fn(() => obj),
       setInteractive: vi.fn(() => obj),
+      destroy: vi.fn(),
       on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
         if (!listeners.has(event)) listeners.set(event, []);
         listeners.get(event)?.push(handler);
