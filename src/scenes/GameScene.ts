@@ -22,6 +22,7 @@ import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
+import { TurnTransition } from "../ui/TurnTransition";
 import { UtilityDPad } from "../ui/UtilityDPad";
 import { WeaponDrawer } from "../ui/WeaponDrawer";
 import { WindHUD } from "../ui/WindHUD";
@@ -82,6 +83,7 @@ export class GameScene extends Phaser.Scene {
    * are refreshed each frame in `update`. */
   private utilityDPad: UtilityDPad | null = null;
   private utilityDPadVisible = false;
+  private turnTransition: TurnTransition | null = null;
 
   // ---- Pointer-gesture state (primary pointer only) ----
   /** Gesture state machine shared across pointer events. Stores last-release
@@ -251,6 +253,8 @@ export class GameScene extends Phaser.Scene {
       // destroys can't leave an active onStateChange listener that keeps
       // firing (and attempting scene.start) after we've moved on.
       this.tearDownRoomListeners();
+      this.turnTransition?.destroy();
+      this.turnTransition = null;
       try {
         this.sim.destroy();
       } catch {
@@ -384,6 +388,23 @@ export class GameScene extends Phaser.Scene {
     // blank space outside the terrain. The camera will follow the active worm
     // once handleTurnChanged fires.
     this.cameras.main.setBounds(0, 0, sceneWidthPx, sceneHeightPx);
+
+    this.turnTransition = new TurnTransition({
+      scene: this,
+      sim: this.sim,
+      worldWidthPx: sceneWidthPx,
+      worldHeightPx: sceneHeightPx,
+      resolveFollowTarget: (wormId) => {
+        if (this.offlineSim) {
+          const w = this.offlineSim.wormsInternal.find((worm) => worm.name === wormId);
+          return w?.graphicsObject ?? null;
+        }
+        return this.wormSprites.get(wormId)?.graphics ?? null;
+      },
+      onTransitioningChanged: (t) => {
+        this.inputController?.setTransitioning(t);
+      },
+    });
 
     this.debugGfx = this.add.graphics();
     this.debugGfx.setDepth(10);
@@ -557,6 +578,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleGameOver(winnerTeamId: string | null): void {
+    this.turnTransition?.cancel();
     this.inputController?.setInputAllowed(false);
     this.turnHUD?.setEndTurnEnabled(false);
     this.spectatorHUD?.hide();
@@ -632,10 +654,6 @@ export class GameScene extends Phaser.Scene {
     if (this.offlineSim) {
       const activeWorm = this.offlineSim.wormsInternal.find((w) => w.name === _wormId);
       if (activeWorm) this.inputController?.setActiveWorm(activeWorm);
-      // Follow the offline worm's physics body renderer.
-      if (activeWorm) {
-        this.cameras.main.startFollow(activeWorm.graphicsObject, true, 0.08, 0.08);
-      }
     } else if (this.networkedSim) {
       // Wrap the render view in a facade so InputController has something
       // to read xPx / facing / aimAngle from. The facade's mutator methods
@@ -644,13 +662,9 @@ export class GameScene extends Phaser.Scene {
       this.inputController?.setActiveWorm(
         view ? adaptRenderableToWormFacade(view, () => this.sim.isJetPacking(), this.sim) : null,
       );
-      // Follow the networked worm sprite's graphics object.
-      const sprite = this.wormSprites.get(_wormId);
-      const followTarget = sprite?.graphics ?? null;
-      if (followTarget) {
-        this.cameras.main.startFollow(followTarget, true, 0.08, 0.08);
-      }
     }
+    // Delegate camera follow to TurnTransition for zoom-out/hold/zoom-in animation.
+    this.turnTransition?.begin(teamId, _wormId);
   }
 
   // ---------------------------------------------------------------------------

@@ -108,6 +108,15 @@ export interface SimAdapter {
   onTurnChanged(cb: (activeTeamId: string, activeWormId: string) => void): () => void;
   /** Called when input-allowed changes (e.g. we become active, or turn-end lands). */
   onInputAllowedChanged(cb: (allowed: boolean) => void): () => void;
+  /**
+   * Fires once per turn-change when the sim's next-turn state is
+   * "committed". Offline: fires on next microtask after onTurnChanged.
+   * Networked: fires after N consecutive sim_state frames report the
+   * same active team/worm as the latest turn_changed.
+   * Used by TurnTransition to stretch the hold-at-overview phase
+   * adaptively across flaky connections.
+   */
+  onStateStable(cb: () => void): () => void;
 }
 
 /**

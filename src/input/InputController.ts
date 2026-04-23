@@ -32,6 +32,7 @@ export class InputController {
   private readonly onAimPowerChange: (power: number) => void;
   private activeWorm: Worm | null = null;
   private inputAllowed = false;
+  private transitioning = false;
   // Track last walk direction so we only fire onWalk on transitions
   // (matches the server contract: press -> send {dir:-1}, release -> send {dir:0}).
   private lastWalkDir: -1 | 0 | 1 = 0;
@@ -130,6 +131,10 @@ export class InputController {
     this.inputAllowed = allowed;
   }
 
+  setTransitioning(v: boolean): void {
+    this.transitioning = v;
+  }
+
   /**
    * Reset the local walk-direction cache to 0 (stopped). Called when
    * network ownership flips away from this client so that the NEXT time
@@ -153,7 +158,7 @@ export class InputController {
    * is the only path that drives the active worm.
    */
   isInputAllowed(): boolean {
-    return this.inputAllowed;
+    return this.inputAllowed && !this.transitioning;
   }
 
   getActiveWorm(): Worm | null {
@@ -173,7 +178,7 @@ export class InputController {
 
   /** Called from GameScene.update. Polls keys, dispatches to active worm. */
   update(dtMs: number): void {
-    if (!this.inputAllowed) return;
+    if (!this.inputAllowed || this.transitioning) return;
 
     // Enter ends turn
     if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
