@@ -3,6 +3,7 @@ import { Box } from "planck";
 import type { Body } from "planck";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters } from "../physics/scale";
+import { applyStratumPaint } from "./stratumPaint";
 import { TERRAIN_ROW_HEIGHT, scanMaskForBoxes } from "./terrainAlgorithm";
 
 interface TerrainBodyMeta {
@@ -61,6 +62,11 @@ export class Terrain {
     if (!ctx) throw new Error("Terrain: could not get 2D context");
     this.ctx = ctx;
     this.ctx.drawImage(init.sourceMask, 0, 0);
+
+    // Depth-stratum paint: grass/dirt/stone over the mask alpha. Matches
+    // the networked TerrainRenderer so offline + networked look identical
+    // regardless of whether the generator painted its own RGB.
+    applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
 
     // Register canvas with Phaser TextureManager
     const canvasTexture = this.scene.textures.addCanvas(this.textureKey, this.buffer);
