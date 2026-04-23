@@ -1,37 +1,62 @@
 import type Phaser from "phaser";
+import { tuning } from "../tuning";
 
 export interface CameraFollowerInit {
   scene: Phaser.Scene;
+  now?: () => number;
 }
 
 /**
  * Decides what the camera follows. Between turns the camera is
  * controlled by TurnTransition. Within a turn, follows the active
  * worm by default. If a projectile spawns, detaches from the worm
- * and follows the projectile until it despawns; then returns to the
- * active worm.
+ * and follows the projectile until it despawns; then holds at the
+ * impact site for postImpactLingerMs before returning to the worm.
  *
  * Multi-projectile case: sticks with the first followed projectile;
  * ignores subsequent spawns. When the followed projectile despawns
  * AND other projectiles still exist (e.g. cluster children), returns
  * to the worm rather than hopping to an arbitrary other projectile.
+ *
+ * Lerp values differ by target type:
+ *   - worm: tuning.camera.wormLerp (0.08) - responsive
+ *   - projectile: tuning.camera.projectileLerp (0.05) - smoother,
+ *     masks per-frame jitter on fast-moving projectiles
  */
 export class CameraFollower {
   private readonly scene: Phaser.Scene;
+  private readonly now: () => number;
   private activeWormTarget: Phaser.GameObjects.GameObject | null = null;
   private followedProjectileId: string | null = null;
+  private lingerUntilMs: number | null = null;
   private suspended = false; // set true while TurnTransition owns the camera
 
   constructor(init: CameraFollowerInit) {
     this.scene = init.scene;
+    this.now = init.now ?? (() => Date.now());
+  }
+
+  private followWorm(target: Phaser.GameObjects.GameObject): void {
+    const lerp = tuning.camera.wormLerp;
+    this.scene.cameras.main.startFollow(target, true, lerp, lerp);
+  }
+
+  private followProjectile(target: Phaser.GameObjects.GameObject): void {
+    const lerp = tuning.camera.projectileLerp;
+    this.scene.cameras.main.startFollow(target, true, lerp, lerp);
   }
 
   /** Called by GameScene when TurnTransition lands the camera on a worm at zoom-in completion. */
   setActiveWormTarget(target: Phaser.GameObjects.GameObject | null): void {
     this.activeWormTarget = target;
     // If we're currently following a worm (not projectile) and not suspended, swap to the new target.
-    if (!this.suspended && this.followedProjectileId === null && target) {
-      this.scene.cameras.main.startFollow(target, true, 0.08, 0.08);
+    if (
+      !this.suspended &&
+      this.followedProjectileId === null &&
+      this.lingerUntilMs === null &&
+      target
+    ) {
+      this.followWorm(target);
     }
   }
 
@@ -41,10 +66,11 @@ export class CameraFollower {
     if (suspended) {
       // Drop our tracking; TurnTransition owns the camera now.
       this.followedProjectileId = null;
+      this.lingerUntilMs = null;
     } else {
       // Resumed - return to active worm if we have one.
       if (this.activeWormTarget) {
-        this.scene.cameras.main.startFollow(this.activeWormTarget, true, 0.08, 0.08);
+        this.followWorm(this.activeWormTarget);
       }
     }
   }
@@ -56,25 +82,43 @@ export class CameraFollower {
   update(projectiles: ReadonlyArray<{ id: string; gfx: Phaser.GameObjects.GameObject }>): void {
     if (this.suspended) return;
 
-    const followedStillExists =
-      this.followedProjectileId !== null &&
-      projectiles.some((p) => p.id === this.followedProjectileId);
-
-    if (this.followedProjectileId !== null && !followedStillExists) {
-      // Our followed projectile despawned. Return to worm.
-      this.followedProjectileId = null;
-      if (this.activeWormTarget) {
-        this.scene.cameras.main.startFollow(this.activeWormTarget, true, 0.08, 0.08);
+    // Linger phase: followed projectile is gone but we're holding the camera
+    // at the impact site for a beat before returning to the worm.
+    if (this.lingerUntilMs !== null) {
+      if (projectiles.length > 0) {
+        // New projectile appeared mid-linger - interrupt, follow the new one.
+        this.lingerUntilMs = null;
+        this.followedProjectileId = null;
+        // fall through to "acquire first projectile" block below
+      } else if (this.now() >= this.lingerUntilMs) {
+        // Linger elapsed - return to worm.
+        this.lingerUntilMs = null;
+        this.followedProjectileId = null;
+        if (this.activeWormTarget) this.followWorm(this.activeWormTarget);
+        return;
+      } else {
+        // Still lingering. Camera is frozen (stopFollow was called), nothing to do.
+        return;
       }
-      return;
     }
 
-    if (this.followedProjectileId === null && projectiles.length > 0) {
-      // No current follow target and a projectile just appeared - follow the first one.
+    // Followed projectile just despawned - enter linger.
+    if (this.followedProjectileId !== null) {
+      const stillExists = projectiles.some((p) => p.id === this.followedProjectileId);
+      if (!stillExists) {
+        this.scene.cameras.main.stopFollow();
+        this.lingerUntilMs = this.now() + tuning.camera.postImpactLingerMs;
+        return;
+      }
+      return; // still following this projectile
+    }
+
+    // No current projectile follow target.
+    if (projectiles.length > 0) {
       const first = projectiles[0];
       if (first) {
         this.followedProjectileId = first.id;
-        this.scene.cameras.main.startFollow(first.gfx, true, 0.08, 0.08);
+        this.followProjectile(first.gfx);
       }
     }
   }
@@ -83,5 +127,6 @@ export class CameraFollower {
     // Nothing to clean up; camera follow state is owned by the scene lifecycle.
     this.activeWormTarget = null;
     this.followedProjectileId = null;
+    this.lingerUntilMs = null;
   }
 }
