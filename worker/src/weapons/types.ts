@@ -28,5 +28,15 @@ export interface WeaponConfig {
   restitution?: number;
   shotsPerActivation?: number;
   powerCapMps?: number;
+  /**
+   * If set, a projectile's body continuously carves terrain at the given
+   * radius + cadence while in flight. Used by Drill.
+   */
+  tunnel?: { cutRadiusPx: number; cutIntervalMs: number };
+  /**
+   * If set, hitscan fires with a random per-shot angle jitter in radians
+   * (uniformly sampled in [-spread, +spread]). Used by Minigun.
+   */
+  hitscanSpreadRad?: number;
   explosion: ExplosionConfig;
 }

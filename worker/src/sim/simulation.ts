@@ -39,7 +39,7 @@ import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
 import { type ExplodeResult, explode } from "../weapons/explode.js";
 import { type FireResult, fire } from "../weapons/fire.js";
-import { getById } from "../weapons/registry.js";
+import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
 
 const OFF_MAP_MARGIN_PX = 200;
 const MAX_PROJECTILES = 8;
@@ -109,6 +109,8 @@ export interface SimulationInit {
 /** Snapshot for DO storage / hibernation recovery. */
 export interface SerializedSim {
   tick: number;
+  /** Per-team ammo pools. Keyed by teamId -> weaponId -> remaining. */
+  teamAmmo?: Record<string, Record<string, number>>;
   worms: Array<{
     id: string;
     teamId: string;
@@ -163,6 +165,11 @@ export class Simulation {
   /** Water level in pixels. Number.MAX_SAFE_INTEGER = no water (sentinel). */
   private waterLevelPx = Number.MAX_SAFE_INTEGER;
   private onPostSolve: ((contact: Contact, impulse: ContactImpulse) => void) | null = null;
+  /**
+   * Per-team ammo pool. Maps teamId -> weaponId -> remaining count.
+   * -1 means infinite. Finite weapons (e.g. holygrenade=2) are tracked here.
+   */
+  private readonly teamAmmo: Map<string, Record<string, number>> = new Map();
 
   constructor(init: SimulationInit) {
     this.widthPx = init.widthPx;
@@ -176,7 +183,9 @@ export class Simulation {
       mask: init.mask,
     });
 
+    const ammoTemplate = defaultAmmoForMatch();
     for (const team of init.teams) {
+      this.teamAmmo.set(team.id, { ...ammoTemplate });
       for (let i = 0; i < team.wormIds.length; i++) {
         const wormId = team.wormIds[i];
         const spawn = team.spawns[i] ?? { xPx: 100, yPx: 100 };
@@ -221,6 +230,22 @@ export class Simulation {
 
   setWaterLevel(yPx: number): void {
     this.waterLevelPx = Math.max(0, yPx);
+  }
+
+  // ---- Ammo controls ----
+
+  /** Return remaining ammo for a team + weapon. -1 means infinite. */
+  getTeamAmmo(teamId: string, weaponId: string): number {
+    const pool = this.teamAmmo.get(teamId);
+    return pool?.[weaponId] ?? -1;
+  }
+
+  /** Re-initialize all team ammo pools from defaultAmmoForMatch (call on match restart). */
+  resetTeamAmmo(): void {
+    const template = defaultAmmoForMatch();
+    for (const teamId of this.teamAmmo.keys()) {
+      this.teamAmmo.set(teamId, { ...template });
+    }
   }
 
   // ---- Input application (called after validating active player) ----
@@ -299,6 +324,11 @@ export class Simulation {
     const weapon = weaponId ? getById(weaponId) : getById(worm.activeWeapon);
     if (!weapon) return null;
 
+    // Enforce per-team ammo. Reject silently if the team has run out.
+    const teamPool = this.teamAmmo.get(worm.teamId);
+    const remaining = teamPool?.[weapon.id] ?? -1;
+    if (remaining !== -1 && remaining <= 0) return null;
+
     const result = fire({
       world: this.world,
       terrain: this.terrain,
@@ -311,6 +341,11 @@ export class Simulation {
     });
 
     worm.activeWeapon = weapon.id;
+
+    // Consume one unit of ammo from the team pool if finite.
+    if (teamPool && remaining !== -1) {
+      teamPool[weapon.id] = remaining - 1;
+    }
 
     this.events.push({
       type: "fire_event",
@@ -397,6 +432,7 @@ export class Simulation {
     for (const proj of this.projectiles) {
       if (proj.detonated) continue;
       proj.tick(dtMs);
+      proj.tickTunnel(dtMs, this.terrain);
       // Wind: apply horizontal force per tick to in-flight projectiles.
       // WIND_FORCE is Newtons per unit wind; tunable in src/tuning.ts.
       if (this.wind !== 0) {
@@ -508,8 +544,13 @@ export class Simulation {
     // Serialized positions/velocities are in METERS (physics-body native).
     // Only the wire format (`toRenderState`) is in pixels; internal
     // storage stays in meters so restore() can set body position directly.
+    const teamAmmoRecord: Record<string, Record<string, number>> = {};
+    for (const [teamId, pool] of this.teamAmmo) {
+      teamAmmoRecord[teamId] = { ...pool };
+    }
     return {
       tick: this.tickCount,
+      teamAmmo: teamAmmoRecord,
       worms: Array.from(this.worms.values()).map((w) => {
         const pos = w.body.getPosition();
         const vel = w.body.getLinearVelocity();
@@ -557,6 +598,13 @@ export class Simulation {
    */
   restore(state: SerializedSim): void {
     this.tickCount = state.tick;
+    // Restore per-team ammo pools if present (absent in pre-fix serializations
+    // means teams keep their freshly-initialized defaultAmmoForMatch pools).
+    if (state.teamAmmo) {
+      for (const [teamId, pool] of Object.entries(state.teamAmmo)) {
+        this.teamAmmo.set(teamId, { ...pool });
+      }
+    }
     for (const ws of state.worms) {
       const worm = this.worms.get(ws.id);
       if (!worm) continue;
@@ -680,8 +728,17 @@ export class Simulation {
     for (const fixture of fixtures) {
       const ud = fixture.getBody().getUserData() as ProjectileUserData | null;
       if (ud && ud.kind === "projectile" && !ud.projectile.detonated) {
-        if (ud.projectile.fuseRemainingMs === null) {
-          // contact-only detonation
+        // Determine what the projectile hit - check the OTHER body.
+        const otherBody = (fixture === a ? b : a).getBody();
+        const otherUd = otherBody.getUserData() as WormUserData | WormFootUserData | null;
+        const isWormContact = otherUd?.kind === "worm" || otherUd?.kind === "worm-foot";
+
+        // Detonate immediately on worm contact regardless of fuse state.
+        // This lets the drill (which has a fuse) still explode when it hits a worm
+        // rather than tunneling through it harmlessly.
+        // For terrain/other contacts, keep the original fuse-null gate so
+        // fused projectiles (drill) keep tunneling until the fuse expires.
+        if (ud.projectile.fuseRemainingMs === null || isWormContact) {
           this.pendingDetonate.push(ud.projectile);
         }
       }

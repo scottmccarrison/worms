@@ -1,10 +1,22 @@
 import { bazooka } from "./bazooka.js";
+import { drill } from "./drill.js";
+import { dynamite } from "./dynamite.js";
 import { handGrenade } from "./handgrenade.js";
+import { holyGrenade } from "./holygrenade.js";
+import { minigun } from "./minigun.js";
 import { shotgun } from "./shotgun.js";
 import type { WeaponConfig } from "./types.js";
 
-/** All weapons in selectKey order (1, 2, 3). */
-const REGISTRY: WeaponConfig[] = [bazooka, shotgun, handGrenade];
+/** All weapons in selectKey order (1-7). */
+const REGISTRY: WeaponConfig[] = [
+  bazooka,
+  shotgun,
+  handGrenade,
+  dynamite,
+  holyGrenade,
+  minigun,
+  drill,
+];
 
 /** All weapons as an array. */
 export function allWeapons(): WeaponConfig[] {

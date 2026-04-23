@@ -22,6 +22,7 @@ interface ActiveProjectile {
   weapon: WeaponConfig;
   firer: Worm;
   detonated: boolean; // guard against double-detonate
+  msSinceLastCut: number; // accumulator for tunnel carving cadence
 }
 
 interface ProjectileManagerInit {
@@ -103,6 +104,7 @@ export class ProjectileManager {
       weapon,
       firer,
       detonated: false,
+      msSinceLastCut: 0,
     };
 
     // Link body userData back to the ActiveProjectile for contact lookup
@@ -126,12 +128,23 @@ export class ProjectileManager {
     }
     this.pendingDetonate.length = 0;
 
-    // Tick fuses
+    // Tick fuses + tunnel carving
     for (const proj of this.projectiles) {
       if (proj.detonated) continue;
       if (proj.fuseMs !== null && this.elapsedMs - proj.spawnedAt >= proj.fuseMs) {
         this.detonateProjectile(proj);
         continue;
+      }
+
+      // Tunnel: carve terrain at the projectile's position on a cadence.
+      const tunnel = proj.weapon.tunnel;
+      if (tunnel) {
+        proj.msSinceLastCut += deltaMs;
+        if (proj.msSinceLastCut >= tunnel.cutIntervalMs) {
+          const pos = proj.body.getPosition();
+          this.terrain.cutCircle(toPixels(pos.x), toPixels(pos.y), tunnel.cutRadiusPx);
+          proj.msSinceLastCut = 0;
+        }
       }
 
       // Sync graphic position to physics body
