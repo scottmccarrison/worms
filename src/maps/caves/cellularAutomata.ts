@@ -3,12 +3,19 @@
  *
  * Subdivides the carving region into cellSizePx x cellSizePx cells.
  * Each cell starts solid with probability initialFillRatio (rng-seeded).
- * Each iteration, a cell becomes solid if >= 5 of its 8 neighbors are solid
- * (out-of-bounds cells are counted as solid, so walls don't erode inward).
- * After iterations, every "void" cell has its pixel block's alpha set to 0.
  *
- * A per-column surface buffer keeps the top N pixels below the surface
- * untouched so caves don't punch skylights through the grass+dirt crust.
+ * Smoothing uses the classic "B5/S4" rule (birth if void with >=5 solid
+ * neighbors, survive if solid with >=4 solid neighbors). This stabilizes
+ * toward coherent cave chambers rather than collapsing to all-void
+ * (which the bare >=5 rule does at 0.45 initial fill).
+ *
+ * Out-of-bounds neighbors count as solid so walls don't erode at the
+ * edges of the region.
+ *
+ * After iterations, every "void" cell has its pixel block's alpha set
+ * to 0. A per-column surface buffer keeps the top N pixels below the
+ * surface untouched so caves don't punch skylights through the
+ * grass+dirt crust.
  */
 
 export interface CarveCavesOpts {
@@ -85,7 +92,11 @@ export function carveCaves(
           }
         }
 
-        next[idx] = solidCount >= 5 ? 1 : 0;
+        // B5/S4 rule: survive if already solid with >=4 solid neighbors,
+        // birth if void with >=5 solid neighbors. Stabilizes into coherent
+        // chambers instead of collapsing toward all-void.
+        const wasSolid = cells[idx] === 1;
+        next[idx] = solidCount >= 5 || (wasSolid && solidCount >= 4) ? 1 : 0;
       }
     }
     cells = next;

@@ -152,8 +152,15 @@ export const tuning: Tuning = {
     defaultId: "terraworld", // registry lookup; falls back to firstId() if invalid
   },
   caves: {
-    cellSizePx: 8,
-    initialFillRatio: 0.45,
+    // 24 gives 2560x1024 a ~107x43 grid. Each cell is ~1 worm tall, so
+    // a single void cell is a small pocket; groups of adjacent cells
+    // form real chambers. Smaller values (8-16) read as pixel-dust.
+    cellSizePx: 24,
+    // 0.50 is the edge between "stable mostly-solid" and "collapse
+    // toward void" under B5/S4. Biasing very slightly toward void
+    // lets chambers coalesce while keeping the subsurface mostly
+    // stone. Stabilizes around 50-55% solid cells after 4 iters.
+    initialFillRatio: 0.5,
     iterations: 4,
     surfaceBufferPx: 80,
   },
