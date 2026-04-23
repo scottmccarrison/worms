@@ -215,6 +215,18 @@ export class OfflineSimAdapter implements SimAdapter {
     return this.projectileManager.count;
   }
 
+  /**
+   * Returns live offline projectiles with their Phaser Graphics objects so
+   * CameraFollower can track them. Each entry has a stable id for the
+   * projectile's lifetime.
+   */
+  getProjectilesWithGfx(): ReadonlyArray<{
+    id: string;
+    gfx: import("phaser").GameObjects.Graphics;
+  }> {
+    return this.projectileManager.getProjectilesWithGfx();
+  }
+
   // -------------------------------------------------------------------------
   // SimAdapter API
   // -------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import { TerrainRenderer } from "../terrain/TerrainRenderer";
 import { WaterRenderer } from "../terrain/WaterRenderer";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
+import { CameraFollower } from "../ui/CameraFollower";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
@@ -84,6 +85,7 @@ export class GameScene extends Phaser.Scene {
   private utilityDPad: UtilityDPad | null = null;
   private utilityDPadVisible = false;
   private turnTransition: TurnTransition | null = null;
+  private cameraFollower: CameraFollower | null = null;
 
   // ---- Pointer-gesture state (primary pointer only) ----
   /** Gesture state machine shared across pointer events. Stores last-release
@@ -253,6 +255,8 @@ export class GameScene extends Phaser.Scene {
       // destroys can't leave an active onStateChange listener that keeps
       // firing (and attempting scene.start) after we've moved on.
       this.tearDownRoomListeners();
+      this.cameraFollower?.destroy();
+      this.cameraFollower = null;
       this.turnTransition?.destroy();
       this.turnTransition = null;
       try {
@@ -389,6 +393,8 @@ export class GameScene extends Phaser.Scene {
     // once handleTurnChanged fires.
     this.cameras.main.setBounds(0, 0, sceneWidthPx, sceneHeightPx);
 
+    this.cameraFollower = new CameraFollower({ scene: this });
+
     this.turnTransition = new TurnTransition({
       scene: this,
       sim: this.sim,
@@ -403,6 +409,10 @@ export class GameScene extends Phaser.Scene {
       },
       onTransitioningChanged: (t) => {
         this.inputController?.setTransitioning(t);
+        this.cameraFollower?.setSuspended(t);
+      },
+      onActiveWormResolved: (target) => {
+        this.cameraFollower?.setActiveWormTarget(target);
       },
     });
 
@@ -454,6 +464,17 @@ export class GameScene extends Phaser.Scene {
     if (this.networkedSim) {
       this.renderNetworkedWorms();
       this.renderNetworkedProjectiles();
+      // Feed networked projectile entries to CameraFollower each frame.
+      if (this.cameraFollower) {
+        const entries: Array<{ id: string; gfx: Phaser.GameObjects.GameObject }> = [];
+        for (const [id, gfx] of this.projectileGraphics) {
+          entries.push({ id, gfx });
+        }
+        this.cameraFollower.update(entries);
+      }
+    } else if (this.offlineSim && this.cameraFollower) {
+      // Offline: projectile graphics are managed by ProjectileManager.
+      this.cameraFollower.update(this.offlineSim.getProjectilesWithGfx());
     }
     // Offline: Worm.update draws each worm's own sprite + HUD text. Nothing
     // to do at the scene level for worm rendering.

@@ -11,6 +11,12 @@ export interface TurnTransitionInit {
   resolveFollowTarget: (wormId: string) => Phaser.GameObjects.GameObject | null;
   /** Called when transitioning state changes (for input gating). */
   onTransitioningChanged: (transitioning: boolean) => void;
+  /**
+   * Called at zoom-in completion with the resolved follow target (or null).
+   * Used by CameraFollower to learn which worm the camera should return to
+   * after a projectile despawns.
+   */
+  onActiveWormResolved?: (target: Phaser.GameObjects.GameObject | null) => void;
 }
 
 type State = "IDLE" | "ZOOMING_OUT" | "HOLDING" | "ZOOMING_IN";
@@ -32,6 +38,9 @@ export class TurnTransition {
   private readonly worldHeightPx: number;
   private readonly resolveFollowTarget: (wormId: string) => Phaser.GameObjects.GameObject | null;
   private readonly onTransitioningChanged: (t: boolean) => void;
+  private readonly onActiveWormResolved:
+    | ((target: Phaser.GameObjects.GameObject | null) => void)
+    | undefined;
   private readonly unsubStable: () => void;
 
   private state: State = "IDLE";
@@ -56,6 +65,7 @@ export class TurnTransition {
     this.worldHeightPx = init.worldHeightPx;
     this.resolveFollowTarget = init.resolveFollowTarget;
     this.onTransitioningChanged = init.onTransitioningChanged;
+    this.onActiveWormResolved = init.onActiveWormResolved;
     this.unsubStable = this.sim.onStateStable(() => this.handleStateStable());
   }
 
@@ -212,6 +222,7 @@ export class TurnTransition {
     this.pendingWormId = null;
     this.stableObserved = false;
     this.setState("IDLE");
+    this.onActiveWormResolved?.(followTarget);
     this.onTransitioningChanged(false);
   }
 }

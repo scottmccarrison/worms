@@ -14,6 +14,7 @@ import { explode } from "./explode";
 import type { WeaponConfig } from "./types";
 
 interface ActiveProjectile {
+  id: string;
   body: Body;
   graphic: Phaser.GameObjects.Graphics;
   spawnedAt: number; // ms since scene start
@@ -38,6 +39,7 @@ export class ProjectileManager {
   private readonly projectiles: ActiveProjectile[] = [];
   private readonly pendingDetonate: ActiveProjectile[] = [];
   private elapsedMs = 0;
+  private nextProjectileId = 0;
 
   constructor(init: ProjectileManagerInit) {
     this.scene = init.scene;
@@ -93,6 +95,7 @@ export class ProjectileManager {
     graphic.fillCircle(0, 0, rPx);
 
     const proj: ActiveProjectile = {
+      id: `offline-proj-${this.nextProjectileId++}`,
       body,
       graphic,
       spawnedAt: this.elapsedMs,
@@ -147,6 +150,15 @@ export class ProjectileManager {
   /** Number of live projectiles (useful for settle detection). */
   get count(): number {
     return this.projectiles.length;
+  }
+
+  /**
+   * Returns a snapshot of live projectiles with their Phaser Graphics objects.
+   * Used by CameraFollower to follow an in-flight projectile in offline mode.
+   * Each entry: { id, gfx } where id is stable for the lifetime of the projectile.
+   */
+  getProjectilesWithGfx(): ReadonlyArray<{ id: string; gfx: Phaser.GameObjects.Graphics }> {
+    return this.projectiles.filter((p) => !p.detonated).map((p) => ({ id: p.id, gfx: p.graphic }));
   }
 
   destroy(): void {
