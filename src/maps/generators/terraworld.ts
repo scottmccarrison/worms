@@ -1,3 +1,5 @@
+import { tuning } from "../../tuning";
+import { carveCaves } from "../caves/cellularAutomata";
 import type { MapGenerator } from "../types";
 import { xorshift } from "../xorshift";
 
@@ -53,14 +55,35 @@ export const terraworldGenerator: MapGenerator = (ctx, width, height, opts) => {
   const detailSampleCount = Math.ceil(width / detailStride) + 2;
   const detailSamples = buildSamples(detailAmp, detailSampleCount);
 
+  // Shared surface formula used by both the fill loop and cave carver
+  const surfaceAt = (x: number): number => {
+    return Math.floor(
+      baseY + sampleAt(baseSamples, baseStride, x) + sampleAt(detailSamples, detailStride, x),
+    );
+  };
+
   // Any opaque fill works; stratum painter overwrites RGB.
   ctx.fillStyle = "#ffffff";
   for (let x = 0; x < width; x++) {
-    const surfaceY = Math.floor(
-      baseY + sampleAt(baseSamples, baseStride, x) + sampleAt(detailSamples, detailStride, x),
-    );
+    const surfaceY = surfaceAt(x);
     if (surfaceY < height) {
       ctx.fillRect(x, surfaceY, 1, height - surfaceY);
     }
   }
+
+  // Build per-column surface array for cave carver
+  const surfaceByColumn = new Int32Array(width);
+  for (let x = 0; x < width; x++) {
+    surfaceByColumn[x] = Math.max(0, Math.min(height, surfaceAt(x)));
+  }
+
+  // Carve cellular-automata caves in the subsurface (Terraworld only)
+  carveCaves(ctx, width, height, {
+    cellSizePx: tuning.caves.cellSizePx,
+    initialFillRatio: tuning.caves.initialFillRatio,
+    iterations: tuning.caves.iterations,
+    rng,
+    surfaceByColumn,
+    surfaceBufferPx: tuning.caves.surfaceBufferPx,
+  });
 };
