@@ -17,7 +17,6 @@ import type { RoomHandle } from "../net/wsClient";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { toViewModel } from "./lobby/renderModel";
 import type { ViewModel } from "./lobby/renderModel";
-import { buildInviteUrl, shareInvite } from "./lobby/shareInvite";
 
 /**
  * LobbyScene accepts two init shapes:
@@ -48,14 +47,13 @@ const TEXT_STYLE_LARGE: Phaser.Types.GameObjects.Text.TextStyle = {
   color: "#e0e0e0",
   fontFamily: "system-ui, sans-serif",
 };
-const TEXT_STYLE_CODE: Phaser.Types.GameObjects.Text.TextStyle = {
-  fontSize: "72px",
-  color: "#88ddff",
-  fontFamily: "system-ui, sans-serif",
-  fontStyle: "bold",
-};
 const TEXT_STYLE_BODY: Phaser.Types.GameObjects.Text.TextStyle = {
   fontSize: "22px",
+  color: "#e0e0e0",
+  fontFamily: "system-ui, sans-serif",
+};
+const TEXT_STYLE_ROOM: Phaser.Types.GameObjects.Text.TextStyle = {
+  fontSize: "32px",
   color: "#e0e0e0",
   fontFamily: "system-ui, sans-serif",
 };
@@ -115,8 +113,6 @@ export class LobbyScene extends Phaser.Scene {
 
   // Room view GameObjects (destroyed + rebuilt on every state change).
   private roomObjects: Phaser.GameObjects.GameObject[] = [];
-  private shareFeedbackText: Phaser.GameObjects.Text | null = null;
-  private rawInviteInput: Phaser.GameObjects.DOMElement | null = null;
 
   constructor() {
     super("LobbyScene");
@@ -566,23 +562,16 @@ export class LobbyScene extends Phaser.Scene {
     const header = this.add.text(60, 40, `Room: ${state.code}`, TEXT_STYLE_BODY);
     this.roomObjects.push(header);
 
-    const bigCode = this.add.text(cx, 120, state.code, TEXT_STYLE_CODE).setOrigin(0.5);
-    this.roomObjects.push(bigCode);
-
     const leaveBtn = this.makeButton(CANVAS_W - 120, 50, 160, 50, "Leave", () => {
       void this.handleLeave();
     });
     this.roomObjects.push(...leaveBtn);
 
-    // Share Invite button sits below the big room code so the host can push
-    // the link via the OS share sheet on mobile or the clipboard on desktop.
-    this.renderShareInvite(cx, 175, state.code);
-
     // Map picker row (host = arrows; guest = read-only name).
-    this.renderMapPicker(cx, 220, vm);
+    this.renderMapPicker(cx, 160, vm);
 
     // Player list.
-    this.renderPlayerList(cx, 310, vm);
+    this.renderPlayerList(cx, 260, vm);
 
     // Ready + Start buttons at the bottom.
     this.renderActions(cx, 620, vm);
@@ -592,45 +581,45 @@ export class LobbyScene extends Phaser.Scene {
     const entry = getById(vm.mapId);
     const mapName = entry?.config.name ?? vm.mapId;
 
-    const mapLabel = this.add.text(cx - 220, y, "Map:", TEXT_STYLE_BODY).setOrigin(0, 0.5);
+    const mapLabel = this.add.text(cx - 260, y, "Map:", TEXT_STYLE_ROOM).setOrigin(0, 0.5);
     this.roomObjects.push(mapLabel);
 
     if (vm.iAmHost) {
-      const prev = this.makeButton(cx - 40, y, 50, 40, "<", () => {
+      const prev = this.makeButton(cx - 60, y, 60, 50, "<", () => {
         this.cycleMap(-1);
       });
       this.roomObjects.push(...prev);
 
-      const nameText = this.add.text(cx + 80, y, mapName, TEXT_STYLE_BODY).setOrigin(0.5);
+      const nameText = this.add.text(cx + 90, y, mapName, TEXT_STYLE_ROOM).setOrigin(0.5);
       this.roomObjects.push(nameText);
 
-      const next = this.makeButton(cx + 200, y, 50, 40, ">", () => {
+      const next = this.makeButton(cx + 240, y, 60, 50, ">", () => {
         this.cycleMap(+1);
       });
       this.roomObjects.push(...next);
     } else {
-      const nameText = this.add.text(cx + 80, y, mapName, TEXT_STYLE_BODY).setOrigin(0.5);
+      const nameText = this.add.text(cx + 90, y, mapName, TEXT_STYLE_ROOM).setOrigin(0.5);
       this.roomObjects.push(nameText);
 
       const hint = this.add
-        .text(cx + 80, y + 28, "(host chooses)", TEXT_STYLE_SMALL)
+        .text(cx + 90, y + 34, "(host chooses)", TEXT_STYLE_SMALL)
         .setOrigin(0.5);
       this.roomObjects.push(hint);
     }
   }
 
   private renderPlayerList(cx: number, y: number, vm: ViewModel): void {
-    const header = this.add.text(cx - 300, y, "Players", TEXT_STYLE_BODY).setOrigin(0, 0.5);
+    const header = this.add.text(cx - 340, y, "Players", TEXT_STYLE_ROOM).setOrigin(0, 0.5);
     this.roomObjects.push(header);
 
-    let rowY = y + 40;
+    let rowY = y + 58;
     for (const row of vm.players) {
       // Color swatch.
       const swatch = this.add.rectangle(
-        cx - 280,
+        cx - 320,
         rowY,
-        28,
-        28,
+        36,
+        36,
         Number.parseInt(row.color.replace("#", ""), 16),
       );
       swatch.setStrokeStyle(2, 0xffffff);
@@ -646,8 +635,8 @@ export class LobbyScene extends Phaser.Scene {
       // precedence over the "you" highlight because if you're seeing your
       // own row as disconnected we're in a weird state worth surfacing.
       const nameColor = row.disconnected ? "#888888" : row.isMe ? "#ffffaa" : "#e0e0e0";
-      const label = this.add.text(cx - 250, rowY, `${row.nickname}${tagStr}`, {
-        ...TEXT_STYLE_BODY,
+      const label = this.add.text(cx - 280, rowY, `${row.nickname}${tagStr}`, {
+        ...TEXT_STYLE_ROOM,
         color: nameColor,
       });
       label.setOrigin(0, 0.5);
@@ -657,14 +646,14 @@ export class LobbyScene extends Phaser.Scene {
       const readyLabel = row.isHost ? "-" : row.ready ? "READY" : "not ready";
       const readyColor = row.ready ? "#44dd44" : "#aaaaaa";
       const readyText = this.add
-        .text(cx + 200, rowY, readyLabel, {
-          ...TEXT_STYLE_BODY,
+        .text(cx + 220, rowY, readyLabel, {
+          ...TEXT_STYLE_ROOM,
           color: row.isHost ? "#666666" : readyColor,
         })
         .setOrigin(0, 0.5);
       this.roomObjects.push(readyText);
 
-      rowY += 40;
+      rowY += 56;
     }
   }
 
@@ -715,74 +704,9 @@ export class LobbyScene extends Phaser.Scene {
     }
   }
 
-  /**
-   * Share Invite button + feedback area. On mobile the Web Share API opens
-   * the OS share sheet; on desktop we fall back to the clipboard. If both
-   * fail we reveal a read-only text input with the raw URL so the host can
-   * select-and-copy manually.
-   */
-  private renderShareInvite(cx: number, y: number, code: string): void {
-    const shareBtn = this.makeButton(cx, y, 260, 60, "Share Invite", () => {
-      void this.handleShareInvite(code);
-    });
-    this.roomObjects.push(...shareBtn);
-
-    // Small feedback slot for transient "Link copied" messages.
-    const feedback = this.add.text(cx, y + 46, "", TEXT_STYLE_SMALL).setOrigin(0.5);
-    this.roomObjects.push(feedback);
-    this.shareFeedbackText = feedback;
-  }
-
-  private async handleShareInvite(code: string): Promise<void> {
-    const result = await shareInvite(code, window);
-    if (result === "shared") {
-      // No feedback: OS share sheet or user cancel is its own feedback.
-      return;
-    }
-    if (result === "copied") {
-      this.flashShareFeedback("Link copied");
-      return;
-    }
-    // Failed: reveal a read-only text field with the raw URL.
-    this.revealRawInviteUrl(code);
-  }
-
-  private flashShareFeedback(msg: string): void {
-    const el = this.shareFeedbackText;
-    if (!el) return;
-    el.setText(msg);
-    this.time.delayedCall(2000, () => {
-      if (!el.scene) return;
-      el.setText("");
-    });
-  }
-
-  private revealRawInviteUrl(code: string): void {
-    // Skip if already revealed (avoid stacking inputs on repeated failures).
-    if (this.rawInviteInput) return;
-    const cx = CANVAS_W / 2;
-    const url = buildInviteUrl(code, window);
-    const inputEl = this.add.dom(
-      cx,
-      255,
-      "input",
-      "width: 360px; height: 36px; font-size: 16px; padding: 4px 8px; color: #e0e0e0; background: #22222c; border: 1px solid #555; border-radius: 4px; color-scheme: dark; text-align: center;",
-    );
-    const node = inputEl.node as HTMLInputElement;
-    node.setAttribute("type", "text");
-    node.setAttribute("readonly", "readonly");
-    node.value = url;
-    node.addEventListener("focus", () => node.select());
-    this.rawInviteInput = inputEl;
-    this.roomObjects.push(inputEl);
-    this.flashShareFeedback("Copy manually:");
-  }
-
   private clearRoom(): void {
     for (const obj of this.roomObjects) obj.destroy();
     this.roomObjects = [];
-    this.shareFeedbackText = null;
-    this.rawInviteInput = null;
   }
 
   private flashRoomError(msg: string): void {
