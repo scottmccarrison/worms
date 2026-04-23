@@ -71,6 +71,7 @@ export class OfflineSimAdapter implements SimAdapter {
   private readonly gameOverSubs = new Set<(winnerTeamId: string | null) => void>();
   private readonly turnChangedSubs = new Set<(teamId: string, wormId: string) => void>();
   private readonly inputAllowedSubs = new Set<(allowed: boolean) => void>();
+  private readonly stableStateSubs = new Set<() => void>();
 
   // Rendering mirror: OfflineSimAdapter's Worms own their own sprites for
   // backward compat with the pre-Epic-45 flow. RenderableWorm[] is a thin
@@ -162,6 +163,10 @@ export class OfflineSimAdapter implements SimAdapter {
         this.setInputAllowed(true);
         this.getWeaponManager(team)?.resetActivation();
         for (const sub of this.turnChangedSubs) sub(team.id, worm.name);
+        // Offline sim is always immediately stable - fire stable subs on next microtask.
+        queueMicrotask(() => {
+          for (const sub of this.stableStateSubs) sub();
+        });
       },
       onTurnEnd: () => {
         this.setInputAllowed(false);
@@ -382,6 +387,7 @@ export class OfflineSimAdapter implements SimAdapter {
     this.gameOverSubs.clear();
     this.turnChangedSubs.clear();
     this.inputAllowedSubs.clear();
+    this.stableStateSubs.clear();
   }
 
   onEvent(cb: (ev: SimEvent) => void): () => void {
@@ -409,6 +415,13 @@ export class OfflineSimAdapter implements SimAdapter {
     this.inputAllowedSubs.add(cb);
     return () => {
       this.inputAllowedSubs.delete(cb);
+    };
+  }
+
+  onStateStable(cb: () => void): () => void {
+    this.stableStateSubs.add(cb);
+    return () => {
+      this.stableStateSubs.delete(cb);
     };
   }
 

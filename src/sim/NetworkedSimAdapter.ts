@@ -25,6 +25,7 @@ import type {
   WormDiedMessage,
 } from "../net/types";
 import type { RoomHandle } from "../net/wsClient";
+import { tuning } from "../tuning";
 import { Team } from "../worm/Team";
 import type { RenderableProjectile, RenderableWorm, SimAdapter, SimEvent } from "./SimAdapter";
 
@@ -61,6 +62,11 @@ export class NetworkedSimAdapter implements SimAdapter {
   private readonly gameOverSubs = new Set<(winnerTeamId: string | null) => void>();
   private readonly turnChangedSubs = new Set<(teamId: string, wormId: string) => void>();
   private readonly inputAllowedSubs = new Set<(allowed: boolean) => void>();
+  private readonly stableSubs: Array<() => void> = [];
+  private framesSinceTurnChange = 0;
+  private stableFiredThisTurn = false;
+  private stableTurnTeamId: string | null = null;
+  private stableTurnWormId: string | null = null;
 
   /**
    * Two-frame interpolation buffer. `prev` is the previous sim_state;
@@ -308,6 +314,7 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.gameOverSubs.clear();
     this.turnChangedSubs.clear();
     this.inputAllowedSubs.clear();
+    this.stableSubs.length = 0;
   }
 
   onEvent(cb: (ev: SimEvent) => void): () => void {
@@ -335,6 +342,14 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.inputAllowedSubs.add(cb);
     return () => {
       this.inputAllowedSubs.delete(cb);
+    };
+  }
+
+  onStateStable(cb: () => void): () => void {
+    this.stableSubs.push(cb);
+    return () => {
+      const i = this.stableSubs.indexOf(cb);
+      if (i >= 0) this.stableSubs.splice(i, 1);
     };
   }
 
@@ -431,8 +446,27 @@ export class NetworkedSimAdapter implements SimAdapter {
     ) {
       this.lastActiveTeamId = state.activeTeamId;
       this.lastActiveWormId = state.activeWormId;
+      // Reset stability tracking for the new turn.
+      this.framesSinceTurnChange = 0;
+      this.stableFiredThisTurn = false;
+      this.stableTurnTeamId = state.activeTeamId;
+      this.stableTurnWormId = state.activeWormId;
       for (const sub of this.turnChangedSubs) sub(state.activeTeamId, state.activeWormId);
     }
+
+    // Stability tracking: after N consecutive frames reporting the same
+    // activeTeamId/activeWormId, consider the turn state settled.
+    this.framesSinceTurnChange += 1;
+    if (
+      !this.stableFiredThisTurn &&
+      state.activeTeamId === this.stableTurnTeamId &&
+      state.activeWormId === this.stableTurnWormId &&
+      this.framesSinceTurnChange >= tuning.camera.networkStabilityFrames
+    ) {
+      this.stableFiredThisTurn = true;
+      for (const sub of this.stableSubs) sub();
+    }
+
     this.lastTurnEndsAt = state.turnEndsAt;
   }
 
