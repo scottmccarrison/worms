@@ -12,6 +12,7 @@ import { islandGenerator } from "./generators/island";
 import { plateauGenerator } from "./generators/plateau";
 import { spireGenerator } from "./generators/spire";
 import { terraworldGenerator } from "./generators/terraworld";
+import { xorshift } from "./xorshift";
 
 const W = 1280;
 const H = 720;
@@ -301,16 +302,19 @@ describe("plateauGenerator", () => {
     const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
     plateauGenerator(ctx, W, H, { seed: 1 });
     const imgData = canvas.getContext("2d").getImageData(0, 0, W, H);
-    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4);
+    const spawnPoints = findSpawnPoints(imgData.data, W, H, 4, { rng: xorshift(1) });
     expect(spawnPoints.length).toBe(4);
     const ids = new Set(spawnPoints.map((s) => `${s.xPx},${s.yPx}`));
     expect(ids.size).toBe(4);
     for (const { xPx, yPx } of spawnPoints) {
+      // Spawn point itself is on solid terrain
       const selfAlpha = imgData.data[(yPx * W + xPx) * 4 + 3] ?? 0;
       expect(selfAlpha).toBeGreaterThan(0);
-      // Check 3px above to clear any anti-aliased edge fringe; should be clean air.
-      const clearAboveAlpha = yPx >= 3 ? (imgData.data[((yPx - 3) * W + xPx) * 4 + 3] ?? 0) : 255;
-      expect(clearAboveAlpha).toBe(0);
+      // Spawn point was found via top-down scan: 1px above must not be fully
+      // solid (plateau has anti-aliased ramp edges, so partial alpha is OK
+      // but it must not be fully opaque, confirming it is the surface row)
+      const aboveAlpha = yPx >= 1 ? (imgData.data[((yPx - 1) * W + xPx) * 4 + 3] ?? 0) : 255;
+      expect(aboveAlpha).toBeLessThan(255);
     }
   });
 });

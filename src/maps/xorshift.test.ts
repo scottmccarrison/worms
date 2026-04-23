@@ -42,4 +42,17 @@ describe("xorshift", () => {
       expect(v).toBeLessThanOrEqual(1);
     }
   });
+
+  it("determinism: same seed produces same value on the first call", () => {
+    const a = xorshift(7);
+    const b = xorshift(7);
+    expect(a()).toBe(b());
+  });
+
+  it("spread: first rng() values for seeds 1-20 span a range > 0.3 (warmup regression guard)", () => {
+    const firstValues = Array.from({ length: 20 }, (_, i) => xorshift(i + 1)());
+    const min = Math.min(...firstValues);
+    const max = Math.max(...firstValues);
+    expect(max - min).toBeGreaterThan(0.3);
+  });
 });

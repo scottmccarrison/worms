@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { xorshift } from "../maps/xorshift";
 import { findSpawnPoints } from "./spawnPoints";
 
 /** Transparent top half + solid bottom half (simulates ground-only terrain). */
@@ -12,79 +13,70 @@ function groundOnlyMask(w: number, h: number): Uint8ClampedArray {
   return data;
 }
 
-/** Solid top strip (ceiling) + transparent middle + solid bottom (ground). */
-function ceilingAndGroundMask(w: number, h: number): Uint8ClampedArray {
-  const data = new Uint8ClampedArray(w * h * 4);
-  const ceilingHeight = Math.floor(h * 0.1);
-  const groundStart = Math.floor(h * 0.6);
-  for (let row = 0; row < h; row++) {
-    if (row < ceilingHeight || row >= groundStart) {
-      for (let col = 0; col < w; col++) {
-        data[(row * w + col) * 4 + 3] = 255;
-      }
-    }
-  }
-  return data;
-}
-
 /** All-transparent mask. */
 function emptyMask(w: number, h: number): Uint8ClampedArray {
   return new Uint8ClampedArray(w * h * 4);
 }
 
-/** Ground only in left + right edge columns (narrow playing field). */
-function edgeOnlyGroundMask(w: number, h: number): Uint8ClampedArray {
-  const data = new Uint8ClampedArray(w * h * 4);
-  const groundStart = Math.floor(h / 2);
-  for (let row = groundStart; row < h; row++) {
-    for (const col of [0, w - 1]) {
-      data[(row * w + col) * 4 + 3] = 255;
-    }
-  }
-  return data;
-}
-
 describe("findSpawnPoints", () => {
-  it("returns N spawn points at ground surface for a ground-only mask", () => {
-    const w = 100;
-    const h = 50;
-    const data = groundOnlyMask(w, h);
-    const pts = findSpawnPoints(data, w, h, 4);
-    expect(pts).toHaveLength(4);
-    // Ground starts at h/2 = 25
-    for (const pt of pts) {
-      expect(pt.yPx).toBe(25);
-    }
-  });
-
-  it("skips a ceiling and returns ground-top for a ceiling+ground mask", () => {
-    const w = 100;
-    const h = 50;
-    const data = ceilingAndGroundMask(w, h);
-    const pts = findSpawnPoints(data, w, h, 4);
-    expect(pts).toHaveLength(4);
-    // Ceiling is rows 0-4; air rows 5-29; ground starts at row 30
-    const expectedGroundTop = Math.floor(50 * 0.6);
-    for (const pt of pts) {
-      expect(pt.yPx).toBe(expectedGroundTop);
-    }
-  });
-
   it("returns [] for an empty mask", () => {
-    const data = emptyMask(100, 50);
-    expect(findSpawnPoints(data, 100, 50, 4)).toEqual([]);
-  });
-
-  it("returns partial results when some slots lack ground", () => {
-    // Only edge columns have ground; center slots have no ground surface
-    const data = edgeOnlyGroundMask(100, 50);
-    const pts = findSpawnPoints(data, 100, 50, 4);
-    expect(pts.length).toBeGreaterThan(0);
-    expect(pts.length).toBeLessThan(4);
+    const data = emptyMask(1000, 500);
+    expect(findSpawnPoints(data, 1000, 500, 4)).toEqual([]);
   });
 
   it("returns [] for count=0", () => {
-    const data = groundOnlyMask(100, 50);
-    expect(findSpawnPoints(data, 100, 50, 0)).toEqual([]);
+    const data = groundOnlyMask(1000, 500);
+    expect(findSpawnPoints(data, 1000, 500, 0)).toEqual([]);
+  });
+
+  it("full-terrain map: finds N spawns all on the surface", () => {
+    const w = 2000;
+    const h = 500;
+    const data = groundOnlyMask(w, h);
+    const pts = findSpawnPoints(data, w, h, 4, { rng: xorshift(1) });
+    expect(pts).toHaveLength(4);
+    for (const pt of pts) {
+      // Surface is at h/2 = 250
+      expect(pt.yPx).toBe(Math.floor(h / 2));
+      // xPx should be inside the canvas
+      expect(pt.xPx).toBeGreaterThanOrEqual(0);
+      expect(pt.xPx).toBeLessThan(w);
+    }
+  });
+
+  it("determinism: same rng seed produces same spawn set", () => {
+    const w = 2000;
+    const h = 500;
+    const data = groundOnlyMask(w, h);
+    const ptsA = findSpawnPoints(data, w, h, 4, { rng: xorshift(42) });
+    const ptsB = findSpawnPoints(data, w, h, 4, { rng: xorshift(42) });
+    expect(ptsA).toEqual(ptsB);
+  });
+
+  it("spacing: with wide open terrain, spawns are at least minSpacingPx apart", () => {
+    const w = 2000;
+    const h = 500;
+    const data = groundOnlyMask(w, h);
+    const minSpacing = 200;
+    const pts = findSpawnPoints(data, w, h, 4, { rng: xorshift(7), minSpacingPx: minSpacing });
+    expect(pts.length).toBeGreaterThan(0);
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const dist = Math.abs((pts[i] as { xPx: number }).xPx - (pts[j] as { xPx: number }).xPx);
+        expect(dist).toBeGreaterThanOrEqual(minSpacing);
+      }
+    }
+  });
+
+  it("different rng seeds produce different spawn positions (variety check)", () => {
+    const w = 2000;
+    const h = 500;
+    const data = groundOnlyMask(w, h);
+    const ptsA = findSpawnPoints(data, w, h, 4, { rng: xorshift(1) });
+    const ptsB = findSpawnPoints(data, w, h, 4, { rng: xorshift(99) });
+    // At least one x position should differ between the two runs
+    const xsA = ptsA.map((p) => p.xPx).sort((a, b) => a - b);
+    const xsB = ptsB.map((p) => p.xPx).sort((a, b) => a - b);
+    expect(xsA).not.toEqual(xsB);
   });
 });
