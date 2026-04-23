@@ -26,7 +26,7 @@ import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { TurnTransition } from "../ui/TurnTransition";
 import { UtilityDPad } from "../ui/UtilityDPad";
-import { WeaponDrawer } from "../ui/WeaponDrawer";
+import { WeaponRadial } from "../ui/WeaponRadial";
 import { WindHUD } from "../ui/WindHUD";
 import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
 import type { Team } from "../worm/Team";
@@ -78,7 +78,7 @@ export class GameScene extends Phaser.Scene {
   private touchControls!: TouchControls;
   private turnHUD!: TurnHUD;
   private spectatorHUD: SpectatorHUD | null = null;
-  private weaponDrawer!: WeaponDrawer;
+  private weaponRadial!: WeaponRadial;
   private aimHUD!: AimHUD;
   /** Rope / jetpack d-pad. Offline-only (networked disables utilities per #65).
    * Shown when a utility is active, hidden otherwise; visibility + callbacks
@@ -272,7 +272,7 @@ export class GameScene extends Phaser.Scene {
       for (const g of this.projectileGraphics.values()) g.destroy();
       this.projectileGraphics.clear();
       this.turnHUD?.destroy();
-      this.weaponDrawer?.destroy();
+      this.weaponRadial?.destroy();
       this.aimHUD?.destroy();
       this.spectatorHUD?.destroy();
       this.utilityDPad?.destroy();
@@ -325,13 +325,11 @@ export class GameScene extends Phaser.Scene {
       ropeEnabled: !this.isNetworked,
       jetPackEnabled: true,
     });
-    this.weaponDrawer = new WeaponDrawer({
+    this.weaponRadial = new WeaponRadial({
       scene: this,
-      weapons: allWeapons(),
-      onSelect: (id) => this.sim.selectWeapon(id),
-      getAmmo: (id) => this.getAmmoFor(id),
-      getSelectedId: () => this.getSelectedWeaponId(),
-      getTeamColor: () => this.getActiveTeamColor(),
+      sim: this.sim,
+      getSelectedWeaponId: () => this.getSelectedWeaponId(),
+      getAmmoFor: (id) => this.getAmmoFor(id),
     });
     this.aimHUD = new AimHUD({
       scene: this,
@@ -448,7 +446,7 @@ export class GameScene extends Phaser.Scene {
     this.renderFromAdapter();
     this.inputController.update(deltaMs);
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
-    this.weaponDrawer.update();
+    this.weaponRadial.update();
     this.aimHUD.update();
     this.windHUD?.update();
     this.waterRenderer?.update();
@@ -782,11 +780,6 @@ export class GameScene extends Phaser.Scene {
     return this.sim.getActiveWeaponId() || allWeapons()[0]?.id || "";
   }
 
-  private getActiveTeamColor(): number {
-    const id = this.sim.getActiveTeamId();
-    return this.sim.teams.find((t) => t.id === id)?.color ?? 0xffffff;
-  }
-
   private isInputAllowed(): boolean {
     if (this.offlineSim) return this.offlineSim.turns.isInputAllowed();
     if (this.networkedSim) return this.networkedSim.isInputAllowed();
@@ -941,7 +934,7 @@ export class GameScene extends Phaser.Scene {
       // them to avoid double-triggering.
       if (this.turnHUD.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
-      if (this.weaponDrawer.hitsIcon(p)) return;
+      if (this.weaponRadial?.hitsRadial(p)) return;
       // Already tracking a gesture on a different pointer: ignore. Multi-touch
       // secondary fingers should route to buttons (above), not the gesture layer.
       if (this.activePointerId !== null) return;
