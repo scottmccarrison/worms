@@ -24,11 +24,25 @@ export const TURN_DURATION_MS = 45_000;
 export const SETTLE_GRACE_MS = 6_000;
 export const DISCONNECT_GRACE_MS = 60_000;
 
+/**
+ * Early-settle tunables. Mirror tuning.turn.settleVelThresholdMps and
+ * tuning.turn.settleHoldMs on the client so server and client feel
+ * consistent. Kept as local consts rather than imported from the client
+ * tuning module to avoid a client->worker dependency.
+ */
+const EARLY_SETTLE_VEL_THRESHOLD_MPS = 0.15;
+const EARLY_SETTLE_HOLD_MS = 500;
+
 /** Provider of authoritative alive counts (the Simulation). */
 export interface AliveCountsProvider {
   aliveWormsByTeam(): Map<string, number>;
   /** Per-worm liveness so the arbiter can skip dead worms during rotation. */
   isWormAlive(wormId: string): boolean;
+  /**
+   * True when every alive worm has linear velocity below the threshold
+   * and no projectiles are in flight. Used by early-settle detection.
+   */
+  isAllSettled(velThresholdMps: number): boolean;
 }
 
 /**
@@ -82,6 +96,7 @@ export class TurnArbiter {
   private pausedRemainingMs: number | null = null;
   private pendingAdvance = false;
   private hasFiredThisTurn = false;
+  private settleHoldMs = 0;
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
@@ -113,6 +128,7 @@ export class TurnArbiter {
   }
 
   start(teamOrder: string[], rosters: TeamRoster[], turnDurationMs: number): void {
+    this.settleHoldMs = 0;
     this.teamRosters.clear();
     this.teamWormCursor.clear();
     this.forfeitedTeams.clear();
@@ -141,7 +157,7 @@ export class TurnArbiter {
    * game_over condition every tick (a worm may have died off-map even
    * without the turn timer expiring).
    */
-  onTick(_dtMs: number): void {
+  onTick(dtMs: number): void {
     if (this.gameOver) return;
     this.checkGameOver();
     if (this.gameOver) return;
@@ -152,6 +168,22 @@ export class TurnArbiter {
     }
     if (this.pausedRemainingMs !== null) return;
     const now = Date.now();
+    // Early-advance: if retreat window is over and the sim has stopped
+    // moving for EARLY_SETTLE_HOLD_MS, advance now instead of waiting
+    // the full SETTLE_GRACE_MS safety cap.
+    if (now > this.room.state.turnEndsAt) {
+      const provider = this.room.getAliveCountsProvider();
+      if (provider?.isAllSettled(EARLY_SETTLE_VEL_THRESHOLD_MPS)) {
+        this.settleHoldMs += dtMs;
+        if (this.settleHoldMs >= EARLY_SETTLE_HOLD_MS) {
+          this.advanceTurn();
+          return;
+        }
+      } else {
+        this.settleHoldMs = 0;
+      }
+    }
+    // Safety cap: advance unconditionally after SETTLE_GRACE_MS.
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
       this.advanceTurn();
     }
@@ -305,6 +337,7 @@ export class TurnArbiter {
   }
 
   private advanceTurn(): void {
+    this.settleHoldMs = 0;
     const teamsWithAliveWorms: string[] = [];
     for (const teamId of this.room.state.teamOrder) {
       if (this.teamAliveCount(teamId) > 0) teamsWithAliveWorms.push(teamId);
