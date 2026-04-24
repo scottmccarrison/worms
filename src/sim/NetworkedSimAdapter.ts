@@ -15,7 +15,7 @@
  * Calls log a warning and drop.
  */
 
-import { dlogUnthrottled } from "../debug/logger";
+import { dlogUnthrottled, setLogContext } from "../debug/logger";
 import type {
   ClientMsg,
   DamageEventMessage,
@@ -105,7 +105,6 @@ export class NetworkedSimAdapter implements SimAdapter {
   private lastActiveTeamId = "";
   private lastActiveWormId = "";
   private lastTurnEndsAt = 0;
-
   // Aim throttling: drag-to-aim fires at 60+Hz but we only send max
   // one input_aim_{angle,power} pair every 50ms (20Hz). The last value
   // is remembered so a subsequent flush lands the final state before
@@ -456,6 +455,7 @@ export class NetworkedSimAdapter implements SimAdapter {
       this.stableFiredThisTurn = false;
       this.stableTurnTeamId = state.activeTeamId;
       this.stableTurnWormId = state.activeWormId;
+      setLogContext({ turn: this.room.state.turnSeq });
       dlogUnthrottled("sim", "NetworkedSimAdapter.turn_changed", {
         teamId: state.activeTeamId,
         wormId: state.activeWormId,

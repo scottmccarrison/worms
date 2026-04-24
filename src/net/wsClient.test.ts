@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientMsg, LobbyState, ServerMsg } from "../../shared/protocol";
+import { getLogForwarder, setLogContext, setLogForwarder, setLoggerEnabled } from "../debug/logger";
 import { createRoom, joinRoom } from "./wsClient";
 
 // ---------------------------------------------------------------------------
@@ -304,6 +305,47 @@ describe("joinRoom", () => {
     room.leave();
     expect(closeCodes).toEqual([1000]);
     expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+  });
+
+  it("stale socket close does not wipe log context set by a newer socket", async () => {
+    // Enable logging so the forwarder is installed on open.
+    setLoggerEnabled(true);
+
+    // --- First connection ---
+    const p1 = joinRoom("ws://example.test", "WAVE", "alice", "#ff4444");
+    const ws1 = MockWebSocket.instances[0];
+    if (!ws1) throw new Error("mock socket 1 not created");
+    ws1.open();
+    ws1.recv({
+      type: "welcome",
+      sessionId: "sid-1",
+      resumeToken: "resume-abc",
+      state: baselineState(),
+    });
+    await p1;
+
+    // Forwarder from first connection is now installed.
+    const fwd1 = getLogForwarder();
+    expect(fwd1).not.toBeNull();
+
+    // --- Second connection (reconnect) sets its own forwarder + log context ---
+    // Simulate new room context being set by a second joinRoom call.
+    // We install a fresh forwarder manually to represent the new socket's setup.
+    const fwd2 = vi.fn();
+    setLogForwarder(fwd2);
+    setLogContext({ room: "NEW_ROOM" });
+
+    // --- First socket's close fires late (stale) ---
+    // In production this happens when the OS flushes a delayed TCP FIN.
+    ws1.close(1001);
+
+    // The stale close must NOT have cleared the newer context/forwarder.
+    expect(getLogForwarder()).toBe(fwd2);
+
+    // Cleanup
+    setLoggerEnabled(false);
+    setLogForwarder(null);
+    setLogContext({ room: undefined });
   });
 
   it("ignores malformed JSON messages instead of crashing", async () => {

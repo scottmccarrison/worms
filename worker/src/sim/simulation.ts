@@ -22,6 +22,7 @@
  */
 
 import type { Contact, ContactImpulse } from "planck";
+import { dlog, type LogContext } from "../debug/logger.js";
 import {
   Projectile,
   type ProjectileRenderState,
@@ -104,6 +105,7 @@ export interface SimulationInit {
   mask: Uint8Array;
   teams: SimTeamInit[];
   seed: number;
+  logCtx?: () => LogContext;
 }
 
 /** Snapshot for DO storage / hibernation recovery. */
@@ -170,11 +172,13 @@ export class Simulation {
    * -1 means infinite. Finite weapons (e.g. holygrenade=2) are tracked here.
    */
   private readonly teamAmmo: Map<string, Record<string, number>> = new Map();
+  private readonly getLogCtx: () => LogContext;
 
   constructor(init: SimulationInit) {
     this.widthPx = init.widthPx;
     this.heightPx = init.heightPx;
     this.seed = init.seed;
+    this.getLogCtx = init.logCtx ?? (() => ({}));
     this.world = createPhysicsWorld(init.gravity ?? { x: 0, y: 10 });
     this.terrain = new Terrain({
       world: this.world,
@@ -355,6 +359,7 @@ export class Simulation {
       power: worm.aimPower,
       facing: worm.facing,
     });
+    dlog("sim", "fire", this.getLogCtx(), { weaponId: weapon.id, wormId: worm.id });
 
     for (const ex of result.explodeResults) {
       this.emitExplodeEvents(ex, null);
@@ -418,6 +423,7 @@ export class Simulation {
         if (!worm.alive && !this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);
           this.events.push({ type: "worm_died", wormId: worm.id });
+          dlog("sim", "worm_died", this.getLogCtx(), { wormId: worm.id, cause: "fall" });
         }
       }
     }
@@ -473,6 +479,7 @@ export class Simulation {
         if (!this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);
           this.events.push({ type: "worm_died", wormId: worm.id });
+          dlog("sim", "worm_died", this.getLogCtx(), { wormId: worm.id, cause: "off_map" });
         }
       }
     }
@@ -490,6 +497,7 @@ export class Simulation {
           if (!this.diedThisTick.has(worm.id)) {
             this.diedThisTick.add(worm.id);
             this.events.push({ type: "worm_died", wormId: worm.id });
+            dlog("sim", "worm_died", this.getLogCtx(), { wormId: worm.id, cause: "drown" });
             this.events.push({
               type: "damage_event",
               wormId: worm.id,
@@ -706,6 +714,7 @@ export class Simulation {
       r: ex.cut.r,
       seq: ex.cut.seq,
     });
+    dlog("sim", "terrain_cut", this.getLogCtx(), { x: ex.cut.x, y: ex.cut.y, r: ex.cut.r });
     for (const d of ex.damaged) {
       this.events.push({
         type: "damage_event",
@@ -717,6 +726,7 @@ export class Simulation {
       if (d.died && !this.diedThisTick.has(d.wormId)) {
         this.diedThisTick.add(d.wormId);
         this.events.push({ type: "worm_died", wormId: d.wormId });
+        dlog("sim", "worm_died", this.getLogCtx(), { wormId: d.wormId, cause: "explosion" });
       }
     }
   }
@@ -725,6 +735,7 @@ export class Simulation {
     if (proj.detonated) return;
     proj.markDetonated();
     const pos = proj.body.getPosition();
+    dlog("sim", "detonate", this.getLogCtx(), { weaponId: proj.config.id, x: toPixels(pos.x), y: toPixels(pos.y) });
     const centerPx = { x: toPixels(pos.x), y: toPixels(pos.y) };
     const result = explode({
       world: this.world,
