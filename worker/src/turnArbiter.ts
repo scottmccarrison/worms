@@ -18,6 +18,7 @@
  */
 
 import type { LobbyState } from "./messages.js";
+import { dlog, type LogContext } from "./debug/logger.js";
 
 /** Shared timing constants. */
 export const TURN_DURATION_MS = 45_000;
@@ -51,6 +52,7 @@ export interface AliveCountsProvider {
  */
 export interface ArbiterRoomAdapter {
   readonly state: LobbyState;
+  readonly code: string;
   /** Broadcast a typed payload to every connected client. */
   broadcast(type: string, payload: unknown): void;
   /** Session ids currently present. Disconnected-grace players may still be here. */
@@ -100,6 +102,10 @@ export class TurnArbiter {
 
   constructor(room: ArbiterRoomAdapter) {
     this.room = room;
+  }
+
+  private logCtx(): LogContext {
+    return { room: this.room.code, turn: this.room.state.turnSeq };
   }
 
   toJSON(): ArbiterPersistedState {
@@ -176,6 +182,7 @@ export class TurnArbiter {
       if (provider?.isAllSettled(EARLY_SETTLE_VEL_THRESHOLD_MPS)) {
         this.settleHoldMs += Math.max(0, dtMs);
         if (this.settleHoldMs >= EARLY_SETTLE_HOLD_MS) {
+          dlog("turn", "early_settled", this.logCtx(), { heldMs: this.settleHoldMs });
           this.advanceTurn();
           return;
         }
@@ -185,6 +192,7 @@ export class TurnArbiter {
     }
     // Safety cap: advance unconditionally after SETTLE_GRACE_MS.
     if (now > this.room.state.turnEndsAt + SETTLE_GRACE_MS) {
+      dlog("turn", "safety_cap", this.logCtx());
       this.advanceTurn();
     }
   }
@@ -218,6 +226,7 @@ export class TurnArbiter {
     if (retreatEnd < this.room.state.turnEndsAt) {
       this.room.state.turnEndsAt = retreatEnd;
     }
+    dlog("turn", "fire_committed", this.logCtx(), { retreatEndsAt: retreatEnd });
   }
 
   /**
@@ -227,8 +236,22 @@ export class TurnArbiter {
    * ignored so the player can't sneak another fire after the timer hits 0).
    */
   canFire(): boolean {
-    if (!this.areInputsAccepted()) return false;
-    if (this.hasFiredThisTurn) return false;
+    if (this.gameOver) {
+      dlog("turn", "fire_rejected", this.logCtx(), { reason: "gameOver" });
+      return false;
+    }
+    if (this.pausedRemainingMs !== null) {
+      dlog("turn", "fire_rejected", this.logCtx(), { reason: "inputsClosed" });
+      return false;
+    }
+    if (Date.now() > this.room.state.turnEndsAt) {
+      dlog("turn", "fire_rejected", this.logCtx(), { reason: "inputsClosed" });
+      return false;
+    }
+    if (this.hasFiredThisTurn) {
+      dlog("turn", "fire_rejected", this.logCtx(), { reason: "alreadyFired" });
+      return false;
+    }
     return true;
   }
 
@@ -291,6 +314,7 @@ export class TurnArbiter {
     const remaining = Math.max(0, this.room.state.turnEndsAt - Date.now());
     this.pausedRemainingMs = remaining;
     this.room.state.turnEndsAt = Number.MAX_SAFE_INTEGER;
+    dlog("turn", "paused", this.logCtx(), { remainingMs: this.pausedRemainingMs });
   }
 
   onOwnerReconnected(sessionId: string): void {
@@ -303,6 +327,7 @@ export class TurnArbiter {
     this.room.state.turnEndsAt = Date.now() + this.pausedRemainingMs;
     this.pausedRemainingMs = null;
     this.settleHoldMs = 0;
+    dlog("turn", "resumed", this.logCtx());
   }
 
   onTeamForfeit(teamId: string): void {
@@ -338,6 +363,7 @@ export class TurnArbiter {
   }
 
   private advanceTurn(): void {
+    const fromTeam = this.room.state.currentTeamId;
     this.settleHoldMs = 0;
     const teamsWithAliveWorms: string[] = [];
     for (const teamId of this.room.state.teamOrder) {
@@ -378,6 +404,7 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.pausedRemainingMs = null;
+    dlog("turn", "advance", this.logCtx(), { fromTeam, toTeam: nextTeamId });
     this.fireTurnStart();
   }
 

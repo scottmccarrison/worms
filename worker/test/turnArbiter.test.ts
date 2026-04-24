@@ -46,6 +46,7 @@ class StubAliveCountsProvider implements AliveCountsProvider {
 
 class StubRoom implements ArbiterRoomAdapter {
   state = makeState();
+  code = "TEST";
   broadcasts: Array<{ type: string; payload: unknown }> = [];
   connected = new Set<string>();
   disconnectedPlayers = new Set<string>();

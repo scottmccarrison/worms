@@ -27,7 +27,9 @@
  */
 
 import type { ClientMsg, LobbyState, ServerMsg } from "../../shared/protocol";
-import { dlog } from "../debug/logger";
+import { dlog, getLogForwarder, isLoggerEnabled, setLogContext, setLogForwarder } from "../debug/logger";
+
+type Forwarder = (scope: "scene" | "net" | "sim" | "camera" | "input", event: string, data?: unknown) => void;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -181,6 +183,15 @@ export async function joinRoom(
     socket.addEventListener("open", () => {
       // WebSocket-level open isn't enough: we wait for the `welcome`
       // application-layer message before surfacing a usable handle.
+      if (isLoggerEnabled()) {
+        const mySocket = socket;
+        const fn: Forwarder = (scope, event, data) => {
+          if (mySocket.readyState !== WebSocket.OPEN) return;
+          mySocket.send(JSON.stringify({ type: "client_log", scope, event, data, ts: Date.now() }));
+        };
+        (fn as unknown as Record<string, unknown>)._socket = mySocket;
+        setLogForwarder(fn);
+      }
     });
 
     socket.addEventListener("message", (ev: MessageEvent) => {
@@ -197,6 +208,7 @@ export async function joinRoom(
         sessionId = msg.sessionId;
         resumeTokenOut = msg.resumeToken;
         currentState = msg.state;
+        setLogContext({ room: currentState.code || code.toUpperCase() });
         settleOk();
         // Welcome ALSO fires onStateChange so callers get a single code
         // path for "state arrived" regardless of first vs subsequent.
@@ -222,6 +234,9 @@ export async function joinRoom(
 
     socket.addEventListener("close", (ev: CloseEvent) => {
       settleErr(new Error(`WebSocket closed before welcome (code ${ev.code})`));
+      const cur = getLogForwarder();
+      if (cur && (cur as unknown as Record<string, unknown>)._socket === socket) setLogForwarder(null);
+      setLogContext({ room: undefined });
       for (const cb of closeSubs) {
         try {
           cb(ev.code);

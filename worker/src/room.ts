@@ -25,12 +25,7 @@ import {
   unpackMask,
 } from "../../shared/maskPack.js";
 
-const DEBUG = true;
-function dlog(event: string, data?: unknown): void {
-  if (!DEBUG) return;
-  if (data !== undefined) console.log(`[room] ${event}`, data);
-  else console.log(`[room] ${event}`);
-}
+import { dlog, type LogContext } from "./debug/logger.js";
 import {
   ALLOWED_COLORS,
   type LobbyPlayer,
@@ -140,11 +135,16 @@ export class Room implements DurableObject {
   private simBootstrap: SimBootstrap | null = null;
   private pendingInputs: PendingInput[] = [];
   private tickInProgress = false;
+  private clientLogBudget = new Map<WebSocket, { count: number; windowStart: number }>();
 
   constructor(state: DurableObjectState, env: unknown) {
     this.state = state;
     this.env = env;
     void this.env;
+  }
+
+  private logCtx(): LogContext {
+    return { room: this.code ?? undefined, turn: this.lobby?.turnSeq };
   }
 
   // ---- storage helpers ----
@@ -248,6 +248,7 @@ export class Room implements DurableObject {
       mask,
       teams: bootstrap.teams,
       seed: bootstrap.seed,
+      logCtx: () => this.logCtx(),
     });
     const persisted = await this.state.storage.get<SerializedSim>("simState");
     if (persisted) this.sim.restore(persisted);
@@ -438,7 +439,7 @@ export class Room implements DurableObject {
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
 
-    dlog("webSocketMessage", { type, sid: attachment.sessionId, phase: lobby.phase });
+    dlog("room", "webSocketMessage", this.logCtx(), { type, sid: attachment.sessionId, phase: lobby.phase });
 
     switch (type) {
       case "set_nickname":
@@ -473,6 +474,9 @@ export class Room implements DurableObject {
       case "input_jetpack_horizontal":
         this.queueInput(attachment.sessionId, type, msg);
         break;
+      case "client_log":
+        this.onClientLog(ws, player, msg);
+        break;
       case "leave":
         try {
           ws.close(1000, "client_leave");
@@ -500,6 +504,8 @@ export class Room implements DurableObject {
     const lobby = this.ensureLobby();
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
+
+    this.clientLogBudget.delete(ws);
 
     const liveForSession = this.state.getWebSockets().some((other) => {
       if (other === ws) return false;
@@ -534,7 +540,7 @@ export class Room implements DurableObject {
     try {
       await this.loadState();
       const lobby = this.ensureLobby();
-      dlog("alarm fire", {
+      dlog("room", "alarm fire", this.logCtx(), {
         phase: lobby.phase,
         tickInProgress: this.tickInProgress,
         hasSim: this.sim !== null,
@@ -640,6 +646,25 @@ export class Room implements DurableObject {
 
   // ---- message handlers ----
 
+  private onClientLog(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
+    const m = msg as { scope?: string; event?: string; data?: unknown };
+    if (typeof m.scope !== "string" || typeof m.event !== "string") return;
+    const now = Date.now();
+    const b = this.clientLogBudget.get(ws);
+    if (!b || now - b.windowStart > 1000) {
+      this.clientLogBudget.set(ws, { count: 1, windowStart: now });
+    } else if (b.count >= 30) {
+      return; // drop
+    } else {
+      b.count++;
+    }
+    const scope = m.scope.slice(0, 16);
+    const event = m.event.slice(0, 64);
+    const sid = player.sessionId?.slice(0, 8) ?? "?";
+    const safeData = typeof m.data === "object" && m.data !== null ? (m.data as Record<string, unknown>) : {};
+    dlog("client", event, this.logCtx(), { ...safeData, clientScope: scope, sid });
+  }
+
   private onSetNickname(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
     const nickname = normaliseNickname((msg as { nickname?: unknown }).nickname);
     if (!isValidNickname(nickname)) {
@@ -669,7 +694,7 @@ export class Room implements DurableObject {
 
   private onSetReady(player: LobbyPlayer, msg: unknown): void {
     const lobby = this.ensureLobby();
-    dlog("onSetReady", {
+    dlog("room", "onSetReady", this.logCtx(), {
       sid: player.sessionId ?? "?",
       ready: Boolean((msg as { ready?: unknown }).ready),
       phase: lobby.phase,
@@ -705,7 +730,7 @@ export class Room implements DurableObject {
    */
   private async onReturnToLobby(ws: WebSocket, player: LobbyPlayer): Promise<void> {
     const lobby = this.ensureLobby();
-    dlog("onReturnToLobby entry", { sid: player.sessionId ?? "?", phase: lobby.phase });
+    dlog("room", "onReturnToLobby entry", this.logCtx(), { sid: player.sessionId ?? "?", phase: lobby.phase });
     if (!player.isHost) {
       this.sendError(ws, "not_host", "Only the host may return to the lobby.");
       return;
@@ -744,7 +769,7 @@ export class Room implements DurableObject {
       if (!p.isHost) p.ready = false;
     }
     await this.persistLobby();
-    dlog("onReturnToLobby exit", { phase: this.ensureLobby().phase });
+    dlog("room", "onReturnToLobby exit", this.logCtx(), { phase: this.ensureLobby().phase });
     this.broadcastState();
   }
 
@@ -865,6 +890,7 @@ export class Room implements DurableObject {
       mask,
       teams: simTeams,
       seed,
+      logCtx: () => this.logCtx(),
     });
     await this.persistSim();
 
@@ -1115,7 +1141,7 @@ export class Room implements DurableObject {
 
   private broadcastState(): void {
     const lobby = this.ensureLobby();
-    dlog("broadcastState", {
+    dlog("room", "broadcastState", this.logCtx(), {
       phase: lobby.phase,
       sockets: this.state.getWebSockets().length,
       players: Object.keys(lobby.players).length,
@@ -1164,6 +1190,9 @@ export class Room implements DurableObject {
     return {
       get state() {
         return self.ensureLobby();
+      },
+      get code() {
+        return self.code ?? "";
       },
       broadcast(type, payload): void {
         self.broadcast({ type, ...(payload as object) } as ServerMsg);
