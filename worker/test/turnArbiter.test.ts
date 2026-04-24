@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LobbyState } from "../src/messages.js";
 import {
   type AliveCountsProvider,
   type ArbiterRoomAdapter,
+  SETTLE_GRACE_MS,
   TURN_DURATION_MS,
   type TeamRoster,
   TurnArbiter,
@@ -31,11 +32,15 @@ function makeState(): LobbyState {
 class StubAliveCountsProvider implements AliveCountsProvider {
   counts = new Map<string, number>();
   deadWorms = new Set<string>();
+  settled = true;
   aliveWormsByTeam(): Map<string, number> {
     return new Map(this.counts);
   }
   isWormAlive(wormId: string): boolean {
     return !this.deadWorms.has(wormId);
+  }
+  isAllSettled(_velThresholdMps: number): boolean {
+    return this.settled;
   }
 }
 
@@ -312,5 +317,144 @@ describe("TurnArbiter", () => {
     // Should NOT have extended it - 1s < 5s so retreat window would extend it,
     // but the guard prevents extension.
     expect(room.state.turnEndsAt).toBe(shortened);
+  });
+});
+
+describe("TurnArbiter - early-settle", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeSettleRoom(settled: boolean): { room: StubRoom; arbiter: TurnArbiter } {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    room.provider.settled = settled;
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+    return { room, arbiter };
+  }
+
+  it("advances turn within ~500ms of ticks when sim is settled after turnEndsAt", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+
+    // Accumulate 10 ticks at 50ms each = 500ms. Should trigger advance.
+    let advanced = false;
+    const turnSeqBefore = room.state.turnSeq;
+    for (let i = 0; i < 10; i++) {
+      arbiter.onTick(50);
+      if (room.state.turnSeq !== turnSeqBefore) {
+        advanced = true;
+        break;
+      }
+    }
+    expect(advanced).toBe(true);
+    // Should NOT have taken the full 6s safety cap.
+    expect(Date.now()).toBeLessThan(room.state.turnEndsAt + SETTLE_GRACE_MS);
+  });
+
+  it("does NOT advance early when sim is not settled; safety cap still fires at 6s", () => {
+    const { room, arbiter } = makeSettleRoom(false);
+
+    // Expire the turn timer but not yet the 6s grace.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Tick 9 times (450ms) - not settled, so hold counter stays 0.
+    for (let i = 0; i < 9; i++) arbiter.onTick(50);
+    // Turn should NOT have advanced yet.
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // Advance past the 6s safety cap.
+    vi.setSystemTime(room.state.turnEndsAt + SETTLE_GRACE_MS + 100);
+    arbiter.onTick(50);
+    expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
+  });
+
+  it("dtMs guard: zero and negative ticks do not advance turn or make settleHoldMs go negative", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Feed zero and negative ticks several times.
+    arbiter.onTick(0);
+    arbiter.onTick(-5);
+    arbiter.onTick(0);
+    arbiter.onTick(-100);
+    arbiter.onTick(0);
+
+    // Turn should NOT have advanced - zero/negative ticks add 0 so 500ms
+    // hold is never reached.
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // settleHoldMs should be exactly 0 (never went negative).
+    expect((arbiter as unknown as { settleHoldMs: number }).settleHoldMs).toBe(0);
+  });
+
+  it("resets settleHoldMs when sim un-settles mid-wait", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Accumulate 4 ticks (200ms) while settled.
+    for (let i = 0; i < 4; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore); // not yet at 500ms
+
+    // Sim becomes un-settled (explosion mid-settle) - resets the counter.
+    room.provider.settled = false;
+    arbiter.onTick(50);
+
+    // Sim settles again; we need a fresh 500ms (10 ticks) accumulation.
+    room.provider.settled = true;
+    // 9 ticks = only 450ms since reset - should NOT advance yet.
+    for (let i = 0; i < 9; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // 10th tick crosses the 500ms hold and triggers advance.
+    arbiter.onTick(50);
+    expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
+  });
+
+  it("pause resume resets settleHoldMs so the full 500ms hold is required post-resume", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer so early-settle accumulation can begin.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Accumulate 300ms of settled ticks (6 x 50ms).
+    for (let i = 0; i < 6; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore); // not yet at 500ms
+
+    // Pause the turn (owner disconnects).
+    arbiter.onOwnerDisconnected("alice");
+
+    // Resume - settleHoldMs should be reset to 0.
+    arbiter.onOwnerReconnected("alice");
+    expect((arbiter as unknown as { settleHoldMs: number }).settleHoldMs).toBe(0);
+
+    // Now the new turnEndsAt is in the future (pause restored remaining time).
+    // Push time past it so early-settle logic can fire.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+
+    // 9 ticks = only 450ms since resume - should NOT advance yet.
+    for (let i = 0; i < 9; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // 10th tick brings holdMs to 500ms - should advance now.
+    arbiter.onTick(50);
+    expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
   });
 });

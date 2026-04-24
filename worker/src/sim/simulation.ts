@@ -674,6 +674,23 @@ export class Simulation {
     return this.projectiles.length;
   }
 
+  /**
+   * True when every alive worm has linear velocity magnitude below the
+   * threshold AND no projectiles/throwables are currently in flight.
+   * Used by turnArbiter to advance the turn as soon as the sim is quiet
+   * instead of waiting the full SETTLE_GRACE_MS safety cap.
+   */
+  isAllSettled(velThresholdMps: number): boolean {
+    const threshSq = velThresholdMps * velThresholdMps;
+    for (const worm of this.worms.values()) {
+      if (!worm.alive) continue;
+      const v = worm.body.getLinearVelocity();
+      if (v.x * v.x + v.y * v.y >= threshSq) return false;
+    }
+    if (this.projectiles.length > 0) return false;
+    return true;
+  }
+
   // ---- private ----
 
   private nextProjectileId(): string {

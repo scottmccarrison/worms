@@ -664,6 +664,57 @@ describe("Simulation - Holy Grenade ammo enforcement", () => {
   });
 });
 
+describe("Simulation - isAllSettled", () => {
+  it("returns true when all worms are at rest and no projectiles are active", () => {
+    const sim = makeSim(twoTeams());
+    // Settle worms onto floor.
+    for (let i = 0; i < 60; i++) sim.tick(50);
+    expect(sim.isAllSettled(0.15)).toBe(true);
+  });
+
+  it("returns false when any worm velocity magnitude is above the threshold", () => {
+    const sim = makeSim(twoTeams());
+    for (let i = 0; i < 30; i++) sim.tick(50);
+    // Give Red-1 a large upward velocity well above threshold.
+    const worm = requireWorm(sim, "Red-1");
+    worm.body.setLinearVelocity({ x: 0, y: -5 });
+    expect(sim.isAllSettled(0.15)).toBe(false);
+  });
+
+  it("returns false when a projectile is active even if all worms are at rest", () => {
+    const sim = makeSim(twoTeams());
+    for (let i = 0; i < 30; i++) sim.tick(50);
+
+    // Fire a projectile aimed upward so it stays in flight.
+    sim.applyAimAngle("Red-1", -Math.PI / 2 + 0.05); // nearly straight up
+    sim.applyAimPower("Red-1", 0.5);
+    sim.applySelectWeapon("Red-1", "bazooka");
+    sim.applyFire("Red-1");
+    // One tick to let the projectile enter the world.
+    sim.tick(50);
+
+    expect(sim.projectileCount()).toBeGreaterThan(0);
+    expect(sim.isAllSettled(0.15)).toBe(false);
+  });
+
+  it("returns true again after all projectiles resolve and worms come to rest", () => {
+    const sim = makeSim(twoTeams());
+    for (let i = 0; i < 30; i++) sim.tick(50);
+
+    // Fire upward; wait until projectile detonates.
+    sim.applyAimAngle("Red-1", -Math.PI / 2 + 0.05);
+    sim.applyAimPower("Red-1", 0.3);
+    sim.applySelectWeapon("Red-1", "bazooka");
+    sim.applyFire("Red-1");
+
+    // Tick up to 4s for the projectile to detonate and worms to settle.
+    for (let i = 0; i < 80; i++) sim.tick(50);
+
+    // After everything settles, isAllSettled should be true.
+    expect(sim.isAllSettled(0.15)).toBe(true);
+  });
+});
+
 describe("Simulation - aim input", () => {
   it("applyAimAngle clamps to [-PI/2, PI/2]", () => {
     const sim = makeSim(twoTeams());
