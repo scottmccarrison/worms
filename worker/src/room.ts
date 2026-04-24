@@ -649,6 +649,7 @@ export class Room implements DurableObject {
   private onClientLog(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
     const m = msg as { scope?: string; event?: string; data?: unknown };
     if (typeof m.scope !== "string" || typeof m.event !== "string") return;
+    if (m.scope.length === 0 || m.event.length === 0) return;
     const now = Date.now();
     const b = this.clientLogBudget.get(ws);
     if (!b || now - b.windowStart > 1000) {
@@ -661,7 +662,10 @@ export class Room implements DurableObject {
     const scope = m.scope.slice(0, 16);
     const event = m.event.slice(0, 64);
     const sid = player.sessionId?.slice(0, 8) ?? "?";
-    const safeData = typeof m.data === "object" && m.data !== null ? (m.data as Record<string, unknown>) : {};
+    const safeData =
+      typeof m.data === "object" && m.data !== null && !Array.isArray(m.data)
+        ? (m.data as Record<string, unknown>)
+        : {};
     dlog("client", event, this.logCtx(), { ...safeData, clientScope: scope, sid });
   }
 

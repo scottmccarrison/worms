@@ -29,6 +29,7 @@ function processClientLog(
 ): { event: string; data: Record<string, unknown> } | null {
   const m = msg as { scope?: string; event?: string; data?: unknown };
   if (typeof m.scope !== "string" || typeof m.event !== "string") return null;
+  if (m.scope.length === 0 || m.event.length === 0) return null;
 
   const b = budget.get(socketKey);
   if (!b || now - b.windowStart > 1000) {
@@ -43,7 +44,9 @@ function processClientLog(
   const event = m.event.slice(0, 64);
   const sid = sessionId.slice(0, 8);
   const safeData =
-    typeof m.data === "object" && m.data !== null ? (m.data as Record<string, unknown>) : {};
+    typeof m.data === "object" && m.data !== null && !Array.isArray(m.data)
+      ? (m.data as Record<string, unknown>)
+      : {};
 
   return {
     event,
@@ -182,5 +185,51 @@ describe("clientLog processing", () => {
       now + 1001,
     );
     expect(after).not.toBeNull();
+  });
+
+  it("array m.data does not spread numeric keys into log data", () => {
+    const budget = new Map<symbol, BudgetEntry>();
+    const key = Symbol("ws");
+    const result = processClientLog(
+      { scope: "sim", event: "test", data: [1, 2, 3] },
+      "abc12345",
+      budget,
+      key,
+      Date.now(),
+    );
+    expect(result).not.toBeNull();
+    // Numeric keys from array spread must NOT appear
+    expect(result!.data[0]).toBeUndefined();
+    expect(result!.data[1]).toBeUndefined();
+    expect(result!.data[2]).toBeUndefined();
+    // Only trusted fields should be present
+    expect(result!.data.clientScope).toBe("sim");
+    expect(result!.data.sid).toBe("abc12345");
+  });
+
+  it("empty scope returns null (silent drop)", () => {
+    const budget = new Map<symbol, BudgetEntry>();
+    const key = Symbol("ws");
+    const result = processClientLog(
+      { scope: "", event: "test" },
+      "abc",
+      budget,
+      key,
+      Date.now(),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("empty event returns null (silent drop)", () => {
+    const budget = new Map<symbol, BudgetEntry>();
+    const key = Symbol("ws");
+    const result = processClientLog(
+      { scope: "sim", event: "" },
+      "abc",
+      budget,
+      key,
+      Date.now(),
+    );
+    expect(result).toBeNull();
   });
 });

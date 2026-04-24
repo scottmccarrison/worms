@@ -235,8 +235,11 @@ export async function joinRoom(
     socket.addEventListener("close", (ev: CloseEvent) => {
       settleErr(new Error(`WebSocket closed before welcome (code ${ev.code})`));
       const cur = getLogForwarder();
-      if (cur && (cur as unknown as Record<string, unknown>)._socket === socket) setLogForwarder(null);
-      setLogContext({ room: undefined });
+      const isOurSocket = cur && (cur as unknown as Record<string, unknown>)._socket === socket;
+      if (isOurSocket) {
+        setLogForwarder(null);
+        setLogContext({ room: undefined });
+      }
       for (const cb of closeSubs) {
         try {
           cb(ev.code);
