@@ -135,6 +135,9 @@ export class TurnArbiter {
 
   start(teamOrder: string[], rosters: TeamRoster[], turnDurationMs: number): void {
     this.settleHoldMs = 0;
+    this.pausedRemainingMs = null;
+    this.pendingAdvance = false;
+    this.hasFiredThisTurn = false;
     this.teamRosters.clear();
     this.teamWormCursor.clear();
     this.forfeitedTeams.clear();
@@ -154,6 +157,7 @@ export class TurnArbiter {
     this.room.state.currentWormId = this.pickNextWormInTeam(firstTeamId);
     this.room.state.turnSeq = 1;
     this.room.state.turnEndsAt = Date.now() + turnDurationMs;
+    dlog("turn", "start", this.logCtx(), { turnDurationMs, turnEndsAt: this.room.state.turnEndsAt });
     this.fireTurnStart();
   }
 
@@ -404,6 +408,7 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.pausedRemainingMs = null;
+    dlog("turn", "advance_reset_timer", this.logCtx(), { now: Date.now(), turnEndsAt: this.room.state.turnEndsAt, turnDurationMs: this.turnDurationMs });
     dlog("turn", "advance", this.logCtx(), { fromTeam, toTeam: nextTeamId });
     this.fireTurnStart();
   }
