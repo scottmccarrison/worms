@@ -174,7 +174,7 @@ export class TurnArbiter {
     if (now > this.room.state.turnEndsAt) {
       const provider = this.room.getAliveCountsProvider();
       if (provider?.isAllSettled(EARLY_SETTLE_VEL_THRESHOLD_MPS)) {
-        this.settleHoldMs += dtMs;
+        this.settleHoldMs += Math.max(0, dtMs);
         if (this.settleHoldMs >= EARLY_SETTLE_HOLD_MS) {
           this.advanceTurn();
           return;
@@ -302,6 +302,7 @@ export class TurnArbiter {
     if (!activeTeam || activeTeam.ownerSessionId !== sessionId) return;
     this.room.state.turnEndsAt = Date.now() + this.pausedRemainingMs;
     this.pausedRemainingMs = null;
+    this.settleHoldMs = 0;
   }
 
   onTeamForfeit(teamId: string): void {

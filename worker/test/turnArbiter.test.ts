@@ -379,6 +379,28 @@ describe("TurnArbiter - early-settle", () => {
     expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
   });
 
+  it("dtMs guard: zero and negative ticks do not advance turn or make settleHoldMs go negative", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Feed zero and negative ticks several times.
+    arbiter.onTick(0);
+    arbiter.onTick(-5);
+    arbiter.onTick(0);
+    arbiter.onTick(-100);
+    arbiter.onTick(0);
+
+    // Turn should NOT have advanced - zero/negative ticks add 0 so 500ms
+    // hold is never reached.
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // settleHoldMs should be exactly 0 (never went negative).
+    expect((arbiter as unknown as { settleHoldMs: number }).settleHoldMs).toBe(0);
+  });
+
   it("resets settleHoldMs when sim un-settles mid-wait", () => {
     const { room, arbiter } = makeSettleRoom(true);
 
@@ -401,6 +423,37 @@ describe("TurnArbiter - early-settle", () => {
     expect(room.state.turnSeq).toBe(turnSeqBefore);
 
     // 10th tick crosses the 500ms hold and triggers advance.
+    arbiter.onTick(50);
+    expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
+  });
+
+  it("pause resume resets settleHoldMs so the full 500ms hold is required post-resume", () => {
+    const { room, arbiter } = makeSettleRoom(true);
+
+    // Expire the turn timer so early-settle accumulation can begin.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+    const turnSeqBefore = room.state.turnSeq;
+
+    // Accumulate 300ms of settled ticks (6 x 50ms).
+    for (let i = 0; i < 6; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore); // not yet at 500ms
+
+    // Pause the turn (owner disconnects).
+    arbiter.onOwnerDisconnected("alice");
+
+    // Resume - settleHoldMs should be reset to 0.
+    arbiter.onOwnerReconnected("alice");
+    expect((arbiter as unknown as { settleHoldMs: number }).settleHoldMs).toBe(0);
+
+    // Now the new turnEndsAt is in the future (pause restored remaining time).
+    // Push time past it so early-settle logic can fire.
+    vi.setSystemTime(room.state.turnEndsAt + 100);
+
+    // 9 ticks = only 450ms since resume - should NOT advance yet.
+    for (let i = 0; i < 9; i++) arbiter.onTick(50);
+    expect(room.state.turnSeq).toBe(turnSeqBefore);
+
+    // 10th tick brings holdMs to 500ms - should advance now.
     arbiter.onTick(50);
     expect(room.state.turnSeq).toBeGreaterThan(turnSeqBefore);
   });
