@@ -319,6 +319,77 @@ describe("TurnArbiter", () => {
     // but the guard prevents extension.
     expect(room.state.turnEndsAt).toBe(shortened);
   });
+  it("start() resets all per-match state when called twice", () => {
+    const room = new StubRoom();
+    const arbiter = new TurnArbiter(room);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    room.connected.add("alice");
+    room.connected.add("bob");
+
+    // Game 1: dirty per-match state.
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+    arbiter.onFireCommitted();
+    arbiter.onOwnerDisconnected("alice");
+
+    const dirty = arbiter as unknown as {
+      settleHoldMs: number;
+      pausedRemainingMs: number | null;
+      pendingAdvance: boolean;
+      hasFiredThisTurn: boolean;
+      turnDurationMs: number;
+    };
+    expect(dirty.hasFiredThisTurn).toBe(true);
+    expect(dirty.pausedRemainingMs).not.toBe(null);
+
+    // Start game 2.
+    arbiter.start(["blue", "red"], rosters, TURN_DURATION_MS);
+
+    const clean = arbiter as unknown as {
+      settleHoldMs: number;
+      pausedRemainingMs: number | null;
+      pendingAdvance: boolean;
+      hasFiredThisTurn: boolean;
+      turnDurationMs: number;
+    };
+    expect(clean.settleHoldMs).toBe(0);
+    expect(clean.pausedRemainingMs).toBe(null);
+    expect(clean.pendingAdvance).toBe(false);
+    expect(clean.hasFiredThisTurn).toBe(false);
+    expect(clean.turnDurationMs).toBe(TURN_DURATION_MS);
+
+    expect(room.state.turnSeq).toBe(1);
+    expect(room.state.turnEndsAt).toBeGreaterThan(Date.now() + TURN_DURATION_MS - 1000);
+    expect(room.state.currentTeamId).toBe("blue");
+  });
+
+  it("start() resets gameOver when a second match follows a completed game", () => {
+    const room = new StubRoom();
+    const arbiter = new TurnArbiter(room);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    room.connected.add("alice");
+    room.connected.add("bob");
+
+    // Game 1: start, kill all red worms to end the match.
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+    room.provider.counts.set("red", 0);
+    room.provider.deadWorms.add("red-0");
+    room.provider.deadWorms.add("red-1");
+    arbiter.onWormDied("red-1");
+    arbiter.onTick(50);
+
+    expect(arbiter.isGameOver()).toBe(true);
+
+    // Game 2.
+    setAllAlive(room.provider, rosters);
+    room.provider.deadWorms.clear();
+    arbiter.start(["blue", "red"], rosters, TURN_DURATION_MS);
+
+    expect(arbiter.isGameOver()).toBe(false);
+    expect(room.state.turnSeq).toBe(1);
+    expect(room.state.turnEndsAt).toBeGreaterThan(Date.now() + TURN_DURATION_MS - 1000);
+  });
 });
 
 describe("TurnArbiter - early-settle", () => {

@@ -408,9 +408,6 @@ export class Room implements DurableObject {
       }
     }
 
-    if (this.lobby?.phase === "playing" && !this.arbiter) {
-      this.arbiter = new TurnArbiter(this.makeArbiterAdapter());
-    }
     await this.ensureRunning();
 
     return new Response(null, { status: 101, webSocket: client });
