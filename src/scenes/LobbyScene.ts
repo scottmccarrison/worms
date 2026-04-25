@@ -159,6 +159,7 @@ export class LobbyScene extends Phaser.Scene {
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       dlogUnthrottled("scene", "LobbyScene.shutdown", { unsubCount: this.roomUnsubs.length });
+      this.tearDownRoomListeners();
     });
 
     if (this.pendingReconnectedRoom) {
