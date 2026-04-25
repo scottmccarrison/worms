@@ -19,4 +19,11 @@ const config: Phaser.Types.Core.GameConfig = {
   },
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// iOS Safari/PWA report new innerWidth/innerHeight asynchronously after
+// orientationchange. Refresh Phaser's scale twice to catch both windows.
+window.addEventListener("orientationchange", () => {
+  setTimeout(() => game.scale.refresh(), 100);
+  setTimeout(() => game.scale.refresh(), 500);
+});
