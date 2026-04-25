@@ -80,35 +80,23 @@ describe("clientLog processing", () => {
       Date.now(),
     );
     expect(result).not.toBeNull();
-    expect(result!.event).toBe("test");
-    expect(result!.data.clientScope).toBe("sim");
-    expect(result!.data.sid).toBe("abc12345");
-    expect(result!.data.x).toBe(1);
+    expect(result?.event).toBe("test");
+    expect(result?.data.clientScope).toBe("sim");
+    expect(result?.data.sid).toBe("abc12345");
+    expect(result?.data.x).toBe(1);
   });
 
   it("non-string scope returns null (silent drop)", () => {
     const budget = new Map<symbol, BudgetEntry>();
     const key = Symbol("ws");
-    const result = processClientLog(
-      { scope: 42, event: "test" },
-      "abc",
-      budget,
-      key,
-      Date.now(),
-    );
+    const result = processClientLog({ scope: 42, event: "test" }, "abc", budget, key, Date.now());
     expect(result).toBeNull();
   });
 
   it("non-string event returns null (silent drop)", () => {
     const budget = new Map<symbol, BudgetEntry>();
     const key = Symbol("ws");
-    const result = processClientLog(
-      { scope: "sim", event: null },
-      "abc",
-      budget,
-      key,
-      Date.now(),
-    );
+    const result = processClientLog({ scope: "sim", event: null }, "abc", budget, key, Date.now());
     expect(result).toBeNull();
   });
 
@@ -125,8 +113,8 @@ describe("clientLog processing", () => {
       Date.now(),
     );
     expect(result).not.toBeNull();
-    expect(result!.data.clientScope).toHaveLength(16);
-    expect(result!.event).toHaveLength(64);
+    expect(result?.data.clientScope).toHaveLength(16);
+    expect(result?.event).toHaveLength(64);
   });
 
   it("spread-first protection: trusted fields (sid, clientScope) overwrite client data", () => {
@@ -141,10 +129,10 @@ describe("clientLog processing", () => {
     );
     expect(result).not.toBeNull();
     // sid and clientScope should come from trusted fields, NOT from client data
-    expect(result!.data.sid).toBe("trustedS"); // first 8 chars of "trustedSid"
-    expect(result!.data.clientScope).toBe("sim");
-    expect(result!.data.sid).not.toBe("evil");
-    expect(result!.data.clientScope).not.toBe("evil");
+    expect(result?.data.sid).toBe("trustedS"); // first 8 chars of "trustedSid"
+    expect(result?.data.clientScope).toBe("sim");
+    expect(result?.data.sid).not.toBe("evil");
+    expect(result?.data.clientScope).not.toBe("evil");
   });
 
   it("rate limits: 35 calls in same second -> only 30 emit", () => {
@@ -199,37 +187,25 @@ describe("clientLog processing", () => {
     );
     expect(result).not.toBeNull();
     // Numeric keys from array spread must NOT appear
-    expect(result!.data[0]).toBeUndefined();
-    expect(result!.data[1]).toBeUndefined();
-    expect(result!.data[2]).toBeUndefined();
+    expect(result?.data[0]).toBeUndefined();
+    expect(result?.data[1]).toBeUndefined();
+    expect(result?.data[2]).toBeUndefined();
     // Only trusted fields should be present
-    expect(result!.data.clientScope).toBe("sim");
-    expect(result!.data.sid).toBe("abc12345");
+    expect(result?.data.clientScope).toBe("sim");
+    expect(result?.data.sid).toBe("abc12345");
   });
 
   it("empty scope returns null (silent drop)", () => {
     const budget = new Map<symbol, BudgetEntry>();
     const key = Symbol("ws");
-    const result = processClientLog(
-      { scope: "", event: "test" },
-      "abc",
-      budget,
-      key,
-      Date.now(),
-    );
+    const result = processClientLog({ scope: "", event: "test" }, "abc", budget, key, Date.now());
     expect(result).toBeNull();
   });
 
   it("empty event returns null (silent drop)", () => {
     const budget = new Map<symbol, BudgetEntry>();
     const key = Symbol("ws");
-    const result = processClientLog(
-      { scope: "sim", event: "" },
-      "abc",
-      budget,
-      key,
-      Date.now(),
-    );
+    const result = processClientLog({ scope: "sim", event: "" }, "abc", budget, key, Date.now());
     expect(result).toBeNull();
   });
 });

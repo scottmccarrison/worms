@@ -27,9 +27,19 @@
  */
 
 import type { ClientMsg, LobbyState, ServerMsg } from "../../shared/protocol";
-import { dlog, getLogForwarder, isLoggerEnabled, setLogContext, setLogForwarder } from "../debug/logger";
+import {
+  dlog,
+  getLogForwarder,
+  isLoggerEnabled,
+  setLogContext,
+  setLogForwarder,
+} from "../debug/logger";
 
-type Forwarder = (scope: "scene" | "net" | "sim" | "camera" | "input", event: string, data?: unknown) => void;
+type Forwarder = (
+  scope: "scene" | "net" | "sim" | "camera" | "input",
+  event: string,
+  data?: unknown,
+) => void;
 
 // ---------------------------------------------------------------------------
 // Public API

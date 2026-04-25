@@ -33,7 +33,7 @@ function formatCtx(ctx?: LogContext): string {
   const parts: string[] = [];
   if (ctx.room !== undefined && ctx.room !== "") parts.push(`room=${ctx.room}`);
   if (ctx.turn !== undefined) parts.push(`turn=${ctx.turn}`);
-  return parts.length > 0 ? " " + parts.join(" ") : "";
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 export function dlog(scope: ServerScope, event: string, ctx?: LogContext, data?: unknown): void {
@@ -44,13 +44,18 @@ export function dlog(scope: ServerScope, event: string, ctx?: LogContext, data?:
   lastEmit.set(key, now);
   pruneIfNeeded();
   const prefix = `[${scope}] ${event}${formatCtx(ctx)}`;
-  if (data !== undefined) console.log(prefix + " |", data);
+  if (data !== undefined) console.log(`${prefix} |`, data);
   else console.log(prefix);
 }
 
-export function dlogUnthrottled(scope: ServerScope, event: string, ctx?: LogContext, data?: unknown): void {
+export function dlogUnthrottled(
+  scope: ServerScope,
+  event: string,
+  ctx?: LogContext,
+  data?: unknown,
+): void {
   if (!DEBUG) return;
   const prefix = `[${scope}] ${event}${formatCtx(ctx)}`;
-  if (data !== undefined) console.log(prefix + " |", data);
+  if (data !== undefined) console.log(`${prefix} |`, data);
   else console.log(prefix);
 }

@@ -84,10 +84,7 @@ class TestClient {
   waitFor(match: (msg: Message) => boolean, timeoutMs = 8000): Promise<Message> {
     for (const m of this.messages) if (match(m)) return Promise.resolve(m);
     return new Promise<Message>((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("timeout waiting for message")),
-        timeoutMs,
-      );
+      const t = setTimeout(() => reject(new Error("timeout waiting for message")), timeoutMs);
       this.waiters.push({
         match,
         resolve: (m) => {
@@ -113,10 +110,7 @@ class TestClient {
       if (m && match(m)) return Promise.resolve(m);
     }
     return new Promise<Message>((resolve, reject) => {
-      const t = setTimeout(
-        () => reject(new Error("timeout waiting for message")),
-        timeoutMs,
-      );
+      const t = setTimeout(() => reject(new Error("timeout waiting for message")), timeoutMs);
       // The waiter fires on every new message pushed to this.messages.
       // We compare this.messages.length at push time against fromIndex
       // to reject messages that arrived before the bookmark.
@@ -167,11 +161,7 @@ async function createRoom(): Promise<string> {
   return body.code as string;
 }
 
-async function joinRoom(
-  code: string,
-  nickname: string,
-  color: string,
-): Promise<TestClient> {
+async function joinRoom(code: string, nickname: string, color: string): Promise<TestClient> {
   const params = new URLSearchParams({ nickname, color });
   const ws = new WebSocket(`${baseWs}/api/room/${code}?${params.toString()}`);
   const client = new TestClient(ws);
@@ -191,13 +181,8 @@ function bothReadyAfter(
     fromIndex,
     (m) => {
       if (m.type !== "state") return false;
-      const players = (
-        m.state as { players: Record<string, { ready: boolean }> }
-      ).players;
-      return (
-        players[aliceSessionId]?.ready === true &&
-        players[bobSessionId]?.ready === true
-      );
+      const players = (m.state as { players: Record<string, { ready: boolean }> }).players;
+      return players[aliceSessionId]?.ready === true && players[bobSessionId]?.ready === true;
     },
     8000,
   );
@@ -216,27 +201,23 @@ describe("lobby-cycle integration (#117 regression)", () => {
 
       // ---- 2. Connect Alice (host) and Bob ----
       const alice = await joinRoom(code, "Alice", "#ff4444");
-      const aliceWelcome = (await alice.waitFor(
-        (m) => m.type === "welcome",
-      )) as unknown as {
+      const aliceWelcome = (await alice.waitFor((m) => m.type === "welcome")) as unknown as {
         sessionId: string;
         resumeToken: string;
       };
       const aliceSessionId = aliceWelcome.sessionId;
 
       const bob = await joinRoom(code, "Bob", "#4488ff");
-      const bobWelcome = (await bob.waitFor(
-        (m) => m.type === "welcome",
-      )) as unknown as { sessionId: string };
+      const bobWelcome = (await bob.waitFor((m) => m.type === "welcome")) as unknown as {
+        sessionId: string;
+      };
       const bobSessionId = bobWelcome.sessionId;
 
       // Wait for Alice to see Bob in the lobby (2-player state).
       await alice.waitFor(
         (m) =>
           m.type === "state" &&
-          Object.keys(
-            (m.state as { players: Record<string, unknown> }).players,
-          ).length === 2,
+          Object.keys((m.state as { players: Record<string, unknown> }).players).length === 2,
       );
 
       // ---- 3. Both set ready for game 1 ----
@@ -251,15 +232,12 @@ describe("lobby-cycle integration (#117 regression)", () => {
 
       // Wait for the "playing" state to arrive so we know the turn timer is live.
       const playingState1 = await alice.waitFor(
-        (m) =>
-          m.type === "state" &&
-          (m.state as { phase: string }).phase === "playing",
+        (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
         10_000,
       );
 
       // Capture the game-1 turnEndsAt for the later assertion.
-      const turnEndsAt1 = (playingState1.state as { turnEndsAt: number })
-        .turnEndsAt;
+      const turnEndsAt1 = (playingState1.state as { turnEndsAt: number }).turnEndsAt;
 
       // ---- 5. Host sends input_return_to_lobby ----
       // We skip the optional fire step to avoid racing the 45s timer.
@@ -277,16 +255,12 @@ describe("lobby-cycle integration (#117 regression)", () => {
       // ---- 6. Both wait for lobby phase (after game 1 ended) ----
       await alice.waitForAfter(
         bookmarkAfterGame1,
-        (m) =>
-          m.type === "state" &&
-          (m.state as { phase: string }).phase === "lobby",
+        (m) => m.type === "state" && (m.state as { phase: string }).phase === "lobby",
         10_000,
       );
       await bob.waitForAfter(
         bookmarkAfterGame1Bob,
-        (m) =>
-          m.type === "state" &&
-          (m.state as { phase: string }).phase === "lobby",
+        (m) => m.type === "state" && (m.state as { phase: string }).phase === "lobby",
         10_000,
       );
 
@@ -300,27 +274,18 @@ describe("lobby-cycle integration (#117 regression)", () => {
       // Bookmark the message cursor so waitForAfter skips game-1 messages.
       const bookmarkBeforeGame2 = alice.messageCount;
       alice.send({ type: "start_game" });
-      await alice.waitForAfter(
-        bookmarkBeforeGame2,
-        (m) => m.type === "game_started",
-        10_000,
-      );
+      await alice.waitForAfter(bookmarkBeforeGame2, (m) => m.type === "game_started", 10_000);
 
       // Wait for the "playing" state carrying fresh turn info.
       // Use waitForAfter so we don't re-match game-1's playing state.
       const playingState2 = await alice.waitForAfter(
         bookmarkBeforeGame2,
-        (m) =>
-          m.type === "state" &&
-          (m.state as { phase: string }).phase === "playing",
+        (m) => m.type === "state" && (m.state as { phase: string }).phase === "playing",
         10_000,
       );
 
-      const turnEndsAt2 = (playingState2.state as { turnEndsAt: number })
-        .turnEndsAt;
-      const currentTeamId2 = (
-        playingState2.state as { currentTeamId: string }
-      ).currentTeamId;
+      const turnEndsAt2 = (playingState2.state as { turnEndsAt: number }).turnEndsAt;
+      const currentTeamId2 = (playingState2.state as { currentTeamId: string }).currentTeamId;
 
       // ---- 9. Assertions ----
 
@@ -336,15 +301,12 @@ describe("lobby-cycle integration (#117 regression)", () => {
       await new Promise((r) => setTimeout(r, 1500));
 
       // Collect any state messages that arrived during the wait.
-      const latestState = alice.messages
-        .filter((m) => m.type === "state")
-        .at(-1);
+      const latestState = alice.messages.filter((m) => m.type === "state").at(-1);
       if (latestState) {
         const phase = (latestState.state as { phase: string }).phase;
         if (phase === "playing") {
-          const currentTeamIdAfterWait = (
-            latestState.state as { currentTeamId: string }
-          ).currentTeamId;
+          const currentTeamIdAfterWait = (latestState.state as { currentTeamId: string })
+            .currentTeamId;
           expect(currentTeamIdAfterWait).toBe(currentTeamId2);
         }
         // If phase changed to something else that would be unexpected, but
