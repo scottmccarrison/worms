@@ -86,19 +86,27 @@
     <script>
       (function () {
         var root = document.documentElement;
-        root.classList.add("boot-grace");
-        setTimeout(function () { root.classList.remove("boot-grace"); }, 700);
+        // Only suppress the splash during launch if dimensions already say
+        // landscape. Real portrait launches show the splash immediately.
+        if (window.innerWidth >= window.innerHeight) {
+          root.classList.add("boot-grace");
+          setTimeout(function () { root.classList.remove("boot-grace"); }, 700);
+        }
 
         function update() {
           var portrait = window.innerHeight > window.innerWidth;
           root.setAttribute("data-portrait", portrait ? "1" : "0");
         }
         window.addEventListener("resize", update);
-        window.addEventListener("orientationchange", function () {
+        function onOrientationChange() {
           // iOS reports new dimensions after a delay; recheck twice.
           setTimeout(update, 100);
           setTimeout(update, 500);
-        });
+        }
+        window.addEventListener("orientationchange", onOrientationChange);
+        if (window.screen && screen.orientation && typeof screen.orientation.addEventListener === "function") {
+          screen.orientation.addEventListener("change", onOrientationChange);
+        }
         update();
       })();
     </script>
