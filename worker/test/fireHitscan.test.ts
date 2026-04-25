@@ -44,6 +44,22 @@ function makeAlwaysHitWorld(): World {
   return world;
 }
 
+/** A World stub whose rayCast never invokes the callback (simulating no hit on any ray). */
+function makeNeverHitWorld(): World {
+  const world = new World();
+  // Override rayCast to never call the callback; simulates no surface intersection.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (world as any).rayCast = (
+    _from: unknown,
+    _to: unknown,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    _callback: (fixture: any, point: { x: number; y: number }, normal: { x: number; y: number }, fraction: number) => number,
+  ) => {
+    // No callback invocation; rayCast returns with no hits found.
+  };
+  return world;
+}
+
 /** Terrain stub - cutCircle is a no-op; consumeCutLog returns []. */
 function makeFakeTerrain(): Terrain {
   return {
@@ -104,6 +120,26 @@ describe("fireHitscan - shotgun (2 pellets, no spread)", () => {
     expect(result.turnEndsImmediately).toBe(true);
     expect(result.shotsRemaining).toBe(0);
     expect(result.spawn).toBeNull();
+  });
+
+  it("returns empty explodeResults when no rays hit", () => {
+    const neverHitWorld = makeNeverHitWorld();
+    const ctx: FireContext = {
+      world: neverHitWorld,
+      terrain: makeFakeTerrain(),
+      worms: [],
+      firer,
+      weapon: shotgun,
+      aimRadians: 0,
+      aimPower01: 1,
+      shotsFiredBefore: 0,
+    };
+
+    const result = fire(ctx);
+
+    expect(result.explodeResults).toHaveLength(0);
+    expect(result.turnEndsImmediately).toBe(true);
+    expect(result.shotsRemaining).toBe(0);
   });
 });
 
