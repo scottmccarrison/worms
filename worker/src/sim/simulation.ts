@@ -22,7 +22,7 @@
  */
 
 import type { Contact, ContactImpulse } from "planck";
-import { dlog, type LogContext } from "../debug/logger.js";
+import { type LogContext, dlog } from "../debug/logger.js";
 import {
   Projectile,
   type ProjectileRenderState,
@@ -735,7 +735,11 @@ export class Simulation {
     if (proj.detonated) return;
     proj.markDetonated();
     const pos = proj.body.getPosition();
-    dlog("sim", "detonate", this.getLogCtx(), { weaponId: proj.config.id, x: toPixels(pos.x), y: toPixels(pos.y) });
+    dlog("sim", "detonate", this.getLogCtx(), {
+      weaponId: proj.config.id,
+      x: toPixels(pos.x),
+      y: toPixels(pos.y),
+    });
     const centerPx = { x: toPixels(pos.x), y: toPixels(pos.y) };
     const result = explode({
       world: this.world,

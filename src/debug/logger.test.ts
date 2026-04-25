@@ -142,7 +142,9 @@ describe("logger", () => {
 
     it("swallows errors thrown by forwarder", () => {
       setLoggerEnabled(true);
-      setLogForwarder(() => { throw new Error("oops"); });
+      setLogForwarder(() => {
+        throw new Error("oops");
+      });
       expect(() => dlogUnthrottled("sim", "test")).not.toThrow();
     });
   });

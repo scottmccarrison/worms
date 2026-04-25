@@ -13,15 +13,16 @@
  */
 
 import { World } from "planck";
+import type { Fixture } from "planck";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fire } from "../src/weapons/fire.js";
-import type { FireContext } from "../src/weapons/fire.js";
 import type { Terrain } from "../src/entities/terrain.js";
 import type { Worm } from "../src/entities/worm.js";
 import { toMeters } from "../src/physics/scale.js";
-import { shotgun } from "../src/weapons/shotgun.js";
-import { minigun } from "../src/weapons/minigun.js";
 import { bazooka } from "../src/weapons/bazooka.js";
+import { fire } from "../src/weapons/fire.js";
+import type { FireContext } from "../src/weapons/fire.js";
+import { minigun } from "../src/weapons/minigun.js";
+import { shotgun } from "../src/weapons/shotgun.js";
 
 // ---- Minimal stubs ----
 
@@ -32,14 +33,22 @@ function makeAlwaysHitWorld(): World {
   // The stub fixture only needs getBody() returning null (not firer.body) so the
   // server-side raycastFirstHit() accepts the hit. We escape type-checking here
   // because we're only testing loop count, not planck fixture internals.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (world as any).rayCast = (
+  (world as unknown as Pick<World, "rayCast">).rayCast = (
     _from: unknown,
     _to: unknown,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    callback: (fixture: any, point: { x: number; y: number }, normal: { x: number; y: number }, fraction: number) => number,
+    callback: (
+      fixture: Fixture,
+      point: { x: number; y: number },
+      normal: { x: number; y: number },
+      fraction: number,
+    ) => number,
   ) => {
-    callback({ getBody: () => null }, { x: toMeters(100), y: toMeters(100) }, { x: -1, y: 0 }, 0.5);
+    callback(
+      { getBody: () => null } as unknown as Fixture,
+      { x: toMeters(100), y: toMeters(100) },
+      { x: -1, y: 0 },
+      0.5,
+    );
   };
   return world;
 }
@@ -48,12 +57,15 @@ function makeAlwaysHitWorld(): World {
 function makeNeverHitWorld(): World {
   const world = new World();
   // Override rayCast to never call the callback; simulates no surface intersection.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (world as any).rayCast = (
+  (world as unknown as Pick<World, "rayCast">).rayCast = (
     _from: unknown,
     _to: unknown,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    _callback: (fixture: any, point: { x: number; y: number }, normal: { x: number; y: number }, fraction: number) => number,
+    _callback: (
+      fixture: Fixture,
+      point: { x: number; y: number },
+      normal: { x: number; y: number },
+      fraction: number,
+    ) => number,
   ) => {
     // No callback invocation; rayCast returns with no hits found.
   };

@@ -25,7 +25,7 @@ import {
   unpackMask,
 } from "../../shared/maskPack.js";
 
-import { dlog, type LogContext } from "./debug/logger.js";
+import { type LogContext, dlog } from "./debug/logger.js";
 import {
   ALLOWED_COLORS,
   type LobbyPlayer,
@@ -436,7 +436,11 @@ export class Room implements DurableObject {
     const player = lobby.players[attachment.sessionId];
     if (!player) return;
 
-    dlog("room", "webSocketMessage", this.logCtx(), { type, sid: attachment.sessionId, phase: lobby.phase });
+    dlog("room", "webSocketMessage", this.logCtx(), {
+      type,
+      sid: attachment.sessionId,
+      phase: lobby.phase,
+    });
 
     switch (type) {
       case "set_nickname":
@@ -731,7 +735,10 @@ export class Room implements DurableObject {
    */
   private async onReturnToLobby(ws: WebSocket, player: LobbyPlayer): Promise<void> {
     const lobby = this.ensureLobby();
-    dlog("room", "onReturnToLobby entry", this.logCtx(), { sid: player.sessionId ?? "?", phase: lobby.phase });
+    dlog("room", "onReturnToLobby entry", this.logCtx(), {
+      sid: player.sessionId ?? "?",
+      phase: lobby.phase,
+    });
     if (!player.isHost) {
       this.sendError(ws, "not_host", "Only the host may return to the lobby.");
       return;
