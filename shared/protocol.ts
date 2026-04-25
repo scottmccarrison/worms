@@ -239,7 +239,13 @@ export interface WormDiedEvent {
 // ---------------------------------------------------------------------------
 
 export type ServerMsg =
-  | { type: "welcome"; sessionId: string; resumeToken: string; state: LobbyState }
+  | {
+      type: "welcome";
+      sessionId: string;
+      resumeToken: string;
+      state: LobbyState;
+      debugLogEnabled: boolean;
+    }
   | { type: "state"; state: LobbyState }
   | {
       type: "game_started";

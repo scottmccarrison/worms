@@ -92,6 +92,9 @@ const INPUT_CSS =
  * and rebuild (original fix for #56 - Ready button click-through).
  */
 export class LobbyScene extends Phaser.Scene {
+  private static instanceCount = 0;
+  private readonly instanceId = LobbyScene.instanceCount++;
+
   private netClient!: NetClient;
   private autoJoinCode: string | null = null;
 
@@ -158,7 +161,10 @@ export class LobbyScene extends Phaser.Scene {
       hasPendingRoom: this.pendingReconnectedRoom !== null,
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      dlogUnthrottled("scene", "LobbyScene.shutdown", { unsubCount: this.roomUnsubs.length });
+      dlogUnthrottled("scene", "LobbyScene.shutdown", {
+        instanceId: this.instanceId,
+        unsubCount: this.roomUnsubs.length,
+      });
       this.tearDownRoomListeners();
     });
 
@@ -378,6 +384,21 @@ export class LobbyScene extends Phaser.Scene {
     this.room = room;
     this.currentRoomCode = room.state?.code ?? room.code ?? "";
     this.wireRoomListeners(room);
+    dlogUnthrottled("scene", "LobbyScene.wired", {
+      unsubCount: this.roomUnsubs.length,
+      phase: room.state?.phase,
+    });
+
+    // Backstop: if we re-entered the lobby but the server already says we're
+    // in 'playing' phase, the game_started broadcast may have been missed
+    // (race during scene transition or stale state). Log only for now - if
+    // the next playtest shows this firing, we'll know this is the failing
+    // path and add a re-request mechanism in the next PR.
+    const currentPhase = room.state?.phase;
+    if (currentPhase === "playing") {
+      dlogUnthrottled("scene", "LobbyScene.backstop_to_game", { reason: "phase_already_playing" });
+    }
+
     this.view = "room";
     this.clearHome();
     // Hide any overlay left behind from a previous reconnect attempt.
@@ -459,7 +480,10 @@ export class LobbyScene extends Phaser.Scene {
 
     this.roomUnsubs.push(
       room.onMessage("game_started", (msg: GameStartedMessage) => {
-        dlogUnthrottled("scene", "LobbyScene.gameStarted", { mapId: msg.mapId });
+        dlogUnthrottled("scene", "LobbyScene.gameStarted", {
+          mapId: msg.mapId,
+          phase: room.state?.phase,
+        });
         // Host clicked Start. Server includes the authoritative mask +
         // spawn points so every client renders pixel-identical terrain
         // (server's physics and client's visuals match).

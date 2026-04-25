@@ -132,6 +132,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
 
     const room = await p;
@@ -151,6 +152,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     await p;
     expect(MockWebSocket.lastUrl).toContain("ws://example.test/api/room/WAVE");
@@ -178,6 +180,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState({ selectedMapId: "flat" }),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -201,6 +204,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -236,6 +240,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -258,6 +263,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -278,6 +284,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -296,6 +303,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -321,6 +329,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     await p1;
 
@@ -359,6 +368,7 @@ describe("joinRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
@@ -400,6 +410,7 @@ describe("createRoom", () => {
       sessionId: "sid-1",
       resumeToken: "resume-abc",
       state: baselineState(),
+      debugLogEnabled: false,
     });
     const room = await p;
 
