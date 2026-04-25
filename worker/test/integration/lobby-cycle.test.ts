@@ -261,29 +261,18 @@ describe("lobby-cycle integration (#117 regression)", () => {
       const turnEndsAt1 = (playingState1.state as { turnEndsAt: number })
         .turnEndsAt;
 
-      // ---- 5. Determine active player and send input_return_to_lobby quickly ----
+      // ---- 5. Host sends input_return_to_lobby ----
       // We skip the optional fire step to avoid racing the 45s timer.
       // (The spec says "or skip the fire entirely and just transition".)
-      // Whoever owns the active team sends return_to_lobby.
-      const currentTeamId = (
-        playingState1.state as { currentTeamId: string }
-      ).currentTeamId;
-      const playersRow = (
-        playingState1.state as {
-          players: Record<string, { ownerOfTeamId: string }>;
-        }
-      ).players;
-      const activeSession = Object.entries(playersRow).find(
-        ([, p]) => p.ownerOfTeamId === currentTeamId,
-      )?.[0];
-      const activeClient =
-        activeSession === aliceSessionId ? alice : bob;
+      // Alice is always the host (first joiner). The server rejects
+      // input_return_to_lobby from non-host clients with sendError("not_host"),
+      // so we must send from alice regardless of which team is active.
 
       // Bookmark before sending return_to_lobby so we wait for the post-game1
       // lobby state, not the pre-game1 one.
       const bookmarkAfterGame1 = alice.messageCount;
       const bookmarkAfterGame1Bob = bob.messageCount;
-      activeClient.send({ type: "input_return_to_lobby", seq: 1 });
+      alice.send({ type: "input_return_to_lobby", seq: 1 });
 
       // ---- 6. Both wait for lobby phase (after game 1 ended) ----
       await alice.waitForAfter(
