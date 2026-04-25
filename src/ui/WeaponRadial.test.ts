@@ -418,10 +418,10 @@ describe("WeaponRadial", () => {
     // The icons fan out to positions based on arc math. With 7 weapons the
     // first icon is at 90 deg (straight up), so its target position is:
     //   targetX = ORBIT_RADIUS * cos(90deg) = ~0
-    //   targetY = -ORBIT_RADIUS * sin(90deg) = -130
-    // Absolute screen position: (trigX + 0, trigY - 130) = (1200, 510).
+    //   targetY = -ORBIT_RADIUS * sin(90deg) = -300
+    // Absolute screen position: (trigX + 0, trigY - 300) = (1200, 340).
     // Fire a global pointerdown near that icon position.
-    const iconPtr = { x: trigX, y: trigY - 130, id: 7 } as Phaser.Input.Pointer;
+    const iconPtr = { x: trigX, y: trigY - 300, id: 7 } as Phaser.Input.Pointer;
     scene._fireInput("pointerdown", iconPtr);
 
     // selectWeapon should have been called with a weapon id string.

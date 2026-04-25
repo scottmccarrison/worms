@@ -16,7 +16,7 @@ type State = "CLOSED" | "OPEN" | "CLOSING";
 // Tunable constants - easy to migrate to tuning.ts later
 const TRIGGER_RADIUS = 34;
 const ICON_RADIUS = 26;
-const ORBIT_RADIUS = 130;
+const ORBIT_RADIUS = 300;
 const ARC_START_DEG = 90; // straight up
 const ARC_SPAN_DEG = 90; // 90-degree fan to the left
 const EXPAND_MS = 160;
