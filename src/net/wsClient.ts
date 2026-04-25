@@ -29,10 +29,12 @@
 import type { ClientMsg, LobbyState, ServerMsg } from "../../shared/protocol";
 import {
   dlog,
+  dlogUnthrottled,
   getLogForwarder,
   isLoggerEnabled,
   setLogContext,
   setLogForwarder,
+  setLoggerEnabled,
 } from "../debug/logger";
 
 type Forwarder = (
@@ -132,6 +134,7 @@ export async function joinRoom(
   qs.set("color", color);
   if (resumeToken) qs.set("resumeToken", resumeToken);
   const url = `${ws}/api/room/${encodeURIComponent(code.toUpperCase())}?${qs.toString()}`;
+  dlogUnthrottled("net", "joinRoom", { code, hasResumeToken: !!resumeToken });
 
   const socket = new WebSocket(url);
 
@@ -148,6 +151,7 @@ export async function joinRoom(
   let resumeTokenOut = "";
 
   const dispatchMessage = (msg: ServerMsg): void => {
+    dlog("net", "dispatch", { type: msg.type, count: messageSubs.get(msg.type)?.size ?? 0 });
     const subs = messageSubs.get(msg.type);
     if (!subs) return;
     for (const cb of subs) {
@@ -162,6 +166,7 @@ export async function joinRoom(
 
   const dispatchStateChange = (): void => {
     if (!currentState) return;
+    dlog("net", "stateChange", { count: stateSubs.size, phase: currentState?.phase });
     dlog("net", "state received", {
       phase: currentState?.phase,
       playerCount: currentState ? Object.keys(currentState.players).length : 0,
@@ -193,6 +198,7 @@ export async function joinRoom(
     socket.addEventListener("open", () => {
       // WebSocket-level open isn't enough: we wait for the `welcome`
       // application-layer message before surfacing a usable handle.
+      dlogUnthrottled("net", "ws_open", { code: currentState?.code ?? "?" });
       if (isLoggerEnabled()) {
         const mySocket = socket;
         const fn: Forwarder = (scope, event, data) => {
@@ -219,6 +225,24 @@ export async function joinRoom(
         resumeTokenOut = msg.resumeToken;
         currentState = msg.state;
         setLogContext({ room: currentState.code || code.toUpperCase() });
+        // Server-controlled debug flag: OR with local ?debug=1 so either path
+        // enables the logger. Never disable if URL param is already set.
+        if (msg.debugLogEnabled) {
+          setLoggerEnabled(true);
+          // Wire the log forwarder now that the logger is enabled. The open
+          // handler only wires it when the logger was already enabled at
+          // open-time (URL ?debug=1), so we replicate the setup here for the
+          // server-flag path.
+          const mySocket = socket;
+          const fn: Forwarder = (scope, event, data) => {
+            if (mySocket.readyState !== WebSocket.OPEN) return;
+            mySocket.send(
+              JSON.stringify({ type: "client_log", scope, event, data, ts: Date.now() }),
+            );
+          };
+          (fn as unknown as Record<string, unknown>)._socket = mySocket;
+          setLogForwarder(fn);
+        }
         settleOk();
         // Welcome ALSO fires onStateChange so callers get a single code
         // path for "state arrived" regardless of first vs subsequent.
@@ -243,6 +267,7 @@ export async function joinRoom(
     });
 
     socket.addEventListener("close", (ev: CloseEvent) => {
+      dlogUnthrottled("net", "ws_close", { code: ev.code });
       settleErr(new Error(`WebSocket closed before welcome (code ${ev.code})`));
       const cur = getLogForwarder();
       const isOurSocket = cur && (cur as unknown as Record<string, unknown>)._socket === socket;
@@ -316,6 +341,7 @@ export async function joinRoom(
       }
       const wrapped = cb as (msg: ServerMsg) => void;
       set.add(wrapped);
+      dlog("net", "subscribe", { type, count: set.size });
       return () => {
         set?.delete(wrapped);
       };

@@ -140,7 +140,6 @@ export class Room implements DurableObject {
   constructor(state: DurableObjectState, env: unknown) {
     this.state = state;
     this.env = env;
-    void this.env;
   }
 
   private logCtx(): LogContext {
@@ -384,11 +383,13 @@ export class Room implements DurableObject {
 
     await this.persistLobby();
 
+    const debugLogEnabled = ((this.env as Record<string, unknown>).DEBUG_LOG ?? "1") === "1";
     const welcome: ServerMsg = {
       type: "welcome",
       sessionId: attachment.sessionId,
       resumeToken: attachment.resumeToken,
       state: this.ensureLobby(),
+      debugLogEnabled,
     };
     try {
       server.send(JSON.stringify(welcome));

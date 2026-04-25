@@ -9,6 +9,7 @@ routes = [
 
 [vars]
 PATH_PREFIX = "/worms"
+DEBUG_LOG = "1"
 
 [assets]
 directory = "../dist"

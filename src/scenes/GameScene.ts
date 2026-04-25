@@ -253,7 +253,7 @@ export class GameScene extends Phaser.Scene {
     // on SHUTDOWN to tear down adapter + unsubs.
     // ------------------------------------------------------------------
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      dlogUnthrottled("scene", "GameScene.shutdown");
+      dlogUnthrottled("scene", "GameScene.shutdown", { unsubCount: this.roomUnsubs.length });
       // Tear down room listeners FIRST so a throw in any of the downstream
       // destroys can't leave an active onStateChange listener that keeps
       // firing (and attempting scene.start) after we've moved on.
@@ -818,7 +818,15 @@ export class GameScene extends Phaser.Scene {
     // the transition is async and state keeps flowing. That produced a
     // freeze on rematch-ready.
     let phaseSub: (() => void) | null = null;
+    let lastObservedPhase: string | undefined;
     phaseSub = this.room.onStateChange((state) => {
+      if (state.phase !== lastObservedPhase) {
+        dlogUnthrottled("scene", "GameScene.phaseObserved", {
+          phase: state.phase,
+          prev: lastObservedPhase ?? null,
+        });
+        lastObservedPhase = state.phase;
+      }
       if (state.phase !== "lobby") return;
       dlogUnthrottled("scene", "GameScene.phaseSub fired", { phase: state.phase });
       phaseSub?.();
