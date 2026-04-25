@@ -33,15 +33,31 @@ let forwarder: Forwarder | null = null;
 const lastEmit = new Map<string, number>();
 const fwdBudget = new Map<Scope, { count: number; windowStart: number }>();
 
-export function setLoggerEnabled(v: boolean): void { enabled = v; }
-export function isLoggerEnabled(): boolean { return enabled; }
-export function setLogContext(next: Partial<LogContext>): void { ctx = { ...ctx, ...next }; }
-export function getLogContext(): LogContext { return { ...ctx }; }
-export function setLogForwarder(f: Forwarder | null): void { forwarder = f; }
-export function getLogForwarder(): Forwarder | null { return forwarder; }
+export function setLoggerEnabled(v: boolean): void {
+  enabled = v;
+}
+export function isLoggerEnabled(): boolean {
+  return enabled;
+}
+export function setLogContext(next: Partial<LogContext>): void {
+  ctx = { ...ctx, ...next };
+}
+export function getLogContext(): LogContext {
+  return { ...ctx };
+}
+export function setLogForwarder(f: Forwarder | null): void {
+  forwarder = f;
+}
+export function getLogForwarder(): Forwarder | null {
+  return forwarder;
+}
 
-export function _testGetThrottleMapSize(): number { return lastEmit.size; }
-export function _testResetFwdBudget(): void { fwdBudget.clear(); }
+export function _testGetThrottleMapSize(): number {
+  return lastEmit.size;
+}
+export function _testResetFwdBudget(): void {
+  fwdBudget.clear();
+}
 
 function pruneIfNeeded(): void {
   if (lastEmit.size <= MAX_THROTTLE_KEYS) return;
@@ -54,7 +70,7 @@ function formatCtx(): string {
   const parts: string[] = [];
   if (ctx.room !== undefined && ctx.room !== "") parts.push(`room=${ctx.room}`);
   if (ctx.turn !== undefined) parts.push(`turn=${ctx.turn}`);
-  return parts.length > 0 ? " " + parts.join(" ") : "";
+  return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }
 
 function tryForward(scope: Scope, event: string, data?: unknown): void {
@@ -69,7 +85,9 @@ function tryForward(scope: Scope, event: string, data?: unknown): void {
   } else {
     b.count++;
   }
-  try { forwarder(scope, event, data); } catch {}
+  try {
+    forwarder(scope, event, data);
+  } catch {}
 }
 
 export function dlog(scope: Scope, event: string, data?: unknown): void {

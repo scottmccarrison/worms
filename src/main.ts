@@ -30,6 +30,10 @@ const refreshScale = () => {
   setTimeout(() => game.scale.refresh(), 500);
 };
 window.addEventListener("orientationchange", refreshScale);
-if (typeof screen !== "undefined" && screen.orientation && typeof screen.orientation.addEventListener === "function") {
+if (
+  typeof screen !== "undefined" &&
+  screen.orientation &&
+  typeof screen.orientation.addEventListener === "function"
+) {
   screen.orientation.addEventListener("change", refreshScale);
 }

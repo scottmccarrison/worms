@@ -17,8 +17,8 @@
  *   - persistence for DO hibernation recovery
  */
 
+import { type LogContext, dlog } from "./debug/logger.js";
 import type { LobbyState } from "./messages.js";
-import { dlog, type LogContext } from "./debug/logger.js";
 
 /** Shared timing constants. */
 export const TURN_DURATION_MS = 45_000;
@@ -157,7 +157,10 @@ export class TurnArbiter {
     this.room.state.currentWormId = this.pickNextWormInTeam(firstTeamId);
     this.room.state.turnSeq = 1;
     this.room.state.turnEndsAt = Date.now() + turnDurationMs;
-    dlog("turn", "start", this.logCtx(), { turnDurationMs, turnEndsAt: this.room.state.turnEndsAt });
+    dlog("turn", "start", this.logCtx(), {
+      turnDurationMs,
+      turnEndsAt: this.room.state.turnEndsAt,
+    });
     this.fireTurnStart();
   }
 
@@ -408,7 +411,11 @@ export class TurnArbiter {
     this.room.state.turnSeq += 1;
     this.room.state.turnEndsAt = Date.now() + this.turnDurationMs;
     this.pausedRemainingMs = null;
-    dlog("turn", "advance_reset_timer", this.logCtx(), { now: Date.now(), turnEndsAt: this.room.state.turnEndsAt, turnDurationMs: this.turnDurationMs });
+    dlog("turn", "advance_reset_timer", this.logCtx(), {
+      now: Date.now(),
+      turnEndsAt: this.room.state.turnEndsAt,
+      turnDurationMs: this.turnDurationMs,
+    });
     dlog("turn", "advance", this.logCtx(), { fromTeam, toTeam: nextTeamId });
     this.fireTurnStart();
   }
