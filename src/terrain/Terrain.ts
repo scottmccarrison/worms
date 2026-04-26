@@ -68,7 +68,12 @@ export class Terrain {
     // regardless of whether the generator painted its own RGB.
     applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
 
-    // Register canvas with Phaser TextureManager
+    // Register canvas with Phaser TextureManager. A previous Terrain
+    // instance in the same scene session leaves its texture registered;
+    // addCanvas returns null on duplicate keys, so remove first.
+    if (this.scene.textures.exists(this.textureKey)) {
+      this.scene.textures.remove(this.textureKey);
+    }
     const canvasTexture = this.scene.textures.addCanvas(this.textureKey, this.buffer);
     if (!canvasTexture) throw new Error(`Terrain: addCanvas failed for key "${this.textureKey}"`);
     this.canvasTexture = canvasTexture;
