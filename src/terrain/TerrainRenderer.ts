@@ -51,6 +51,13 @@ export class TerrainRenderer {
 
     applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
 
+    // A previous TerrainRenderer instance in the same scene session (e.g.
+    // game 1 -> return to lobby -> game 2) leaves its canvas texture
+    // registered in Phaser's TextureManager. addCanvas returns null on
+    // duplicate keys, so remove any stale registration first.
+    if (init.scene.textures.exists(this.textureKey)) {
+      init.scene.textures.remove(this.textureKey);
+    }
     const canvasTexture = init.scene.textures.addCanvas(this.textureKey, this.buffer);
     if (!canvasTexture) {
       throw new Error(`TerrainRenderer: addCanvas failed for key "${this.textureKey}"`);
