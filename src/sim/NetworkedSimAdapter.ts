@@ -120,64 +120,78 @@ export class NetworkedSimAdapter implements SimAdapter {
   private lastJetThrustH: -1 | 0 | 1 | null = null;
 
   constructor(init: NetworkedSimAdapterInit) {
-    this.room = init.room;
-    this.frameIntervalMs = init.frameIntervalMs ?? 50;
+    dlogUnthrottled("sim", "NetworkedSimAdapter.constructing", {
+      hasRoom: !!init.room,
+      teamCount: init.teams?.length ?? -1,
+    });
+    try {
+      this.room = init.room;
+      this.frameIntervalMs = init.frameIntervalMs ?? 50;
 
-    // Parse team color strings to Phaser ints once at construction.
-    for (const t of init.teams) {
-      this.teams.push(new Team({ id: t.id, name: t.name, color: parseTeamColor(t.color) }));
-    }
-
-    // Build allWorms from the authoritative team roster. These are the
-    // worms the scene will render; positions start at (0, 0) and update
-    // from the first sim_state. Initial hp = maxHealth is a placeholder;
-    // the first sim_state reconciles it within ~50ms.
-    for (const t of init.teams) {
-      const team = this.teams.find((x) => x.id === t.id);
-      if (!team) continue;
-      for (const wormName of t.wormNames) {
-        const state = {
-          xPx: 0,
-          yPx: 0,
-          facing: 1 as -1 | 1,
-          aimAngle: -Math.PI / 4,
-          aimPower: 0.5,
-          hp: 100,
-          alive: true,
-        };
-        this.renderState.set(wormName, state);
-        const view: RenderableWorm = {
-          id: wormName,
-          team,
-          name: wormName,
-          get xPx() {
-            return state.xPx;
-          },
-          get yPx() {
-            return state.yPx;
-          },
-          get facing() {
-            return state.facing;
-          },
-          get aimAngle() {
-            return state.aimAngle;
-          },
-          get aimPower() {
-            return state.aimPower;
-          },
-          get hp() {
-            return state.hp;
-          },
-          get isAlive() {
-            return state.alive;
-          },
-        };
-        this.allWorms.push(view);
+      // Parse team color strings to Phaser ints once at construction.
+      for (const t of init.teams) {
+        this.teams.push(new Team({ id: t.id, name: t.name, color: parseTeamColor(t.color) }));
       }
-    }
 
-    this.wireRoom();
-    dlogUnthrottled("sim", "NetworkedSimAdapter.created");
+      // Build allWorms from the authoritative team roster. These are the
+      // worms the scene will render; positions start at (0, 0) and update
+      // from the first sim_state. Initial hp = maxHealth is a placeholder;
+      // the first sim_state reconciles it within ~50ms.
+      for (const t of init.teams) {
+        const team = this.teams.find((x) => x.id === t.id);
+        if (!team) continue;
+        for (const wormName of t.wormNames) {
+          const state = {
+            xPx: 0,
+            yPx: 0,
+            facing: 1 as -1 | 1,
+            aimAngle: -Math.PI / 4,
+            aimPower: 0.5,
+            hp: 100,
+            alive: true,
+          };
+          this.renderState.set(wormName, state);
+          const view: RenderableWorm = {
+            id: wormName,
+            team,
+            name: wormName,
+            get xPx() {
+              return state.xPx;
+            },
+            get yPx() {
+              return state.yPx;
+            },
+            get facing() {
+              return state.facing;
+            },
+            get aimAngle() {
+              return state.aimAngle;
+            },
+            get aimPower() {
+              return state.aimPower;
+            },
+            get hp() {
+              return state.hp;
+            },
+            get isAlive() {
+              return state.alive;
+            },
+          };
+          this.allWorms.push(view);
+        }
+      }
+
+      this.wireRoom();
+      dlogUnthrottled("sim", "NetworkedSimAdapter.created");
+    } catch (err) {
+      const e = err as { message?: string; stack?: string; name?: string };
+      dlogUnthrottled("sim", "NetworkedSimAdapter.error", {
+        name: e.name ?? "Error",
+        msg: e.message ?? String(err),
+        stack: (e.stack ?? "").slice(0, 500),
+      });
+      throw err;
+    }
   }
 
   // -------------------------------------------------------------------------

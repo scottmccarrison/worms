@@ -186,259 +186,285 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     dlogUnthrottled("scene", "GameScene.create", { isNetworked: this.isNetworked });
-    // Build the team roster once; both adapters use the same shape.
-    const teamsForAdapter = this.buildAdapterTeams(this.teamsInit);
+    try {
+      // Build the team roster once; both adapters use the same shape.
+      const teamsForAdapter = this.buildAdapterTeams(this.teamsInit);
 
-    // ------------------------------------------------------------------
-    // Pick the adapter. Everything sim-related flows through it.
-    // ------------------------------------------------------------------
-    // World dimensions: networked games get them from game_started; offline
-    // and fallback paths use the canonical WORLD_*_PX constants so the
-    // scrolling world (2560x1024) still applies. Never use this.scale.width
-    // as a fallback - that's the logical viewport (1280x720 for Scale.FIT),
-    // not the world.
-    const worldW = this.serverWidthPx ?? WORLD_WIDTH_PX;
-    const worldH = this.serverHeightPx ?? WORLD_HEIGHT_PX;
-    if (this.isNetworked && this.room) {
-      // Networked path: the server is authoritative for geometry. Paint
-      // the received mask into a canvas for the visual terrain.
-      const maskCanvas = this.serverMask
-        ? decodeServerMaskToCanvas(this.serverMask, worldW, worldH)
-        : loadMap(this.mapId, worldW, worldH, this.seedOverride).mask;
-      this.terrainRenderer = new TerrainRenderer({
-        scene: this,
-        widthPx: worldW,
-        heightPx: worldH,
-        sourceMask: maskCanvas,
+      // ------------------------------------------------------------------
+      // Pick the adapter. Everything sim-related flows through it.
+      // ------------------------------------------------------------------
+      // World dimensions: networked games get them from game_started; offline
+      // and fallback paths use the canonical WORLD_*_PX constants so the
+      // scrolling world (2560x1024) still applies. Never use this.scale.width
+      // as a fallback - that's the logical viewport (1280x720 for Scale.FIT),
+      // not the world.
+      const worldW = this.serverWidthPx ?? WORLD_WIDTH_PX;
+      const worldH = this.serverHeightPx ?? WORLD_HEIGHT_PX;
+      dlogUnthrottled("scene", "create.step", {
+        step: "pre_adapter",
+        hasRoom: !!this.room,
+        hasMask: !!this.serverMask,
       });
-      this.networkedSim = new NetworkedSimAdapter({
-        room: this.room,
-        teams: this.teamsInit ?? [],
-      });
-      this.sim = this.networkedSim;
-    } else {
-      // Offline path: adapter owns everything physics-touching.
-      const loaded = loadMap(this.mapId, worldW, worldH, this.seedOverride);
-      this.offlineSim = new OfflineSimAdapter({
-        scene: this,
-        loaded,
-        widthPx: worldW,
-        heightPx: worldH,
-        teams: teamsForAdapter,
-      });
-      this.sim = this.offlineSim;
-    }
-
-    // Build render sprites for networked worms; offline worms draw themselves.
-    if (this.networkedSim) {
-      for (const w of this.networkedSim.allWorms) {
-        this.wormSprites.set(w.id, new WormSprite({ scene: this }, w));
+      if (this.isNetworked && this.room) {
+        // Networked path: the server is authoritative for geometry. Paint
+        // the received mask into a canvas for the visual terrain.
+        const maskCanvas = this.serverMask
+          ? decodeServerMaskToCanvas(this.serverMask, worldW, worldH)
+          : loadMap(this.mapId, worldW, worldH, this.seedOverride).mask;
+        dlogUnthrottled("scene", "create.step", { step: "mask_decoded" });
+        this.terrainRenderer = new TerrainRenderer({
+          scene: this,
+          widthPx: worldW,
+          heightPx: worldH,
+          sourceMask: maskCanvas,
+        });
+        dlogUnthrottled("scene", "create.step", { step: "terrain_renderer_built" });
+        this.networkedSim = new NetworkedSimAdapter({
+          room: this.room,
+          teams: this.teamsInit ?? [],
+        });
+        dlogUnthrottled("scene", "create.step", { step: "adapter_built" });
+        this.sim = this.networkedSim;
+      } else {
+        // Offline path: adapter owns everything physics-touching.
+        const loaded = loadMap(this.mapId, worldW, worldH, this.seedOverride);
+        this.offlineSim = new OfflineSimAdapter({
+          scene: this,
+          loaded,
+          widthPx: worldW,
+          heightPx: worldH,
+          teams: teamsForAdapter,
+        });
+        this.sim = this.offlineSim;
       }
-    }
 
-    // Event + game-over subscriptions (both modes). We attach these AFTER
-    // adapter construction so the first turn's onTurnStart (fired synchronously
-    // during OfflineSimAdapter's TurnManager.start()) has already fired; the
-    // current active worm is re-read below when the HUDs wire up.
-    this.sim.onEvent((ev) => this.handleSimEvent(ev));
-    this.sim.onGameOver((winnerTeamId) => this.handleGameOver(winnerTeamId));
-    this.sim.onTurnChanged((teamId, wormId) => this.handleTurnChanged(teamId, wormId));
-    this.sim.onInputAllowedChanged((allowed) => {
-      this.inputController?.setInputAllowed(allowed);
-      this.turnHUD?.setEndTurnEnabled(allowed);
-    });
-
-    // ------------------------------------------------------------------
-    // Shutdown hook. Scene.restart on reconnect re-runs create(); we rely
-    // on SHUTDOWN to tear down adapter + unsubs.
-    // ------------------------------------------------------------------
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      dlogUnthrottled("scene", "GameScene.shutdown", { unsubCount: this.roomUnsubs.length });
-      // Tear down room listeners FIRST so a throw in any of the downstream
-      // destroys can't leave an active onStateChange listener that keeps
-      // firing (and attempting scene.start) after we've moved on.
-      this.tearDownRoomListeners();
-      this.cameraFollower?.destroy();
-      this.cameraFollower = null;
-      this.turnTransition?.destroy();
-      this.turnTransition = null;
-      try {
-        this.sim.destroy();
-      } catch {
-        // adapter may have torn itself down on reconnect; ignore.
-      }
-      for (const s of this.wormSprites.values()) s.destroy();
-      this.wormSprites.clear();
-      for (const g of this.projectileGraphics.values()) g.destroy();
-      this.projectileGraphics.clear();
-      this.turnHUD?.destroy();
-      this.weaponRadial?.destroy();
-      this.aimHUD?.destroy();
-      this.spectatorHUD?.destroy();
-      this.utilityDPad?.destroy();
-      this.utilityDPad = null;
-      this.windHUD?.destroy();
-      this.windHUD = null;
-      this.waterRenderer?.destroy();
-      this.waterRenderer = null;
-      this.reconnectingOverlay?.destroy();
-      this.reconnectingOverlay = null;
-      this.disconnectTick?.remove(false);
-      this.disconnectTick = null;
-      this.terrainRenderer?.destroy();
-      this.terrainRenderer = null;
-    });
-
-    // ------------------------------------------------------------------
-    // Input layer. InputController drives the adapter, not Worm directly.
-    // ------------------------------------------------------------------
-    this.inputController = new InputController({
-      scene: this,
-      allWorms: this.offlineSim?.wormsInternal ?? [],
-      onEndTurn: () => {
-        this.sim.endTurn();
-      },
-      onSelectWeapon: (n) => {
-        const weapon = allWeapons().find((w) => w.selectKey === n);
-        if (!weapon) return;
-        this.sim.selectWeapon(weapon.id);
-      },
-      onFire: () => {
-        this.sim.fire();
-      },
-      onCycleMap: () => {
-        if (!this.sim.getActiveWormId()) return;
-        const next = nextId(this.mapId);
-        this.scene.restart({ mapId: next });
-      },
-      onWalk: (dir) => this.sim.walk(dir),
-      onJump: () => this.sim.jump(),
-      onBackflip: () => this.sim.backflip(),
-      onAimAngleChange: (rad) => this.sim.setAimAngle(rad),
-      onAimPowerChange: (p) => this.sim.setAimPower(p),
-    });
-
-    // Touch + HUDs are scene-owned and identical across modes.
-    this.touchControls = new TouchControls({
-      scene: this,
-      getActiveWorm: () => this.getActiveWormAdapter(),
-      ropeEnabled: !this.isNetworked,
-      jetPackEnabled: true,
-    });
-    this.weaponRadial = new WeaponRadial({
-      scene: this,
-      sim: this.sim,
-      getSelectedWeaponId: () => this.getSelectedWeaponId(),
-      getAmmoFor: (id) => this.getAmmoFor(id),
-    });
-    this.aimHUD = new AimHUD({
-      scene: this,
-      getActiveWorm: () => this.getActiveWormAdapter(),
-      isInputAllowed: () => this.isInputAllowed(),
-    });
-    this.turnHUD = new TurnHUD({
-      scene: this,
-      onEndTurnPressed: () => this.sim.endTurn(),
-    });
-
-    // Utility d-pad: always mounted in both modes. Networked mode routes
-    // through the sim adapter (sends to server); offline routes to the
-    // local worm directly. Down button stays offline-only (rope extend).
-    this.utilityDPad = new UtilityDPad({
-      scene: this,
-      onLeft: (dir) => this.sim.setJetPackHorizontal(dir),
-      onUp: (active) => this.sim.setJetPackThrust(active),
-      onDown: (_active) => {
-        if (this.offlineSim) this.dispatchUtilityDown(_active);
-      },
-    });
-
-    // Replay the current turn so the HUD + input gates are correctly
-    // primed. Offline mode's TurnManager.start() fires its onTurnStart
-    // synchronously during adapter construction, before our subscribers
-    // are attached - so we manually pull the current state here.
-    const initialTeamId = this.sim.getActiveTeamId();
-    const initialWormId = this.sim.getActiveWormId();
-    if (initialTeamId) {
-      this.handleTurnChanged(initialTeamId, initialWormId);
-    }
-    // Initial inputAllowed is "true" offline (local player drives every turn)
-    // and "am I the active team's owner?" networked.
-    const initialAllowed = this.offlineSim
-      ? this.offlineSim.isInputAllowed()
-      : this.networkedSim
-        ? initialTeamId === this.myTeamId && this.myTeamId !== ""
-        : false;
-    this.inputController.setInputAllowed(initialAllowed);
-    this.turnHUD.setEndTurnEnabled(initialAllowed);
-
-    // Networked-only UI (spectator banner + reconnect + room listeners).
-    if (this.isNetworked && this.room) {
-      this.wireNetworkedScene();
-    }
-
-    // Wind HUD and water renderer (both modes). Use the canonical world
-    // dims - not this.scale.width, which is the viewport, not the world.
-    const sceneWidthPx = this.serverWidthPx ?? WORLD_WIDTH_PX;
-    const sceneHeightPx = this.serverHeightPx ?? WORLD_HEIGHT_PX;
-    this.windHUD = new WindHUD({ scene: this, sim: this.sim });
-    this.waterRenderer = new WaterRenderer({
-      scene: this,
-      sim: this.sim,
-      widthPx: sceneWidthPx,
-      heightPx: sceneHeightPx,
-    });
-
-    // Camera: constrain scroll to the world bounds so the camera never shows
-    // blank space outside the terrain. The camera will follow the active worm
-    // once handleTurnChanged fires.
-    this.cameras.main.setBounds(0, 0, sceneWidthPx, sceneHeightPx);
-
-    this.cameraFollower = new CameraFollower({ scene: this });
-
-    this.turnTransition = new TurnTransition({
-      scene: this,
-      sim: this.sim,
-      worldWidthPx: sceneWidthPx,
-      worldHeightPx: sceneHeightPx,
-      resolveFollowTarget: (wormId) => {
-        if (this.offlineSim) {
-          const w = this.offlineSim.wormsInternal.find((worm) => worm.name === wormId);
-          return w?.graphicsObject ?? null;
+      // Build render sprites for networked worms; offline worms draw themselves.
+      if (this.networkedSim) {
+        for (const w of this.networkedSim.allWorms) {
+          this.wormSprites.set(w.id, new WormSprite({ scene: this }, w));
         }
-        return this.wormSprites.get(wormId)?.graphics ?? null;
-      },
-      onTransitioningChanged: (t) => {
-        this.inputController?.setTransitioning(t);
-        this.cameraFollower?.setSuspended(t);
-      },
-      onActiveWormResolved: (target) => {
-        this.cameraFollower?.setActiveWormTarget(target);
-      },
-    });
-
-    this.debugGfx = this.add.graphics();
-    this.debugGfx.setDepth(10);
-    this.hud = this.add
-      .text(12, 12, "", {
-        fontSize: "14px",
-        color: "#e0e0e0",
-        fontFamily: "system-ui, sans-serif",
-      })
-      .setDepth(20);
-
-    this.wirePointerInput();
-
-    void mountTuningPanel(() => {
-      // Tuning panel gravity edit only affects offline; networked sim gravity
-      // lives on the server and is immutable from the client.
-      if (this.offlineSim) {
-        this.offlineSim.wormsInternal[0]?.body.getWorld().setGravity({
-          x: 0,
-          y: tuning.world.gravityY,
+        dlogUnthrottled("scene", "create.step", {
+          step: "worm_sprites_built",
+          count: this.wormSprites.size,
         });
       }
-    });
+
+      // Event + game-over subscriptions (both modes). We attach these AFTER
+      // adapter construction so the first turn's onTurnStart (fired synchronously
+      // during OfflineSimAdapter's TurnManager.start()) has already fired; the
+      // current active worm is re-read below when the HUDs wire up.
+      this.sim.onEvent((ev) => this.handleSimEvent(ev));
+      this.sim.onGameOver((winnerTeamId) => this.handleGameOver(winnerTeamId));
+      this.sim.onTurnChanged((teamId, wormId) => this.handleTurnChanged(teamId, wormId));
+      this.sim.onInputAllowedChanged((allowed) => {
+        this.inputController?.setInputAllowed(allowed);
+        this.turnHUD?.setEndTurnEnabled(allowed);
+      });
+
+      // ------------------------------------------------------------------
+      // Shutdown hook. Scene.restart on reconnect re-runs create(); we rely
+      // on SHUTDOWN to tear down adapter + unsubs.
+      // ------------------------------------------------------------------
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        dlogUnthrottled("scene", "GameScene.shutdown", { unsubCount: this.roomUnsubs.length });
+        // Tear down room listeners FIRST so a throw in any of the downstream
+        // destroys can't leave an active onStateChange listener that keeps
+        // firing (and attempting scene.start) after we've moved on.
+        this.tearDownRoomListeners();
+        this.cameraFollower?.destroy();
+        this.cameraFollower = null;
+        this.turnTransition?.destroy();
+        this.turnTransition = null;
+        try {
+          this.sim.destroy();
+        } catch {
+          // adapter may have torn itself down on reconnect; ignore.
+        }
+        for (const s of this.wormSprites.values()) s.destroy();
+        this.wormSprites.clear();
+        for (const g of this.projectileGraphics.values()) g.destroy();
+        this.projectileGraphics.clear();
+        this.turnHUD?.destroy();
+        this.weaponRadial?.destroy();
+        this.aimHUD?.destroy();
+        this.spectatorHUD?.destroy();
+        this.utilityDPad?.destroy();
+        this.utilityDPad = null;
+        this.windHUD?.destroy();
+        this.windHUD = null;
+        this.waterRenderer?.destroy();
+        this.waterRenderer = null;
+        this.reconnectingOverlay?.destroy();
+        this.reconnectingOverlay = null;
+        this.disconnectTick?.remove(false);
+        this.disconnectTick = null;
+        this.terrainRenderer?.destroy();
+        this.terrainRenderer = null;
+      });
+
+      // ------------------------------------------------------------------
+      // Input layer. InputController drives the adapter, not Worm directly.
+      // ------------------------------------------------------------------
+      this.inputController = new InputController({
+        scene: this,
+        allWorms: this.offlineSim?.wormsInternal ?? [],
+        onEndTurn: () => {
+          this.sim.endTurn();
+        },
+        onSelectWeapon: (n) => {
+          const weapon = allWeapons().find((w) => w.selectKey === n);
+          if (!weapon) return;
+          this.sim.selectWeapon(weapon.id);
+        },
+        onFire: () => {
+          this.sim.fire();
+        },
+        onCycleMap: () => {
+          if (!this.sim.getActiveWormId()) return;
+          const next = nextId(this.mapId);
+          this.scene.restart({ mapId: next });
+        },
+        onWalk: (dir) => this.sim.walk(dir),
+        onJump: () => this.sim.jump(),
+        onBackflip: () => this.sim.backflip(),
+        onAimAngleChange: (rad) => this.sim.setAimAngle(rad),
+        onAimPowerChange: (p) => this.sim.setAimPower(p),
+      });
+
+      // Touch + HUDs are scene-owned and identical across modes.
+      this.touchControls = new TouchControls({
+        scene: this,
+        getActiveWorm: () => this.getActiveWormAdapter(),
+        ropeEnabled: !this.isNetworked,
+        jetPackEnabled: true,
+      });
+      this.weaponRadial = new WeaponRadial({
+        scene: this,
+        sim: this.sim,
+        getSelectedWeaponId: () => this.getSelectedWeaponId(),
+        getAmmoFor: (id) => this.getAmmoFor(id),
+      });
+      this.aimHUD = new AimHUD({
+        scene: this,
+        getActiveWorm: () => this.getActiveWormAdapter(),
+        isInputAllowed: () => this.isInputAllowed(),
+      });
+      this.turnHUD = new TurnHUD({
+        scene: this,
+        onEndTurnPressed: () => this.sim.endTurn(),
+      });
+
+      // Utility d-pad: always mounted in both modes. Networked mode routes
+      // through the sim adapter (sends to server); offline routes to the
+      // local worm directly. Down button stays offline-only (rope extend).
+      this.utilityDPad = new UtilityDPad({
+        scene: this,
+        onLeft: (dir) => this.sim.setJetPackHorizontal(dir),
+        onUp: (active) => this.sim.setJetPackThrust(active),
+        onDown: (_active) => {
+          if (this.offlineSim) this.dispatchUtilityDown(_active);
+        },
+      });
+
+      // Replay the current turn so the HUD + input gates are correctly
+      // primed. Offline mode's TurnManager.start() fires its onTurnStart
+      // synchronously during adapter construction, before our subscribers
+      // are attached - so we manually pull the current state here.
+      const initialTeamId = this.sim.getActiveTeamId();
+      const initialWormId = this.sim.getActiveWormId();
+      if (initialTeamId) {
+        this.handleTurnChanged(initialTeamId, initialWormId);
+      }
+      // Initial inputAllowed is "true" offline (local player drives every turn)
+      // and "am I the active team's owner?" networked.
+      const initialAllowed = this.offlineSim
+        ? this.offlineSim.isInputAllowed()
+        : this.networkedSim
+          ? initialTeamId === this.myTeamId && this.myTeamId !== ""
+          : false;
+      this.inputController.setInputAllowed(initialAllowed);
+      this.turnHUD.setEndTurnEnabled(initialAllowed);
+
+      // Networked-only UI (spectator banner + reconnect + room listeners).
+      if (this.isNetworked && this.room) {
+        this.wireNetworkedScene();
+      }
+
+      // Wind HUD and water renderer (both modes). Use the canonical world
+      // dims - not this.scale.width, which is the viewport, not the world.
+      const sceneWidthPx = this.serverWidthPx ?? WORLD_WIDTH_PX;
+      const sceneHeightPx = this.serverHeightPx ?? WORLD_HEIGHT_PX;
+      this.windHUD = new WindHUD({ scene: this, sim: this.sim });
+      this.waterRenderer = new WaterRenderer({
+        scene: this,
+        sim: this.sim,
+        widthPx: sceneWidthPx,
+        heightPx: sceneHeightPx,
+      });
+
+      // Camera: constrain scroll to the world bounds so the camera never shows
+      // blank space outside the terrain. The camera will follow the active worm
+      // once handleTurnChanged fires.
+      this.cameras.main.setBounds(0, 0, sceneWidthPx, sceneHeightPx);
+
+      this.cameraFollower = new CameraFollower({ scene: this });
+
+      this.turnTransition = new TurnTransition({
+        scene: this,
+        sim: this.sim,
+        worldWidthPx: sceneWidthPx,
+        worldHeightPx: sceneHeightPx,
+        resolveFollowTarget: (wormId) => {
+          if (this.offlineSim) {
+            const w = this.offlineSim.wormsInternal.find((worm) => worm.name === wormId);
+            return w?.graphicsObject ?? null;
+          }
+          return this.wormSprites.get(wormId)?.graphics ?? null;
+        },
+        onTransitioningChanged: (t) => {
+          this.inputController?.setTransitioning(t);
+          this.cameraFollower?.setSuspended(t);
+        },
+        onActiveWormResolved: (target) => {
+          this.cameraFollower?.setActiveWormTarget(target);
+        },
+      });
+
+      this.debugGfx = this.add.graphics();
+      this.debugGfx.setDepth(10);
+      this.hud = this.add
+        .text(12, 12, "", {
+          fontSize: "14px",
+          color: "#e0e0e0",
+          fontFamily: "system-ui, sans-serif",
+        })
+        .setDepth(20);
+
+      this.wirePointerInput();
+
+      void mountTuningPanel(() => {
+        // Tuning panel gravity edit only affects offline; networked sim gravity
+        // lives on the server and is immutable from the client.
+        if (this.offlineSim) {
+          this.offlineSim.wormsInternal[0]?.body.getWorld().setGravity({
+            x: 0,
+            y: tuning.world.gravityY,
+          });
+        }
+      });
+
+      dlogUnthrottled("scene", "create.completed");
+    } catch (err) {
+      const e = err as { message?: string; stack?: string; name?: string };
+      dlogUnthrottled("scene", "create.error", {
+        step: "exception",
+        name: e.name ?? "Error",
+        msg: e.message ?? String(err),
+        stack: (e.stack ?? "").slice(0, 500),
+      });
+      // Re-throw so Phaser's existing console.error path still surfaces it
+      throw err;
+    }
   }
 
   update(_time: number, deltaMs: number): void {
