@@ -4,12 +4,16 @@ import { CameraFollower } from "./CameraFollower";
 
 function makeMocks() {
   const startFollowCalls: Array<{ target: object }> = [];
+  const centerOnCalls: Array<{ x: number; y: number }> = [];
 
   const camera = {
     startFollow: vi.fn((target: object) => {
       startFollowCalls.push({ target });
     }),
     stopFollow: vi.fn(),
+    centerOn: vi.fn((x: number, y: number) => {
+      centerOnCalls.push({ x, y });
+    }),
   };
 
   const scene = {
@@ -20,11 +24,11 @@ function makeMocks() {
     return new CameraFollower({ scene: scene as never, now });
   }
 
-  function makeGfx(label: string) {
-    return { __label: label } as unknown as import("phaser").GameObjects.GameObject;
+  function makeGfx(label: string, x = 0, y = 0) {
+    return { __label: label, x, y } as unknown as import("phaser").GameObjects.GameObject;
   }
 
-  return { scene, camera, startFollowCalls, makeFollower, makeGfx };
+  return { scene, camera, startFollowCalls, centerOnCalls, makeFollower, makeGfx };
 }
 
 const wormLerp = tuning.camera.wormLerp;
@@ -238,6 +242,30 @@ describe("CameraFollower", () => {
     follower.setSuspended(false);
     expect(camera.startFollow).toHaveBeenCalledTimes(1);
     expect(camera.startFollow).toHaveBeenCalledWith(worm, true, wormLerp, wormLerp);
+  });
+
+  it("snaps camera to last projectile position when projectile despawns", () => {
+    const { camera, centerOnCalls, makeFollower, makeGfx } = makeMocks();
+    const follower = makeFollower();
+    const worm = makeGfx("worm");
+
+    // First update: projectile at (1000, 600) - CameraFollower acquires it and caches position.
+    const projGfxA = makeGfx("proj", 1000, 600);
+    follower.setActiveWormTarget(worm);
+    follower.update([{ id: "p1", gfx: projGfxA }]);
+    expect(camera.startFollow).toHaveBeenCalledWith(projGfxA, true, projLerp, projLerp);
+    expect(camera.centerOn).not.toHaveBeenCalled();
+
+    // Second update: same projectile, moved to (1500, 800) - position cache updates.
+    const projGfxB = makeGfx("proj", 1500, 800);
+    follower.update([{ id: "p1", gfx: projGfxB }]);
+    expect(camera.centerOn).not.toHaveBeenCalled();
+
+    // Third update: projectile despawned - should stopFollow AND centerOn last cached position.
+    follower.update([]);
+    expect(camera.stopFollow).toHaveBeenCalledTimes(1);
+    expect(camera.centerOn).toHaveBeenCalledTimes(1);
+    expect(centerOnCalls[0]).toEqual({ x: 1500, y: 800 });
   });
 
   it("worm follow uses wormLerp, projectile follow uses projectileLerp", () => {
