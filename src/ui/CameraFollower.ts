@@ -30,6 +30,7 @@ export class CameraFollower {
   private followedProjectileId: string | null = null;
   private lingerUntilMs: number | null = null;
   private suspended = false; // set true while TurnTransition owns the camera
+  private lastFollowedPos: { x: number; y: number } | null = null;
 
   constructor(init: CameraFollowerInit) {
     this.scene = init.scene;
@@ -67,6 +68,7 @@ export class CameraFollower {
       // Drop our tracking; TurnTransition owns the camera now.
       this.followedProjectileId = null;
       this.lingerUntilMs = null;
+      this.lastFollowedPos = null;
     } else {
       // Resumed - return to active worm if we have one.
       if (this.activeWormTarget) {
@@ -104,13 +106,23 @@ export class CameraFollower {
 
     // Followed projectile just despawned - enter linger.
     if (this.followedProjectileId !== null) {
-      const stillExists = projectiles.some((p) => p.id === this.followedProjectileId);
-      if (!stillExists) {
-        this.scene.cameras.main.stopFollow();
-        this.lingerUntilMs = this.now() + tuning.camera.postImpactLingerMs;
+      const cur = projectiles.find((p) => p.id === this.followedProjectileId);
+      if (cur) {
+        // Cache position each frame so we know where to snap on despawn.
+        const g = cur.gfx as unknown as { x: number; y: number };
+        this.lastFollowedPos = { x: g.x, y: g.y };
         return;
       }
-      return; // still following this projectile
+      // Followed projectile just despawned. Snap to last known position
+      // so the impact VFX is visible regardless of camera lerp lag.
+      const cam = this.scene.cameras.main;
+      cam.stopFollow();
+      if (this.lastFollowedPos) {
+        cam.centerOn(this.lastFollowedPos.x, this.lastFollowedPos.y);
+      }
+      this.lastFollowedPos = null;
+      this.lingerUntilMs = this.now() + tuning.camera.postImpactLingerMs;
+      return;
     }
 
     // No current projectile follow target.
@@ -118,6 +130,8 @@ export class CameraFollower {
       const first = projectiles[0];
       if (first) {
         this.followedProjectileId = first.id;
+        const g = first.gfx as unknown as { x: number; y: number };
+        this.lastFollowedPos = { x: g.x, y: g.y };
         this.followProjectile(first.gfx);
       }
     }
@@ -128,5 +142,6 @@ export class CameraFollower {
     this.activeWormTarget = null;
     this.followedProjectileId = null;
     this.lingerUntilMs = null;
+    this.lastFollowedPos = null;
   }
 }
