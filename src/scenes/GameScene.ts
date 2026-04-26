@@ -243,11 +243,11 @@ export class GameScene extends Phaser.Scene {
         for (const w of this.networkedSim.allWorms) {
           this.wormSprites.set(w.id, new WormSprite({ scene: this }, w));
         }
+        dlogUnthrottled("scene", "create.step", {
+          step: "worm_sprites_built",
+          count: this.wormSprites.size,
+        });
       }
-      dlogUnthrottled("scene", "create.step", {
-        step: "worm_sprites_built",
-        count: this.wormSprites.size,
-      });
 
       // Event + game-over subscriptions (both modes). We attach these AFTER
       // adapter construction so the first turn's onTurnStart (fired synchronously
