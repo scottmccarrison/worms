@@ -37,6 +37,7 @@ export interface TerrainCut {
   y: number;
   r: number;
   seq: number;
+  source: "explode" | "tunnel";
 }
 
 interface TerrainBodyMeta {
@@ -79,7 +80,7 @@ export class Terrain {
    * affected Y-band, and append the cut to the log so the Simulation
    * can broadcast it as an event.
    */
-  cutCircle(xPx: number, yPx: number, rPx: number): TerrainCut {
+  cutCircle(xPx: number, yPx: number, rPx: number, source: "explode" | "tunnel"): TerrainCut {
     this.eraseCircleInMask(xPx, yPx, rPx);
 
     const yMin = Math.max(0, Math.floor((yPx - rPx) / this.rowHeight) * this.rowHeight);
@@ -87,7 +88,7 @@ export class Terrain {
     this.rebuildBodiesInRegion(yMin, yMax);
 
     this.cutSeq += 1;
-    const cut: TerrainCut = { x: xPx, y: yPx, r: rPx, seq: this.cutSeq };
+    const cut: TerrainCut = { x: xPx, y: yPx, r: rPx, seq: this.cutSeq, source };
     this.cutLog.push(cut);
     return cut;
   }
