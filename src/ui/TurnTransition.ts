@@ -1,4 +1,5 @@
 import type Phaser from "phaser";
+import type { NetworkedSimAdapter } from "../sim/NetworkedSimAdapter";
 import type { SimAdapter } from "../sim/SimAdapter";
 import { tuning } from "../tuning";
 
@@ -17,6 +18,12 @@ export interface TurnTransitionInit {
    * after a projectile despawns.
    */
   onActiveWormResolved?: (target: Phaser.GameObjects.GameObject | null) => void;
+  /**
+   * Optional reference to the NetworkedSimAdapter so zoom-in can read the
+   * authoritative worm position from the latest server frame instead of
+   * the interpolated sprite position (which lags by up to one render tick).
+   */
+  simAdapter?: NetworkedSimAdapter;
 }
 
 type State = "IDLE" | "ZOOMING_OUT" | "HOLDING" | "ZOOMING_IN";
@@ -41,6 +48,7 @@ export class TurnTransition {
   private readonly onActiveWormResolved:
     | ((target: Phaser.GameObjects.GameObject | null) => void)
     | undefined;
+  private readonly simAdapter: NetworkedSimAdapter | undefined;
   private readonly unsubStable: () => void;
 
   private state: State = "IDLE";
@@ -66,6 +74,7 @@ export class TurnTransition {
     this.resolveFollowTarget = init.resolveFollowTarget;
     this.onTransitioningChanged = init.onTransitioningChanged;
     this.onActiveWormResolved = init.onActiveWormResolved;
+    this.simAdapter = init.simAdapter;
     this.unsubStable = this.sim.onStateStable(() => this.handleStateStable());
   }
 
@@ -147,7 +156,7 @@ export class TurnTransition {
   private computeFitZoom(): number {
     const vw = this.scene.scale.width;
     const vh = this.scene.scale.height;
-    return Math.min(vw / this.worldWidthPx, vh / this.worldHeightPx);
+    return Math.max(vw / this.worldWidthPx, vh / this.worldHeightPx);
   }
 
   private enterHolding(): void {
@@ -187,9 +196,31 @@ export class TurnTransition {
     const gen = this.generation;
 
     const camera = this.scene.cameras.main;
-    const target = this.pendingWormId ? this.resolveFollowTarget(this.pendingWormId) : null;
 
-    if (!target) {
+    let panX: number | null = null;
+    let panY: number | null = null;
+
+    if (this.pendingWormId) {
+      // Prefer authoritative sim-state position (not stale sprite graphics).
+      const simPos = this.simAdapter?.getWormPosition(this.pendingWormId);
+      if (simPos?.alive) {
+        panX = simPos.xPx;
+        panY = simPos.yPx;
+      } else {
+        // Fallback: sprite graphics (may be stale, but better than (0,0))
+        const target = this.resolveFollowTarget(this.pendingWormId);
+        if (target) {
+          const g = target as unknown as { x: number; y: number };
+          panX = g.x;
+          panY = g.y;
+        }
+      }
+    }
+
+    if (panX === null || panY === null) {
+      console.warn("[TurnTransition] cannot resolve pan target", {
+        pendingWormId: this.pendingWormId,
+      });
       // No target - fail gracefully back to idle without a zoom-in.
       camera.zoomTo(1, tuning.camera.turnZoomInMs, "Sine.easeInOut", true);
       this.zoomInDelayed = this.scene.time.delayedCall(tuning.camera.turnZoomInMs, () => {
@@ -199,18 +230,21 @@ export class TurnTransition {
       return;
     }
 
-    // target is a Phaser GameObject with x/y we can read
-    const g = target as unknown as { x: number; y: number };
+    // Resolve the follow target (sprite) for startFollow at zoom-in completion.
+    // This may be null in networked mode when the sim adapter provided the position
+    // but the sprite isn't ready - finishToIdle handles a null follow target gracefully.
+    const followTarget = this.pendingWormId ? this.resolveFollowTarget(this.pendingWormId) : null;
+
     camera.zoomTo(1, tuning.camera.turnZoomInMs, "Sine.easeInOut", true);
     camera.pan(
-      g.x,
-      g.y,
+      panX,
+      panY,
       tuning.camera.turnZoomInMs,
       "Sine.easeInOut",
       true,
       (_c: Phaser.Cameras.Scene2D.Camera, progress: number) => {
         if (progress >= 1 && this.state === "ZOOMING_IN" && gen === this.generation) {
-          this.finishToIdle(target);
+          this.finishToIdle(followTarget);
         }
       },
     );

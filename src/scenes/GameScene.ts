@@ -428,6 +428,7 @@ export class GameScene extends Phaser.Scene {
         onActiveWormResolved: (target) => {
           this.cameraFollower?.setActiveWormTarget(target);
         },
+        simAdapter: this.networkedSim ?? undefined,
       });
 
       this.debugGfx = this.add.graphics();

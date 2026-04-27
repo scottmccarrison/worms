@@ -54,7 +54,17 @@ function makeMocks() {
   };
 
   const onTransitioningChanged = vi.fn();
-  const resolveFollowTarget = vi.fn((_id: string) => ({ x: 500, y: 300 }));
+  const resolveFollowTarget = vi.fn((_id: string): { x: number; y: number } | null => ({
+    x: 500,
+    y: 300,
+  }));
+
+  // Mock NetworkedSimAdapter with configurable getWormPosition
+  const simAdapter = {
+    getWormPosition: vi.fn(
+      (_id: string): { xPx: number; yPx: number; alive: boolean } | null => null,
+    ),
+  };
 
   function fireStable() {
     for (const sub of stableSubs) sub();
@@ -67,6 +77,7 @@ function makeMocks() {
   return {
     scene,
     sim,
+    simAdapter,
     onTransitioningChanged,
     resolveFollowTarget,
     cameraCalls,
@@ -84,6 +95,7 @@ function makeTurnTransition(mocks: ReturnType<typeof makeMocks>) {
     worldHeightPx: 1024,
     resolveFollowTarget: mocks.resolveFollowTarget as never,
     onTransitioningChanged: mocks.onTransitioningChanged,
+    simAdapter: mocks.simAdapter as never,
   });
 }
 
@@ -239,5 +251,71 @@ describe("TurnTransition", () => {
     expect(tt.isTransitioning()).toBe(false);
     // Stable sub should have been removed
     expect(mocks.stableSubs.length).toBe(0);
+  });
+
+  it("getWormPosition returns valid alive worm -> camera pans to that position (xPx, yPx)", async () => {
+    const mocks = makeMocks();
+    // Sim adapter returns an alive worm at authoritative position (different from sprite)
+    mocks.simAdapter.getWormPosition.mockReturnValue({ xPx: 800, yPx: 600, alive: true });
+    // Sprite position is different to confirm we're reading from sim, not sprite
+    mocks.resolveFollowTarget.mockReturnValue({ x: 500, y: 300 });
+    const tt = makeTurnTransition(mocks);
+
+    tt.begin("red", "red-1");
+
+    // ZOOMING_OUT -> HOLDING via pan callback
+    await Promise.resolve();
+
+    // stable + min hold
+    mocks.fireStable();
+    vi.advanceTimersByTime(700);
+
+    // ZOOMING_IN should pan to sim-state position (800, 600), not sprite (500, 300)
+    expect(mocks.cameraCalls).toContain("pan:800,600");
+  });
+
+  it("getWormPosition returns null (pre-first-frame) -> falls back to sprite graphics target", async () => {
+    const mocks = makeMocks();
+    // Sim adapter returns null (no frame yet)
+    mocks.simAdapter.getWormPosition.mockReturnValue(null);
+    // Sprite is at 500, 300
+    mocks.resolveFollowTarget.mockReturnValue({ x: 500, y: 300 });
+    const tt = makeTurnTransition(mocks);
+
+    tt.begin("red", "red-1");
+
+    await Promise.resolve();
+
+    mocks.fireStable();
+    vi.advanceTimersByTime(700);
+
+    // Should fall back to sprite position
+    expect(mocks.cameraCalls).toContain("pan:500,300");
+  });
+
+  it("getWormPosition returns alive=false -> skips pan to sim pos, console.warn called", async () => {
+    const mocks = makeMocks();
+    // Sim adapter returns a dead worm
+    mocks.simAdapter.getWormPosition.mockReturnValue({ xPx: 800, yPx: 600, alive: false });
+    // resolveFollowTarget also returns null (no sprite for dead worm)
+    mocks.resolveFollowTarget.mockReturnValue(null);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tt = makeTurnTransition(mocks);
+
+    tt.begin("red", "red-1");
+
+    await Promise.resolve();
+
+    mocks.fireStable();
+    vi.advanceTimersByTime(700);
+
+    // Should have warned and not panned to sim position
+    expect(mocks.cameraCalls).not.toContain("pan:800,600");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[TurnTransition] cannot resolve pan target",
+      expect.objectContaining({ pendingWormId: "red-1" }),
+    );
+
+    warnSpy.mockRestore();
   });
 });
