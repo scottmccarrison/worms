@@ -457,7 +457,7 @@ export class Room implements DurableObject {
         this.onSetColor(ws, player, msg);
         break;
       case "set_ready":
-        this.onSetReady(player, msg);
+        this.onSetReady(ws, player, msg);
         break;
       case "select_map":
         this.onSelectMap(ws, player, msg);
@@ -704,15 +704,20 @@ export class Room implements DurableObject {
     this.broadcastState();
   }
 
-  private onSetReady(player: LobbyPlayer, msg: unknown): void {
+  private onSetReady(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
+    const candidate = (msg as { ready?: unknown }).ready;
+    if (typeof candidate !== "boolean") {
+      this.sendError(ws, "invalid_payload", "set_ready expects { ready: boolean }");
+      return;
+    }
     const lobby = this.ensureLobby();
     dlog("room", "onSetReady", this.logCtx(), {
       sid: player.sessionId ?? "?",
-      ready: Boolean((msg as { ready?: unknown }).ready),
+      ready: candidate,
       phase: lobby.phase,
     });
     if (lobby.phase !== "lobby") return;
-    player.ready = Boolean((msg as { ready?: unknown }).ready);
+    player.ready = candidate;
     this.broadcastState();
   }
 
