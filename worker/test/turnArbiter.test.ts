@@ -363,6 +363,33 @@ describe("TurnArbiter", () => {
     expect(room.state.currentTeamId).toBe("blue");
   });
 
+  it("onWormDied advances turn immediately when the active worm dies (no onTick needed)", () => {
+    const room = new StubRoom();
+    room.connected = new Set(["alice", "bob"]);
+    const rosters = [rosterFor("red", "alice"), rosterFor("blue", "bob")];
+    setAllAlive(room.provider, rosters);
+    const arbiter = new TurnArbiter(room);
+    arbiter.start(["red", "blue"], rosters, TURN_DURATION_MS);
+
+    // Capture the active worm before the call.
+    const dyingWormId = room.state.currentWormId;
+    expect(dyingWormId).toBe("red-0");
+
+    // Mark the worm dead in the provider so alive counts reflect reality.
+    room.provider.deadWorms.add(dyingWormId);
+    room.provider.counts.set("red", 1); // one worm left on red
+
+    // Call onWormDied once - do NOT call onTick after.
+    arbiter.onWormDied(dyingWormId);
+
+    // Turn must have advanced without any onTick call.
+    expect(room.state.currentWormId).not.toBe(dyingWormId);
+    expect(room.state.currentTeamId).toBe("blue");
+
+    // pendingAdvance must not be the gating factor - advance already happened.
+    expect((arbiter as unknown as { pendingAdvance: boolean }).pendingAdvance).toBe(false);
+  });
+
   it("start() resets gameOver when a second match follows a completed game", () => {
     const room = new StubRoom();
     const arbiter = new TurnArbiter(room);

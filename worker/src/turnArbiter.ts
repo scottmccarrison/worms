@@ -272,6 +272,9 @@ export class TurnArbiter {
     if (this.gameOver) return false;
     if (this.pausedRemainingMs !== null) return false;
     if (Date.now() > this.room.state.turnEndsAt) return false;
+    const currentId = this.room.state.currentWormId;
+    const provider = this.room.getAliveCountsProvider();
+    if (currentId && provider && !provider.isWormAlive(currentId)) return false;
     return true;
   }
 
@@ -284,7 +287,7 @@ export class TurnArbiter {
     this.checkGameOver();
     if (this.gameOver) return;
     if (wormId && wormId === this.room.state.currentWormId) {
-      this.pendingAdvance = true;
+      this.advanceTurn();
     }
   }
 
