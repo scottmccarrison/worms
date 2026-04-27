@@ -104,7 +104,10 @@ export class ProjectileManager {
       weapon,
       firer,
       detonated: false,
-      msSinceLastCut: 0,
+      // For tunneling weapons (drill), force the first cut to happen on the
+      // next tick rather than waiting cutIntervalMs. Without this, the projectile
+      // has time to bounce on first terrain contact before the tunnel begins.
+      msSinceLastCut: weapon.tunnel ? weapon.tunnel.cutIntervalMs : 0,
     };
 
     // Link body userData back to the ActiveProjectile for contact lookup

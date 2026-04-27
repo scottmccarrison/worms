@@ -80,6 +80,13 @@ export class Projectile {
       restitution: init.config.restitution ?? 0.1,
     });
 
+    // For tunneling weapons (drill), force the first cut to happen on the
+    // next tick rather than waiting cutIntervalMs. Without this, the projectile
+    // has time to bounce on first terrain contact before the tunnel begins.
+    if (init.config.tunnel) {
+      this.msSinceLastCut = init.config.tunnel.cutIntervalMs;
+    }
+
     const userData: ProjectileUserData = { kind: "projectile", projectile: this };
     this.body.setUserData(userData);
   }
