@@ -102,6 +102,11 @@ interface Tuning {
     projectileLerp: number;
     postImpactLingerMs: number;
   };
+  juice: {
+    shakeMaxIntensity: number;  // accessibility cap; bigger explosions clamp here
+    shakeMinRadiusPx: number;   // below this radius, no shake
+    flashMaxAlpha: number;
+  };
 }
 
 export const tuning: Tuning = {
@@ -184,5 +189,10 @@ export const tuning: Tuning = {
     wormLerp: 0.08,
     projectileLerp: 0.05,
     postImpactLingerMs: 1200,
+  },
+  juice: {
+    shakeMaxIntensity: 0.012,  // accessibility cap; bigger explosions clamp here
+    shakeMinRadiusPx: 15,       // below this radius, no shake
+    flashMaxAlpha: 0.20,
   },
 };
