@@ -39,7 +39,8 @@ import { toMeters, toPixels } from "../physics/scale.js";
 import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
 import { type ExplodeResult, explode } from "../weapons/explode.js";
-import { type FireResult, fire } from "../weapons/fire.js";
+import { fire } from "../weapons/fire.js";
+import type { FireResult as WeaponFireResult } from "../weapons/fire.js";
 import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
 
 const OFF_MAP_MARGIN_PX = 200;
@@ -146,6 +147,22 @@ export interface SerializedSim {
   wind: number;
   waterLevelPx: number;
 }
+
+/**
+ * Structured result from applyFire. On success, `ok: true` and the underlying
+ * WeaponFireResult is included for the arbiter (shotsRemaining / turnEndsImmediately).
+ * On failure, `ok: false` with a reason the caller can forward to the client.
+ */
+export type SimFireResult =
+  | { ok: true; weaponResult: WeaponFireResult }
+  | {
+      ok: false;
+      reason:
+        | "no_ammo"
+        | "no_active_worm"
+        | "max_projectiles"
+        | "weapon_not_found";
+    };
 
 export class Simulation {
   readonly world: PlanckWorld;
@@ -316,22 +333,22 @@ export class Simulation {
   }
 
   /**
-   * Fire the worm's active weapon. Returns the FireResult so the
-   * caller can inspect shotsRemaining / turnEndsImmediately for the
-   * turn arbiter. Also emits a fire_event SimEvent on success, and
-   * any explode events for hitscan hits.
+   * Fire the worm's active weapon. Returns a SimFireResult so the caller can
+   * inspect shotsRemaining / turnEndsImmediately (on success) or forward a
+   * rejection reason to the originating client (on failure). Also emits a
+   * fire_event SimEvent on success, and any explode events for hitscan hits.
    */
-  applyFire(wormId: string, weaponId?: string): FireResult | null {
+  applyFire(wormId: string, weaponId?: string): SimFireResult {
     const worm = this.worms.get(wormId);
-    if (!worm || !worm.alive) return null;
-    if (this.projectiles.length >= MAX_PROJECTILES) return null;
+    if (!worm || !worm.alive) return { ok: false, reason: "no_active_worm" };
+    if (this.projectiles.length >= MAX_PROJECTILES) return { ok: false, reason: "max_projectiles" };
     const weapon = weaponId ? getById(weaponId) : getById(worm.activeWeapon);
-    if (!weapon) return null;
+    if (!weapon) return { ok: false, reason: "weapon_not_found" };
 
-    // Enforce per-team ammo. Reject silently if the team has run out.
+    // Enforce per-team ammo. Reject if the team has run out.
     const teamPool = this.teamAmmo.get(worm.teamId);
     const remaining = teamPool?.[weapon.id] ?? -1;
-    if (remaining !== -1 && remaining <= 0) return null;
+    if (remaining !== -1 && remaining <= 0) return { ok: false, reason: "no_ammo" };
 
     const result = fire({
       world: this.world,
@@ -379,7 +396,7 @@ export class Simulation {
       this.projectiles.push(proj);
     }
 
-    return result;
+    return { ok: true, weaponResult: result };
   }
 
   // ---- Main tick ----

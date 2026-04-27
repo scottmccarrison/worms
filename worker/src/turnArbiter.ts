@@ -209,6 +209,11 @@ export class TurnArbiter {
     return this.gameOver;
   }
 
+  /** True if the active worm has already fired this turn (one-shot gate). */
+  getHasFiredThisTurn(): boolean {
+    return this.hasFiredThisTurn;
+  }
+
   /**
    * Called by the Room immediately after a fire input is processed.
    * Shortens turnEndsAt to +5s so players can reposition (retreat window)

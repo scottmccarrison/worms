@@ -15,6 +15,7 @@ export {
   type ClientMsg,
   type DamageEvent,
   type FireEvent,
+  type FireRejectedMessage,
   type LobbyPlayer,
   type LobbyState,
   type ProjectileRenderState,
@@ -49,3 +50,4 @@ export type TerrainCutMessage = Extract<ServerMsg, { type: "terrain_cut" }>;
 export type FireEventMessage = Extract<ServerMsg, { type: "fire_event" }>;
 export type DamageEventMessage = Extract<ServerMsg, { type: "damage_event" }>;
 export type WormDiedMessage = Extract<ServerMsg, { type: "worm_died" }>;
+export type FireRejectedMsg = Extract<ServerMsg, { type: "fire_rejected" }>;

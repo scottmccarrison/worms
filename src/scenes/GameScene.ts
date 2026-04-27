@@ -596,7 +596,54 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.shake(80, 0.002);
         return;
       }
+      case "fire_rejected": {
+        // Show a brief toast above the active worm so the player sees why
+        // the shot was rejected. Skip toasting for no_active_worm - it
+        // usually means the worm just died and the message is stale.
+        if (ev.reason === "no_active_worm") return;
+        const reasonText: Record<string, string> = {
+          no_ammo: "OUT OF AMMO",
+          not_your_turn: "NOT YOUR TURN",
+          already_fired: "ALREADY FIRED",
+          max_projectiles: "TOO MANY IN FLIGHT",
+          weapon_not_found: "WEAPON UNAVAILABLE",
+        };
+        const label = reasonText[ev.reason];
+        if (!label) return;
+        const activeId = this.sim.getActiveWormId();
+        const activeWorm = this.sim.allWorms.find((w) => w.id === activeId);
+        const xPx = activeWorm?.xPx ?? this.scale.width / 2;
+        const yPx = activeWorm ? activeWorm.yPx - 20 : this.scale.height / 2;
+        this.spawnFireRejectedToast(xPx, yPx, label);
+        return;
+      }
     }
+  }
+
+  /**
+   * Floating toast label shown when a fire input is rejected by the server.
+   * Styled similarly to spawnDamageNumber but in orange/yellow. Auto-destroys
+   * after the tween completes.
+   */
+  private spawnFireRejectedToast(xPx: number, yPx: number, label: string): void {
+    const txt = this.add
+      .text(xPx, yPx, label, {
+        fontSize: "16px",
+        fontFamily: "monospace",
+        color: "#ffaa00",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(50);
+    this.tweens.add({
+      targets: txt,
+      y: yPx - 24,
+      alpha: { from: 1, to: 0 },
+      duration: 1200,
+      ease: "Quad.easeOut",
+      onComplete: () => txt.destroy(),
+    });
   }
 
   /**

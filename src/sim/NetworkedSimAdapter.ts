@@ -20,6 +20,7 @@ import type {
   ClientMsg,
   DamageEventMessage,
   FireEventMessage,
+  FireRejectedMsg,
   SimStateMessage,
   TeamInit,
   TerrainCutMessage,
@@ -617,6 +618,13 @@ export class NetworkedSimAdapter implements SimAdapter {
       for (const sub of this.gameOverSubs) sub(msg.winnerTeamId);
     });
     this.unsubs.push(gameOverUnsub);
+
+    const fireRejectedUnsub = this.room.onMessage("fire_rejected", (msg: FireRejectedMsg) => {
+      for (const sub of this.eventSubs) {
+        sub({ type: "fire_rejected", weaponId: msg.weaponId, reason: msg.reason });
+      }
+    });
+    this.unsubs.push(fireRejectedUnsub);
   }
 }
 
