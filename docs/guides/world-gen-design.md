@@ -181,6 +181,22 @@ When that draft is written, this section gets updated to point at it.
 
 ---
 
+## Process appendix: guiding questions for architectural decisions
+
+Version 2 of world-gen (the directory of one-off mask drawers) felt right when we shipped it. It bit us when the architecture revealed itself as fickle. The shape of that mistake: we made decisions from confident-sounding first-principles reasoning without grounding them in references or research. The discipline below exists so version 3 (this pipeline) does not repeat that pattern.
+
+Apply these five questions at every architecturally-loaded step. Not every line of code, but every decision that locks in a contract, a data shape, an ordering rule, or a category boundary:
+
+1. **Bible cite.** Which section of `world-gen-philosophy.md` speaks to this? If the bible is silent, say so plainly. The bible is not a substitute for a decision, but knowing it is silent is itself information - it tells us we are filling in a gap the philosophy did not name, and that the choice we make is a worms-specific commitment, not a Terraria-derived one.
+2. **Consensus cite.** Which prior decision in `world-gen-design.md` or `world-gen-passes-v1.md` already constrains this? Reusing prior consensus is cheaper than re-litigating, and a new decision that contradicts an old one needs to be flagged as such, not silently introduced.
+3. **Prior art.** How do comparable shipped systems handle this? Have we *researched*, or are we *assuming*? First-principles reasoning is necessary but not sufficient. A confident-sounding architecture with no research is what produced version 2. If we cannot name a real shipped reference, we have not done the work.
+4. **Simplest sufficient.** Is this solving a problem we *have*, or one we *imagine*? Match the discipline that kept `SmoothMaskEdges` out of v1 (no evidence of need) and that resists pre-engineering for hypothetical scale. Speculative optimization is a category of mistake; the solution is to wait for measurement.
+5. **Assumption-that-bites.** What are we taking for granted that the implementation might invalidate? Name the specific way we would learn we were wrong. The hardcoded-island problem in version 2 was a takes-for-granted that bit us when we tried to scale; the canyon-void edge case in the original v1 draft was another. If we cannot name how we would discover the assumption was wrong, we have not stress-tested it.
+
+If any answer is "I do not know," that is the signal to stop and research before deciding. The cost of pausing for prior art is hours; the cost of making the wrong architectural call is rewriting a third version.
+
+---
+
 ## Done
 
 This document captures consensus on world-gen philosophy as of the conversation that produced it. The bible at `world-gen-philosophy.md` remains the unmodified extraction of Terraria's model. This doc is what we believe and what we are building. They are read together.
