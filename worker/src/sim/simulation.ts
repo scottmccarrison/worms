@@ -468,13 +468,15 @@ export class Simulation {
 
     // 5. Off-map kill: any worm pushed outside the map (in any direction,
     //    plus a margin) is marked dead. Absorbs issue #53.
-    const killMin = -OFF_MAP_MARGIN_PX / 30; // meters
+    //    Top boundary intentionally excluded: gravity returns airborne worms;
+    //    turn timer caps duration. Fix for issue #141.
+    const killMinX = -OFF_MAP_MARGIN_PX / 30; // meters
     const killMaxX = (this.widthPx + OFF_MAP_MARGIN_PX) / 30;
     const killMaxY = (this.heightPx + OFF_MAP_MARGIN_PX) / 30;
     for (const worm of this.worms.values()) {
       if (!worm.alive) continue;
       const pos = worm.body.getPosition();
-      if (pos.x < killMin || pos.x > killMaxX || pos.y < killMin || pos.y > killMaxY) {
+      if (pos.x < killMinX || pos.x > killMaxX || pos.y > killMaxY) {
         worm.kill();
         if (!this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);
