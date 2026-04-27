@@ -54,7 +54,9 @@ function makeMocks() {
   };
 
   const onTransitioningChanged = vi.fn();
-  const resolveFollowTarget = vi.fn((_id: string) => ({ x: 500, y: 300 }));
+  const resolveFollowTarget = vi.fn(
+    (_id: string): { x: number; y: number } | null => ({ x: 500, y: 300 }),
+  );
 
   // Mock NetworkedSimAdapter with configurable getWormPosition
   const simAdapter = {
