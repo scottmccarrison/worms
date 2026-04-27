@@ -42,7 +42,6 @@ type LobbySceneData = LobbySceneDataHome | LobbySceneDataReconnect;
 
 type View = "home" | "room";
 
-
 const TEXT_STYLE_LARGE: Phaser.Types.GameObjects.Text.TextStyle = {
   fontSize: "64px",
   color: "#e0e0e0",
