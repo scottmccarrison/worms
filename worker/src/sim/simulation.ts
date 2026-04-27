@@ -528,11 +528,15 @@ export class Simulation {
       }
     }
 
-    // 7. Drain terrain cut log. Currently every cut is authored via
-    //    explode() which also emits its own terrain_cut SimEvent, so
-    //    the log entries are redundant. Drain to keep the log from
-    //    growing unbounded.
-    this.terrain.consumeCutLog();
+    // 7. Drain terrain cut log. Drill tunnel cuts (projectile.tickTunnel
+    //    -> terrain.cutCircle) bypass emitExplodeEvents, so emit them as
+    //    terrain_cut SimEvents here. Explosion cuts already emitted via
+    //    emitExplodeEvents - filter them out to avoid double-emit.
+    const drained = this.terrain.consumeCutLog();
+    for (const cut of drained) {
+      if (cut.source !== "tunnel") continue;
+      this.events.push({ type: "terrain_cut", x: cut.x, y: cut.y, r: cut.r, seq: cut.seq });
+    }
 
     // stateChanged: always true when playing (worms + projectiles
     // move). Cheap heuristic: events non-empty OR any worm moved OR

@@ -114,7 +114,7 @@ export class Projectile {
     this.msSinceLastCut += dtMs;
     if (this.msSinceLastCut >= tunnel.cutIntervalMs) {
       const pos = this.body.getPosition();
-      terrain.cutCircle(toPixels(pos.x), toPixels(pos.y), tunnel.cutRadiusPx);
+      terrain.cutCircle(toPixels(pos.x), toPixels(pos.y), tunnel.cutRadiusPx, "tunnel");
       this.msSinceLastCut = 0;
     }
   }
