@@ -118,6 +118,7 @@ export class Worm {
       fixedRotation: true,
       linearDamping,
     });
+    this.body.setBullet(true);
 
     // Main circle body.
     this.body.createFixture({
