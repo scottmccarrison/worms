@@ -442,7 +442,10 @@ export class Simulation {
       // Wind: apply horizontal force per tick to in-flight projectiles.
       // WIND_FORCE is Newtons per unit wind; tunable in src/tuning.ts.
       if (this.wind !== 0) {
-        const WIND_FORCE = 2; // Mirror of tuning.wind.forceNewtonsPerUnit.
+        // Mirror of src/tuning.ts wind.forceNewtonsPerUnit - keep in sync.
+        // 0.8 N/unit gives ~9 m/s^2 lateral accel at wind=0.8 on a 0.07kg projectile,
+        // approximately gravity strength - meaningful but not trajectory-breaking.
+        const WIND_FORCE = 0.8;
         proj.body.applyForce(
           { x: this.wind * WIND_FORCE, y: 0 },
           proj.body.getWorldCenter(),
