@@ -4,17 +4,19 @@
  * - `offline`: dev-only flag that skips the lobby and drops straight into
  *   GameScene with local defaults. Matches Epic 7's single-device behaviour.
  * - `autoJoinCode`: 4-letter uppercase room code from `?room=WAVE`. Invalid
- *   codes (wrong length, lowercase, digits, non-A-Z) are rejected to null so
- *   we never send garbage into the matchmaker.
+ *   codes (wrong length, lowercase, digits, characters outside CODE_ALPHABET)
+ *   are rejected to null so we never send garbage into the matchmaker.
  * - `mapId`: optional `?map=hills` hint consumed by GameScene in offline mode.
  */
+import { CODE_ALPHABET } from "../../../shared/codeAlphabet";
+
 export interface UrlParams {
   offline: boolean;
   autoJoinCode: string | null;
   mapId: string | null;
 }
 
-const CODE_PATTERN = /^[A-Z]{4}$/;
+const CODE_PATTERN = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 
 /**
  * Pure URL query parser. Input is the `search` portion (e.g. `?room=WAVE&offline=1`).

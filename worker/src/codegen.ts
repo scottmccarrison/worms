@@ -9,7 +9,8 @@
  * Ported verbatim from server/src/codegen.ts. Pure; no Node APIs.
  */
 
-const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // 24 letters: excludes I, O
+import { CODE_ALPHABET } from "../../shared/codeAlphabet.js"; // .js suffix per worker ESM convention
+const ALPHABET = CODE_ALPHABET;
 
 /** Generate a single 4-letter code from ALPHABET. Not guaranteed unique. */
 export function generateCode(): string {
@@ -38,5 +39,5 @@ export function generateUniqueCode(taken: Set<string>, maxAttempts = 100): strin
 }
 
 /** Exported for tests + potential validation helpers. */
-export const CODE_ALPHABET = ALPHABET;
+export { CODE_ALPHABET };
 export const CODE_LENGTH = 4;
