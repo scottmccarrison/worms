@@ -46,6 +46,12 @@ describe("parseUrlParams", () => {
     expect(parseUrlParams("?room=WAV%20").autoJoinCode).toBeNull();
   });
 
+  it("rejects codes containing I or O (excluded from CODE_ALPHABET to avoid 1/0 confusion)", () => {
+    expect(parseUrlParams("?room=OHIO").autoJoinCode).toBeNull();
+    expect(parseUrlParams("?room=BIOM").autoJoinCode).toBeNull();
+    expect(parseUrlParams("?room=ICON").autoJoinCode).toBeNull();
+  });
+
   it("parses ?map=ID through unchanged", () => {
     expect(parseUrlParams("?map=hills").mapId).toBe("hills");
   });
