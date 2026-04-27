@@ -14,8 +14,8 @@ export class JetPack implements Utility {
   private _active = false;
   private _fuel: number;
   private readonly flameGfx: Phaser.GameObjects.Graphics;
-  private thrustH: -1 | 0 | 1 = 0; // horizontal from InputController
-  private thrustUp = false; // vertical from InputController
+  thrustVx = 0; // continuous horizontal thrust: -1=left, +1=right
+  thrustVy = 0; // continuous vertical thrust: -1=up, +1=down (Phaser Y-down)
 
   constructor(init: JetPackInit) {
     this.worm = init.worm;
@@ -79,9 +79,9 @@ export class JetPack implements Utility {
 
     // Build force vector - use applyForce (continuous acceleration, dt-integrated by solver)
     // not applyLinearImpulse (instant velocity kick that stacks every frame at 60fps).
-    // Negative Y = upward in planck (y-down coordinate system)
-    const fx = this.thrustH * tuning.jetpack.sideForce;
-    const fy = this.thrustUp ? -tuning.jetpack.upwardForce : 0;
+    // Negative vy = thrust up in planck (y-down coordinate system).
+    const fx = this.thrustVx * tuning.jetpack.sideForce;
+    const fy = this.thrustVy * tuning.jetpack.upwardForce;
 
     if (fx !== 0 || fy !== 0) {
       this.worm.body.applyForce({ x: fx, y: fy }, this.worm.body.getPosition(), true);
@@ -95,8 +95,8 @@ export class JetPack implements Utility {
     }
 
     // Update facing direction when thrusting sideways
-    if (this.thrustH !== 0) {
-      this.worm.setFacing(this.thrustH as -1 | 1);
+    if (this.thrustVx !== 0) {
+      this.worm.setFacing(this.thrustVx > 0 ? 1 : -1);
     }
 
     // Draw flame (small orange triangle below worm)
@@ -104,18 +104,31 @@ export class JetPack implements Utility {
   }
 
   /**
-   * Called by InputController: horizontal thrust direction.
-   * -1 = left, 0 = none, 1 = right.
+   * Set continuous 2D thrust vector. Magnitude is clamped to <= 1 so
+   * diagonal presses (e.g. W+D) don't exceed full-power thrust.
+   * vx: -1=left, +1=right. vy: -1=up, +1=down (Phaser Y-down).
    */
-  setHorizontalInput(direction: -1 | 0 | 1): void {
-    this.thrustH = direction;
+  setThrustVector(nx: number, ny: number): void {
+    const len = Math.hypot(nx, ny);
+    const scale = len > 1 ? 1 / len : 1;
+    this.thrustVx = nx * scale;
+    this.thrustVy = ny * scale;
   }
 
   /**
-   * Called by InputController: whether upward thrust is pressed.
+   * Back-compat wrapper for InputController keyboard path.
+   * Preserves the current vy so W (up) + D (right) both work simultaneously.
+   */
+  setHorizontalInput(h: -1 | 0 | 1): void {
+    this.setThrustVector(h, this.thrustVy);
+  }
+
+  /**
+   * Back-compat wrapper for InputController keyboard path.
+   * Preserves the current vx so W (up) + D (right) both work simultaneously.
    */
   setVerticalInput(up: boolean): void {
-    this.thrustUp = up;
+    this.setThrustVector(this.thrustVx, up ? -1 : 0);
   }
 
   /** Clean up graphics. Called when worm is destroyed. */
@@ -138,15 +151,15 @@ export class JetPack implements Utility {
 
     this.flameGfx.clear();
 
-    // Bottom flame when thrusting up
-    if (this.thrustUp) {
+    // Bottom flame when thrusting up (vy < 0 in Y-down)
+    if (this.thrustVy < 0) {
       this.flameGfx.fillStyle(0xff6600, 0.85);
       this.flameGfx.fillTriangle(cx - 5, cy + r + 2, cx + 5, cy + r + 2, cx, cy + r + 14);
     }
 
     // Side flame when thrusting horizontally
-    if (this.thrustH !== 0) {
-      const sx = this.thrustH * -1; // flame points opposite to movement
+    if (this.thrustVx !== 0) {
+      const sx = this.thrustVx > 0 ? -1 : 1; // flame points opposite to movement
       this.flameGfx.fillStyle(0xff8800, 0.75);
       this.flameGfx.fillTriangle(cx + sx * r, cy - 4, cx + sx * r, cy + 4, cx + sx * (r + 10), cy);
     }

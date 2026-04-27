@@ -96,6 +96,8 @@ export interface SimAdapter {
   toggleJetPack(): void;
   setJetPackThrust(active: boolean): void;
   setJetPackHorizontal(dir: -1 | 0 | 1): void;
+  /** Continuous 2D thrust vector API. vx: -1=left, +1=right. vy: -1=up, +1=down (Y-down). */
+  setJetPackThrustVector(vx: number, vy: number): void;
   isJetPacking(): boolean;
   /** Current jetpack fuel level, 0..100. */
   getJetPackFuel(): number;

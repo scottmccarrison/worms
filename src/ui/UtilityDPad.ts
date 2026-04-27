@@ -83,6 +83,18 @@ export class UtilityDPad {
     }
   }
 
+  /** Returns true if the pointer is over any of the d-pad buttons.
+   * GameScene uses this to gate the gesture layer so d-pad taps don't
+   * double-fire as utility_thrust gestures. */
+  hitsButton(pointer: Phaser.Input.Pointer): boolean {
+    if (!this.container.visible) return false;
+    const hits = this.scene.input.hitTestPointer(pointer);
+    return hits.some(
+      (obj) =>
+        obj === this.leftBtn || obj === this.rightBtn || obj === this.upBtn || obj === this.downBtn,
+    );
+  }
+
   show(): void {
     this.container.setVisible(true);
     // Re-enable hit-testing on each button; setInteractive() is a no-op

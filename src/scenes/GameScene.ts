@@ -97,7 +97,7 @@ export class GameScene extends Phaser.Scene {
    * - "walk": tap-hold on a screen half, walking left/right
    * - null: no pointer is being tracked
    */
-  private activeGestureKind: "aim" | "walk" | null = null;
+  private activeGestureKind: "aim" | "walk" | "utility_thrust" | null = null;
   /** Pointer id that opened the active gesture. Only this id's move/up events
    * are honored; other pointers (multi-touch) are routed to their own buttons. */
   private activePointerId: number | null = null;
@@ -1039,6 +1039,7 @@ export class GameScene extends Phaser.Scene {
       if (this.turnHUD.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
       if (this.weaponRadial?.hitsRadial(p)) return;
+      if (this.utilityDPad?.hitsButton(p)) return;
       // Already tracking a gesture on a different pointer: ignore. Multi-touch
       // secondary fingers should route to buttons (above), not the gesture layer.
       if (this.activePointerId !== null) return;
@@ -1060,6 +1061,7 @@ export class GameScene extends Phaser.Scene {
         myTurn,
         utilityActive,
         wormHitRadiusPx: tuning.touch.wormHitRadiusPx,
+        jetpackRadialDeadZonePx: tuning.touch.jetpackRadialDeadZonePx,
         doubleTapMaxMs: tuning.touch.doubleTapMaxMs,
         longPressMs: tuning.touch.longPressMs,
       };
@@ -1077,6 +1079,10 @@ export class GameScene extends Phaser.Scene {
           // walk message directly.
           this.sim.setFacing(o.dir);
           this.sim.walk(o.dir);
+        } else if (o.kind === "utility_thrust_start") {
+          this.activeGestureKind = "utility_thrust";
+          this.activePointerId = p.id;
+          this.sim.setJetPackThrustVector(o.nx, o.ny);
         }
         // "ignored": no-op. pointermove / pointerup for this pointer won't
         // match activePointerId (null), so they short-circuit.
@@ -1085,6 +1091,15 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
       if (p.id !== this.activePointerId) return;
+      if (this.activeGestureKind === "utility_thrust") {
+        const moves = this.gestureTracker.processMove(p.worldX, p.worldY);
+        for (const m of moves) {
+          if (m.kind === "utility_thrust_move") {
+            this.sim.setJetPackThrustVector(m.nx, m.ny);
+          }
+        }
+        return;
+      }
       if (this.activeGestureKind !== "aim") return;
       const worm = this.getActiveWormAdapter();
       if (!worm || !this.isInputAllowed()) return;
@@ -1134,6 +1149,8 @@ export class GameScene extends Phaser.Scene {
           this.sim.jump();
         } else if (o.kind === "backflip") {
           this.sim.backflip();
+        } else if (o.kind === "utility_thrust_end") {
+          this.sim.setJetPackThrustVector(0, 0);
         }
       }
       void gestureKind; // retained for future metrics / debug.

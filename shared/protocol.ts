@@ -328,5 +328,6 @@ export type ClientMsg =
   | { type: "input_jetpack_toggle"; seq: number }
   | { type: "input_jetpack_thrust"; active: boolean; seq: number }
   | { type: "input_jetpack_horizontal"; dir: -1 | 0 | 1; seq: number }
+  | { type: "input_jetpack_vector"; vx: number; vy: number }
   | { type: "leave" }
   | { type: "client_log"; scope: string; event: string; data?: unknown; ts: number };

@@ -315,6 +315,10 @@ export class Simulation {
     this.worms.get(wormId)?.setJetPackHorizontal(dir);
   }
 
+  applyJetPackVector(wormId: string, vx: number, vy: number): void {
+    this.worms.get(wormId)?.setJetPackThrustVector(vx, vy);
+  }
+
   /** Reset utility state when a new turn starts for the given worm. */
   resetUtilitiesForTurnStart(wormId: string): void {
     this.worms.get(wormId)?.resetUtilitiesForTurnStart();
