@@ -91,10 +91,7 @@ export class UtilityDPad {
     const hits = this.scene.input.hitTestPointer(pointer);
     return hits.some(
       (obj) =>
-        obj === this.leftBtn ||
-        obj === this.rightBtn ||
-        obj === this.upBtn ||
-        obj === this.downBtn,
+        obj === this.leftBtn || obj === this.rightBtn || obj === this.upBtn || obj === this.downBtn,
     );
   }
 
