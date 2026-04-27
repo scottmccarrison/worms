@@ -174,7 +174,8 @@ export const tuning: Tuning = {
     iterations: 4,
     surfaceBufferPx: 80,
   },
-  wind: { forceNewtonsPerUnit: 2 },
+  // Mirror of worker/src/sim/simulation.ts WIND_FORCE - keep in sync.
+  wind: { forceNewtonsPerUnit: 0.8 },
   camera: {
     turnZoomOutMs: 800,
     turnHoldMinMs: 700,
