@@ -207,8 +207,9 @@ describe("fireHitscan - minigun (12 pellets, with spread)", () => {
 
     const result = fire(ctx);
 
-    // Math.random must have been called once per pellet (spread > 0).
-    expect(callCount).toBe(12);
+    // Math.random must have been called twice per pellet (Bates-2 triangular
+    // distribution: jitter = (rand - 0.5) + (rand - 0.5)) so 24 calls for 12 pellets.
+    expect(callCount).toBe(24);
     // All 12 hits should be present.
     expect(result.explodeResults).toHaveLength(12);
   });
