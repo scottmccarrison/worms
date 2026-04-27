@@ -6,7 +6,7 @@ export interface InputControllerInit {
   scene: Phaser.Scene;
   allWorms: Worm[]; // renamed from worms; all worms for cycleWithinTeam lookups
   onEndTurn: () => void; // called on Enter keydown
-  onSelectWeapon: (n: 1 | 2 | 3) => void; // called when 1/2/3 pressed in normal state
+  onSelectWeapon: (n: number) => void; // called when 1-7 pressed in normal state
   onFire: () => void; // called when F pressed in normal state
   onCycleMap: () => void; // called when M pressed; dev affordance to cycle maps
   // Epic 9: optional callbacks fired when local input mutates the active worm.
@@ -22,7 +22,7 @@ export interface InputControllerInit {
 export class InputController {
   private readonly scene: Phaser.Scene;
   private readonly onEndTurn: () => void;
-  private readonly onSelectWeapon: (n: 1 | 2 | 3) => void;
+  private readonly onSelectWeapon: (n: number) => void;
   private readonly onFire: () => void;
   private readonly onCycleMap: () => void;
   private readonly onWalk: (dir: -1 | 0 | 1) => void;
@@ -58,6 +58,10 @@ export class InputController {
   private readonly key1: Phaser.Input.Keyboard.Key;
   private readonly key2: Phaser.Input.Keyboard.Key;
   private readonly key3: Phaser.Input.Keyboard.Key;
+  private readonly key4: Phaser.Input.Keyboard.Key;
+  private readonly key5: Phaser.Input.Keyboard.Key;
+  private readonly key6: Phaser.Input.Keyboard.Key;
+  private readonly key7: Phaser.Input.Keyboard.Key;
   private readonly keyFire: Phaser.Input.Keyboard.Key; // F
   private readonly keyPowerDown: Phaser.Input.Keyboard.Key; // [
   private readonly keyPowerUp: Phaser.Input.Keyboard.Key; // ]
@@ -97,6 +101,10 @@ export class InputController {
     this.key1 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.key2 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
     this.key3 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
+    this.key4 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR);
+    this.key5 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE);
+    this.key6 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SIX);
+    this.key7 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SEVEN);
     this.keyFire = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.keyPowerDown = kb.addKey(Phaser.Input.Keyboard.KeyCodes.OPEN_BRACKET);
     this.keyPowerUp = kb.addKey(Phaser.Input.Keyboard.KeyCodes.CLOSED_BRACKET);
@@ -277,10 +285,14 @@ export class InputController {
         return;
       }
 
-      // Weapon select (1/2/3)
+      // Weapon select (1-7)
       if (Phaser.Input.Keyboard.JustDown(this.key1)) this.onSelectWeapon(1);
       else if (Phaser.Input.Keyboard.JustDown(this.key2)) this.onSelectWeapon(2);
       else if (Phaser.Input.Keyboard.JustDown(this.key3)) this.onSelectWeapon(3);
+      else if (Phaser.Input.Keyboard.JustDown(this.key4)) this.onSelectWeapon(4);
+      else if (Phaser.Input.Keyboard.JustDown(this.key5)) this.onSelectWeapon(5);
+      else if (Phaser.Input.Keyboard.JustDown(this.key6)) this.onSelectWeapon(6);
+      else if (Phaser.Input.Keyboard.JustDown(this.key7)) this.onSelectWeapon(7);
 
       // Fire (F)
       if (Phaser.Input.Keyboard.JustDown(this.keyFire)) {
