@@ -347,6 +347,10 @@ export class OfflineSimAdapter implements SimAdapter {
     this.turnManager.getActiveWorm()?.jetPackUtility?.setHorizontalInput(dir);
   }
 
+  setJetPackThrustVector(vx: number, vy: number): void {
+    this.turnManager.getActiveWorm()?.jetPackUtility?.setThrustVector(vx, vy);
+  }
+
   isJetPacking(): boolean {
     return this.turnManager.getActiveWorm()?.isJetPacking() ?? false;
   }

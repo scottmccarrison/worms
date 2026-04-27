@@ -119,6 +119,9 @@ export class NetworkedSimAdapter implements SimAdapter {
   private lastJetThrustV: boolean | null = null;
   /** Cache last jetpack horizontal dir for the same reason. */
   private lastJetThrustH: -1 | 0 | 1 | null = null;
+  /** Cache last jetpack vector for dedup. */
+  private lastJetVx: number | null = null;
+  private lastJetVy: number | null = null;
 
   constructor(init: NetworkedSimAdapterInit) {
     dlogUnthrottled("sim", "NetworkedSimAdapter.constructing", {
@@ -298,6 +301,13 @@ export class NetworkedSimAdapter implements SimAdapter {
     if (dir === this.lastJetThrustH) return;
     this.lastJetThrustH = dir;
     this.send({ type: "input_jetpack_horizontal", dir, seq: this.nextSeq() });
+  }
+
+  setJetPackThrustVector(vx: number, vy: number): void {
+    if (vx === this.lastJetVx && vy === this.lastJetVy) return;
+    this.lastJetVx = vx;
+    this.lastJetVy = vy;
+    this.send({ type: "input_jetpack_vector", vx, vy });
   }
 
   isJetPacking(): boolean {
