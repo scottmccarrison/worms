@@ -77,7 +77,10 @@ function fireHitscan(ctx: FireContext): FireResult {
 
   for (let i = 0; i < shotsAllowed; i++) {
     // Re-jitter angle for each pellet independently.
-    const jitter = spread > 0 ? (Math.random() * 2 - 1) * spread : 0;
+    // Bates-2 (triangular) distribution biases toward center, removing visible
+    // outliers. Sum of two uniforms peaks at 0; ~50% of pellets within +/-0.29*spread
+    // vs uniform's +/-0.5*spread.
+    const jitter = spread > 0 ? (Math.random() - 0.5 + (Math.random() - 0.5)) * spread : 0;
     const shotAngle = aimRadians + jitter;
 
     const originPx = {

@@ -234,6 +234,23 @@ export interface WormDiedEvent {
   wormId: string;
 }
 
+/**
+ * Sent to the originating client (not broadcast) when a fire input is
+ * rejected. The client shows a brief toast above the active worm so the
+ * player knows why their shot did not fire.
+ */
+export type FireRejectedMessage = {
+  type: "fire_rejected";
+  weaponId: string;
+  reason:
+    | "no_ammo"
+    | "not_your_turn"
+    | "already_fired"
+    | "no_active_worm"
+    | "max_projectiles"
+    | "weapon_not_found";
+};
+
 // ---------------------------------------------------------------------------
 // Server -> client messages (discriminated by `type`)
 // ---------------------------------------------------------------------------
@@ -268,7 +285,8 @@ export type ServerMsg =
   | ({ type: "fire_event" } & FireEvent)
   | ({ type: "damage_event" } & DamageEvent)
   | ({ type: "worm_died" } & WormDiedEvent)
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | FireRejectedMessage;
 
 // Note: Epic 9's per-input relay variants (input_walk/jump/etc as SERVER-SENT
 // messages) + turn_resolved have been removed. Server runs an authoritative

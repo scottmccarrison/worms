@@ -586,9 +586,10 @@ describe("Simulation - Holy Grenade ammo enforcement", () => {
     expect(r2).not.toBeNull();
     expect(sim.getTeamAmmo("red", "holygrenade")).toBe(0);
 
-    // Third fire: should be rejected (returns null).
+    // Third fire: should be rejected (no ammo remaining).
     const r3 = sim.applyFire("Red-1");
-    expect(r3).toBeNull();
+    expect(r3.ok).toBe(false);
+    expect((r3 as { ok: false; reason: string }).reason).toBe("no_ammo");
     expect(sim.getTeamAmmo("red", "holygrenade")).toBe(0);
   });
 
