@@ -816,7 +816,10 @@ export class Room implements DurableObject {
     }
 
     const seed = Math.floor(Math.random() * 2 ** 31);
-    const sorted = players.slice().sort((a, b) => a.joinedAt - b.joinedAt);
+    const sorted = players.slice().sort((a, b) => {
+      if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
+      return a.sessionId.localeCompare(b.sessionId);
+    });
     const teamCount = Math.min(sorted.length, 4);
     const teams = buildTeamsForPlayers(sorted, teamCount);
     for (const t of teams) {
@@ -1314,7 +1317,10 @@ export class Room implements DurableObject {
       let nextHostId = "";
       let earliest = Number.POSITIVE_INFINITY;
       for (const [sid, p] of Object.entries(lobby.players)) {
-        if (p.joinedAt < earliest) {
+        if (
+          p.joinedAt < earliest ||
+          (p.joinedAt === earliest && (nextHostId === "" || sid < nextHostId))
+        ) {
           earliest = p.joinedAt;
           nextHostId = sid;
         }
