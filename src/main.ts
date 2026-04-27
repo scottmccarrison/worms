@@ -5,14 +5,13 @@ import { LobbyScene } from "./scenes/LobbyScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 1280,
-  height: 720,
   parent: "game-container",
   backgroundColor: "#0b0b0f",
   scene: [BootScene, LobbyScene, GameScene],
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    mode: Phaser.Scale.RESIZE,
+    width: window.innerWidth,
+    height: window.innerHeight,
   },
   dom: {
     createContainer: true,
