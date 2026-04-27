@@ -239,12 +239,9 @@ export class Worm {
    */
   setJetPackThrustVector(vx: number, vy: number): void {
     const len = Math.hypot(vx, vy);
-    if (len > 1) {
-      vx /= len;
-      vy /= len;
-    }
-    this.jetPackThrustVx = vx;
-    this.jetPackThrustVy = vy;
+    const scale = len > 1 ? 1 / len : 1;
+    this.jetPackThrustVx = vx * scale;
+    this.jetPackThrustVy = vy * scale;
     this._useVectorThrust = true;
   }
 

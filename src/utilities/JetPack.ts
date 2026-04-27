@@ -110,12 +110,9 @@ export class JetPack implements Utility {
    */
   setThrustVector(nx: number, ny: number): void {
     const len = Math.hypot(nx, ny);
-    if (len > 1) {
-      nx /= len;
-      ny /= len;
-    }
-    this.thrustVx = nx;
-    this.thrustVy = ny;
+    const scale = len > 1 ? 1 / len : 1;
+    this.thrustVx = nx * scale;
+    this.thrustVy = ny * scale;
   }
 
   /**
