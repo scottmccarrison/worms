@@ -81,15 +81,23 @@ async function claimFreshRoom(env: Env): Promise<string | null> {
     const code = generateCode();
     const id = env.ROOMS.idFromName(code);
     const stub = env.ROOMS.get(id);
-    const res = await stub.fetch("https://room/init", {
-      method: "POST",
-      body: JSON.stringify({ code, claim: true }),
-      headers: { "content-type": "application/json" },
-    });
-    if (res.ok) return code;
-    // 409 means the DO already has a different code claimed; keep
-    // trying. Any other non-2xx is a hard error.
-    if (res.status !== 409) return null;
+    try {
+      const res = await stub.fetch("https://room/init", {
+        method: "POST",
+        body: JSON.stringify({ code, claim: true }),
+        headers: { "content-type": "application/json" },
+      });
+      if (res.ok) return code;
+      // 409 means the DO already has a different code claimed; keep
+      // trying. Any other non-2xx is a hard error.
+      if (res.status !== 409) {
+        console.warn("[claim_room] DO claim failed", { status: res.status, code });
+        return null;
+      }
+    } catch (e) {
+      console.warn("[claim_room] DO claim threw", { error: String(e), code });
+      return null;
+    }
   }
   return null;
 }

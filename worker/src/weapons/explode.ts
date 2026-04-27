@@ -45,7 +45,7 @@ export function explode(p: ExplodeParams): ExplodeResult {
   const { world, terrain, centerPx, config, firedByWormId } = p;
 
   // 1. Terrain cut (also appends to terrain's cut log).
-  const cut = terrain.cutCircle(centerPx.x, centerPx.y, config.terrainRadiusPx);
+  const cut = terrain.cutCircle(centerPx.x, centerPx.y, config.terrainRadiusPx, "explode");
 
   // 2. AABB query
   const centerM = { x: toMeters(centerPx.x), y: toMeters(centerPx.y) };

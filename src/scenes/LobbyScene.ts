@@ -1,4 +1,5 @@
 import * as Phaser from "phaser";
+import { CODE_ALPHABET } from "../../shared/codeAlphabet";
 import { packMask } from "../../shared/maskPack";
 import { dlogUnthrottled } from "../debug/logger";
 import { loadMap } from "../maps/loadMap";
@@ -241,11 +242,12 @@ export class LobbyScene extends Phaser.Scene {
     joinNode.style.textTransform = "uppercase";
     joinNode.style.textAlign = "center";
     joinNode.addEventListener("input", () => {
-      // Strip non-letters, uppercase, cap at 4. Runs on every keystroke so
-      // the user can never hold an invalid value.
+      // Strip characters outside CODE_ALPHABET (excludes I and O), uppercase,
+      // cap at 4. Runs on every keystroke so the user can never hold an
+      // invalid value.
       joinNode.value = joinNode.value
         .toUpperCase()
-        .replace(/[^A-Z]/g, "")
+        .replace(new RegExp(`[^${CODE_ALPHABET}]`, "g"), "")
         .slice(0, 4);
     });
     this.joinCodeInput = joinEl;
@@ -326,7 +328,7 @@ export class LobbyScene extends Phaser.Scene {
       this.setHomeError("Code must be 4 letters");
       return;
     }
-    if (!/^[A-Z]{4}$/.test(code)) {
+    if (!new RegExp(`^[${CODE_ALPHABET}]{4}$`).test(code)) {
       this.setHomeError("Enter a 4-letter room code");
       return;
     }

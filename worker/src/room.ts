@@ -457,7 +457,7 @@ export class Room implements DurableObject {
         this.onSetColor(ws, player, msg);
         break;
       case "set_ready":
-        this.onSetReady(player, msg);
+        this.onSetReady(ws, player, msg);
         break;
       case "select_map":
         this.onSelectMap(ws, player, msg);
@@ -704,15 +704,20 @@ export class Room implements DurableObject {
     this.broadcastState();
   }
 
-  private onSetReady(player: LobbyPlayer, msg: unknown): void {
+  private onSetReady(ws: WebSocket, player: LobbyPlayer, msg: unknown): void {
+    const candidate = (msg as { ready?: unknown }).ready;
+    if (typeof candidate !== "boolean") {
+      this.sendError(ws, "invalid_payload", "set_ready expects { ready: boolean }");
+      return;
+    }
     const lobby = this.ensureLobby();
     dlog("room", "onSetReady", this.logCtx(), {
       sid: player.sessionId ?? "?",
-      ready: Boolean((msg as { ready?: unknown }).ready),
+      ready: candidate,
       phase: lobby.phase,
     });
     if (lobby.phase !== "lobby") return;
-    player.ready = Boolean((msg as { ready?: unknown }).ready);
+    player.ready = candidate;
     this.broadcastState();
   }
 
@@ -811,7 +816,10 @@ export class Room implements DurableObject {
     }
 
     const seed = Math.floor(Math.random() * 2 ** 31);
-    const sorted = players.slice().sort((a, b) => a.joinedAt - b.joinedAt);
+    const sorted = players.slice().sort((a, b) => {
+      if (a.joinedAt !== b.joinedAt) return a.joinedAt - b.joinedAt;
+      return a.sessionId.localeCompare(b.sessionId);
+    });
     const teamCount = Math.min(sorted.length, 4);
     const teams = buildTeamsForPlayers(sorted, teamCount);
     for (const t of teams) {
@@ -1309,7 +1317,10 @@ export class Room implements DurableObject {
       let nextHostId = "";
       let earliest = Number.POSITIVE_INFINITY;
       for (const [sid, p] of Object.entries(lobby.players)) {
-        if (p.joinedAt < earliest) {
+        if (
+          p.joinedAt < earliest ||
+          (p.joinedAt === earliest && (nextHostId === "" || sid < nextHostId))
+        ) {
           earliest = p.joinedAt;
           nextHostId = sid;
         }
