@@ -567,6 +567,19 @@ export class NetworkedSimAdapter implements SimAdapter {
     return this.inputAllowed;
   }
 
+  /**
+   * Return the authoritative position of a worm from the latest server frame.
+   * Reads from `currFrame.state.worms` (server-authoritative), NOT from
+   * `allWorms` (which lags by up to one render tick due to interpolation).
+   * Returns null if no frame has arrived yet or the worm id is not found.
+   */
+  getWormPosition(wormId: string): { xPx: number; yPx: number; alive: boolean } | null {
+    if (!this.currFrame) return null; // pre-first-frame guard
+    const worm = this.currFrame.state.worms.find((w) => w.id === wormId);
+    if (!worm) return null;
+    return { xPx: worm.x, yPx: worm.y, alive: worm.alive };
+  }
+
   private wireRoom(): void {
     const simStateUnsub = this.room.onMessage("sim_state", (msg: SimStateMessage) => {
       this.ingestSimState(msg);
