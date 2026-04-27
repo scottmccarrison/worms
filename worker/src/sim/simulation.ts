@@ -770,7 +770,17 @@ export class Simulation {
         // rather than tunneling through it harmlessly.
         // For terrain/other contacts, keep the original fuse-null gate so
         // fused projectiles (drill) keep tunneling until the fuse expires.
-        if (ud.projectile.fuseRemainingMs === null || isWormContact) {
+
+        // Skip detonation when the projectile contacts its own firer. Without
+        // this, drill fired straight down spawns inside the firer's foot sensor
+        // and self-destructs (the foot sensor's body userData is kind:"worm",
+        // so otherBody.getUserData() reports a worm contact). Bazooka into one's
+        // own feet also no longer self-detonates - acceptable edge case;
+        // fused weapons still detonate via fuse expiration regardless.
+        const otherWormRef = (otherUd as { worm?: { id: string } } | null)?.worm;
+        const isFirerSelfContact = isWormContact && otherWormRef?.id === ud.projectile.ownerId;
+
+        if (!isFirerSelfContact && (ud.projectile.fuseRemainingMs === null || isWormContact)) {
           this.pendingDetonate.push(ud.projectile);
         }
       }
