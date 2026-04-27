@@ -42,7 +42,6 @@ type LobbySceneData = LobbySceneDataHome | LobbySceneDataReconnect;
 
 type View = "home" | "room";
 
-const CANVAS_W = 1280;
 
 const TEXT_STYLE_LARGE: Phaser.Types.GameObjects.Text.TextStyle = {
   fontSize: "64px",
@@ -200,7 +199,7 @@ export class LobbyScene extends Phaser.Scene {
     this.clearRoom();
     this.clearHome();
 
-    const cx = CANVAS_W / 2;
+    const cx = this.scale.width / 2;
 
     const title = this.add.text(cx, 120, "WORMS", TEXT_STYLE_LARGE).setOrigin(0.5);
     this.homeObjects.push(title);
@@ -634,13 +633,13 @@ export class LobbyScene extends Phaser.Scene {
       this.lastNormalizedHiddenMapId = null;
     }
 
-    const cx = CANVAS_W / 2;
+    const cx = this.scale.width / 2;
 
     // Header: code + leave button.
     const header = this.add.text(60, 40, `Room: ${state.code}`, TEXT_STYLE_BODY);
     this.roomObjects.push(header);
 
-    const leaveBtn = this.makeButton(CANVAS_W - 120, 50, 160, 50, "Leave", () => {
+    const leaveBtn = this.makeButton(this.scale.width - 120, 50, 160, 50, "Leave", () => {
       void this.handleLeave();
     });
     this.roomObjects.push(...leaveBtn);
@@ -788,7 +787,7 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private flashRoomError(msg: string): void {
-    const cx = CANVAS_W / 2;
+    const cx = this.scale.width / 2;
     const txt = this.add.text(cx, 680, msg, TEXT_STYLE_ERROR).setOrigin(0.5);
     this.roomObjects.push(txt);
     this.time.delayedCall(3000, () => {
@@ -827,7 +826,7 @@ export class LobbyScene extends Phaser.Scene {
     // in game_started so every client renders pixel-identical terrain.
 
     const loadingText = this.add
-      .text(CANVAS_W / 2, this.scale.height / 2, "Generating world...", {
+      .text(this.scale.width / 2, this.scale.height / 2, "Generating world...", {
         fontSize: "32px",
         color: "#ffffff",
         fontFamily: "system-ui, sans-serif",

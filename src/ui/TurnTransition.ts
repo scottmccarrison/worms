@@ -147,7 +147,7 @@ export class TurnTransition {
   private computeFitZoom(): number {
     const vw = this.scene.scale.width;
     const vh = this.scene.scale.height;
-    return Math.min(vw / this.worldWidthPx, vh / this.worldHeightPx);
+    return Math.max(vw / this.worldWidthPx, vh / this.worldHeightPx);
   }
 
   private enterHolding(): void {
