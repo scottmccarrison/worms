@@ -17,7 +17,13 @@
  * applies the input immediately to the local world; networked mode forwards
  * the input to the server and waits for the next `sim_state`.
  */
-import type { DamageEvent, FireEvent, TerrainCutEvent, WormDiedEvent } from "../../shared/protocol";
+import type {
+  DamageEvent,
+  FireEvent,
+  FireRejectedMessage,
+  TerrainCutEvent,
+  WormDiedEvent,
+} from "../../shared/protocol";
 import type { Team } from "../worm/Team";
 
 /** Union of event types an adapter can emit upstream to the renderer. */
@@ -25,7 +31,8 @@ export type SimEvent =
   | ({ type: "terrain_cut" } & TerrainCutEvent)
   | ({ type: "fire_event" } & FireEvent)
   | ({ type: "damage_event" } & DamageEvent)
-  | ({ type: "worm_died" } & WormDiedEvent);
+  | ({ type: "worm_died" } & WormDiedEvent)
+  | FireRejectedMessage;
 
 /**
  * Renderer's view of a worm. Pixel-space coords so the renderer never

@@ -28,6 +28,7 @@ import {
 import { type LogContext, dlog } from "./debug/logger.js";
 import {
   ALLOWED_COLORS,
+  type FireRejectedMessage,
   type LobbyPlayer,
   type LobbyState,
   type ServerMsg,
@@ -35,7 +36,7 @@ import {
   type TeamInit,
 } from "./messages.js";
 import { isValidNickname, normaliseNickname } from "./sanitize.js";
-import { type SerializedSim, type SimEvent, Simulation } from "./sim/simulation.js";
+import { type SerializedSim, type SimEvent, type SimFireResult, Simulation } from "./sim/simulation.js";
 import {
   type AliveCountsProvider,
   type ArbiterPersistedState,
@@ -1079,13 +1080,34 @@ export class Room implements DurableObject {
         case "select_weapon":
           this.sim.applySelectWeapon(activeWormId, input.weaponId);
           break;
-        case "fire":
-          // Reject if arbiter says no: already fired, paused, past timer, or
-          // game over. Prevents double-fire within a turn and post-timer sneaks.
-          if (!this.arbiter?.canFire()) break;
-          this.sim.applyFire(activeWormId);
+        case "fire": {
+          // Resolve the weapon id now so rejection messages can include it.
+          const activeWeapon = this.sim.getWorm(activeWormId)?.activeWeapon ?? "";
+          // Reject if arbiter says no: already fired, paused, past timer, or game over.
+          if (!this.arbiter?.canFire()) {
+            // Determine the most specific arbiter rejection reason.
+            const arbiterReason: FireRejectedMessage["reason"] = this.arbiter?.getHasFiredThisTurn()
+              ? "already_fired"
+              : "not_your_turn";
+            this.sendToSession(input.sessionId, {
+              type: "fire_rejected",
+              weaponId: activeWeapon,
+              reason: arbiterReason,
+            });
+            break;
+          }
+          const fireResult: SimFireResult = this.sim.applyFire(activeWormId);
+          if (!fireResult.ok) {
+            this.sendToSession(input.sessionId, {
+              type: "fire_rejected",
+              weaponId: activeWeapon,
+              reason: fireResult.reason,
+            });
+            break;
+          }
           this.arbiter.onFireCommitted();
           break;
+        }
         case "jetpack_toggle":
           this.sim.applyJetPackToggle(activeWormId);
           break;
@@ -1137,6 +1159,22 @@ export class Room implements DurableObject {
       ws.send(JSON.stringify({ type: "error", code, message }));
     } catch {
       // ignore
+    }
+  }
+
+  /** Send a message to the single WebSocket belonging to the given sessionId. */
+  private sendToSession(sessionId: string, msg: ServerMsg): void {
+    const serialised = JSON.stringify(msg);
+    for (const ws of this.state.getWebSockets()) {
+      const att = ws.deserializeAttachment() as WsAttachment | undefined;
+      if (att?.sessionId === sessionId) {
+        try {
+          ws.send(serialised);
+        } catch {
+          // ignore
+        }
+        return;
+      }
     }
   }
 
