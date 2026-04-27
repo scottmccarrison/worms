@@ -103,8 +103,8 @@ interface Tuning {
     postImpactLingerMs: number;
   };
   juice: {
-    shakeMaxIntensity: number;  // accessibility cap; bigger explosions clamp here
-    shakeMinRadiusPx: number;   // below this radius, no shake
+    shakeMaxIntensity: number; // accessibility cap; bigger explosions clamp here
+    shakeMinRadiusPx: number; // below this radius, no shake
     flashMaxAlpha: number;
   };
 }
@@ -192,8 +192,8 @@ export const tuning: Tuning = {
     postImpactLingerMs: 1200,
   },
   juice: {
-    shakeMaxIntensity: 0.012,  // accessibility cap; bigger explosions clamp here
-    shakeMinRadiusPx: 15,       // below this radius, no shake
-    flashMaxAlpha: 0.20,
+    shakeMaxIntensity: 0.012, // accessibility cap; bigger explosions clamp here
+    shakeMinRadiusPx: 15, // below this radius, no shake
+    flashMaxAlpha: 0.2,
   },
 };

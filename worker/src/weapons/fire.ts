@@ -80,9 +80,7 @@ function fireHitscan(ctx: FireContext): FireResult {
     // Bates-2 (triangular) distribution biases toward center, removing visible
     // outliers. Sum of two uniforms peaks at 0; ~50% of pellets within +/-0.29*spread
     // vs uniform's +/-0.5*spread.
-    const jitter = spread > 0
-      ? ((Math.random() - 0.5) + (Math.random() - 0.5)) * spread
-      : 0;
+    const jitter = spread > 0 ? (Math.random() - 0.5 + (Math.random() - 0.5)) * spread : 0;
     const shotAngle = aimRadians + jitter;
 
     const originPx = {

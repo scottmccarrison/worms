@@ -570,7 +570,7 @@ export class GameScene extends Phaser.Scene {
             0xffffff,
             flashAlpha,
           );
-          flash.setScrollFactor(0);  // CRITICAL: pin to camera viewport
+          flash.setScrollFactor(0); // CRITICAL: pin to camera viewport
           flash.setDepth(10000);
           this.tweens.add({
             targets: flash,

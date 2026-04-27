@@ -36,7 +36,12 @@ import {
   type TeamInit,
 } from "./messages.js";
 import { isValidNickname, normaliseNickname } from "./sanitize.js";
-import { type SerializedSim, type SimEvent, type SimFireResult, Simulation } from "./sim/simulation.js";
+import {
+  type SerializedSim,
+  type SimEvent,
+  type SimFireResult,
+  Simulation,
+} from "./sim/simulation.js";
 import {
   type AliveCountsProvider,
   type ArbiterPersistedState,

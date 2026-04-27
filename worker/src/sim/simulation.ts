@@ -157,11 +157,7 @@ export type SimFireResult =
   | { ok: true; weaponResult: WeaponFireResult }
   | {
       ok: false;
-      reason:
-        | "no_ammo"
-        | "no_active_worm"
-        | "max_projectiles"
-        | "weapon_not_found";
+      reason: "no_ammo" | "no_active_worm" | "max_projectiles" | "weapon_not_found";
     };
 
 export class Simulation {
