@@ -41,7 +41,12 @@ function fireHitscan(weapon: WeaponConfig, ctx: FireContext, shotsFiredBefore: n
 
   // Apply per-shot angle jitter if weapon has hitscanSpreadRad set (e.g. Minigun).
   const spread = weapon.hitscanSpreadRad ?? 0;
-  const jitter = spread > 0 ? (Math.random() * 2 - 1) * spread : 0;
+  // Bates-2 (triangular) distribution biases toward center, removing visible
+  // outliers. Sum of two uniforms peaks at 0; ~50% of pellets within +/-0.29*spread
+  // vs uniform's +/-0.5*spread.
+  const jitter = spread > 0
+    ? ((Math.random() - 0.5) + (Math.random() - 0.5)) * spread
+    : 0;
   const shotAngle = aimRadians + jitter;
 
   // Compute ray endpoints
