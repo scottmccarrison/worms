@@ -1053,7 +1053,10 @@ export class Room implements DurableObject {
       if (player.ownerOfTeamId !== lobby.currentTeamId) continue;
       const activeWormId = lobby.currentWormId;
       if (!activeWormId) continue;
-      if (inputsLocked) continue;
+      // walk-stop (dir 0) bypasses the input-lock so a worm halts when the timer
+      // expires post-fire. Without this, walk-stop messages arriving after the
+      // retreat window expires are dropped and the worm keeps walking until turn end.
+      if (inputsLocked && !(input.kind === "walk" && input.dir === 0)) continue;
       switch (input.kind) {
         case "walk":
           this.sim.applyWalkInput(activeWormId, input.dir);
