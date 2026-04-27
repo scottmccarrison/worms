@@ -68,6 +68,11 @@ interface Tuning {
     /** Radius around the active worm (in pixels) where a pointerdown is
      * treated as aim-intent instead of walk-intent. */
     wormHitRadiusPx: number;
+    /** Min distance from the click point to the worm (in pixels) required
+     * for a utility-active off-worm drag to register as a jetpack thrust.
+     * Must be > wormHitRadiusPx (40) so the on-worm zone resolves to AIM,
+     * not thrust. */
+    jetpackRadialDeadZonePx: number;
     /** Max ms between two walk-side taps for the second to count as a
      * double-tap (-> jump). */
     doubleTapMaxMs: number;
@@ -160,6 +165,7 @@ export const tuning: Tuning = {
     buttonIdleAlpha: 0.55,
     buttonPressedAlpha: 1.0,
     wormHitRadiusPx: 40,
+    jetpackRadialDeadZonePx: 50,
     doubleTapMaxMs: 250,
     longPressMs: 400,
   },

@@ -107,7 +107,8 @@ type PendingInput =
   | { kind: "fire"; sessionId: string }
   | { kind: "jetpack_toggle"; sessionId: string }
   | { kind: "jetpack_thrust"; sessionId: string; active: boolean }
-  | { kind: "jetpack_horizontal"; sessionId: string; dir: -1 | 0 | 1 };
+  | { kind: "jetpack_horizontal"; sessionId: string; dir: -1 | 0 | 1 }
+  | { kind: "jetpack_vector"; sessionId: string; vx: number; vy: number };
 
 /** Sim-kickoff metadata persisted so hibernation can rebuild. */
 interface SimBootstrap {
@@ -480,6 +481,7 @@ export class Room implements DurableObject {
       case "input_jetpack_toggle":
       case "input_jetpack_thrust":
       case "input_jetpack_horizontal":
+      case "input_jetpack_vector":
         this.queueInput(attachment.sessionId, type, msg);
         break;
       case "client_log":
@@ -1037,6 +1039,14 @@ export class Room implements DurableObject {
         this.pendingInputs.push({ kind: "jetpack_horizontal", sessionId: senderSessionId, dir });
         return;
       }
+      case "input_jetpack_vector": {
+        const vx = raw.vx;
+        const vy = raw.vy;
+        if (typeof vx !== "number" || typeof vy !== "number") return;
+        if (vx < -1 || vx > 1 || vy < -1 || vy > 1) return;
+        this.pendingInputs.push({ kind: "jetpack_vector", sessionId: senderSessionId, vx, vy });
+        return;
+      }
       case "input_end_turn":
         // Explicit end-turn press from the active player. Force-advance
         // via the arbiter (validates ownership + pause state). Without
@@ -1129,6 +1139,9 @@ export class Room implements DurableObject {
           break;
         case "jetpack_horizontal":
           this.sim.applyJetPackHorizontal(activeWormId, input.dir);
+          break;
+        case "jetpack_vector":
+          this.sim.applyJetPackVector(activeWormId, input.vx, input.vy);
           break;
       }
     }

@@ -16,6 +16,7 @@ function mkInput(overrides: Partial<GestureInput> = {}): GestureInput {
     myTurn: true,
     utilityActive: false,
     wormHitRadiusPx: 40,
+    jetpackRadialDeadZonePx: 50,
     doubleTapMaxMs: 250,
     longPressMs: 400,
     ...overrides,
@@ -120,10 +121,35 @@ describe("touchGestures state machine", () => {
     expect(up).toEqual([]);
   });
 
-  it("utility active off-worm returns ignored", () => {
+  it("utility active off-worm outside dead zone emits utility_thrust_start", () => {
     const t = createGestureTracker();
-    const down = t.processDown(mkInput({ downXPx: 200, utilityActive: true }));
+    // downXPx=200, wormXPx=640, wormYPx=400, downYPx=360 -> dx=440, dy=40 -> len~441
+    // len > jetpackRadialDeadZonePx (50), so thrust fires.
+    const down = t.processDown(
+      mkInput({ downXPx: 200, utilityActive: true, jetpackRadialDeadZonePx: 50 }),
+    );
+    expect(down).toHaveLength(1);
+    expect(down[0].kind).toBe("utility_thrust_start");
+    const o = down[0] as { kind: "utility_thrust_start"; nx: number; ny: number };
+    // nx/ny should be a unit vector; magnitude must be ~1.
+    expect(Math.hypot(o.nx, o.ny)).toBeCloseTo(1, 5);
+  });
+
+  it("utility active off-worm inside dead zone returns ignored", () => {
+    const t = createGestureTracker();
+    // downXPx=650, wormXPx=640, wormYPx=400, downYPx=360 -> dx=10,dy=40 -> len~41
+    // 41 < jetpackRadialDeadZonePx (50), so ignored.
+    const down = t.processDown(
+      mkInput({ downXPx: 650, downYPx: 356, utilityActive: true, jetpackRadialDeadZonePx: 50 }),
+    );
     expect(down).toEqual([{ kind: "ignored" }]);
+  });
+
+  it("utility_thrust_end emitted on pointerup after thrust start", () => {
+    const t = createGestureTracker();
+    t.processDown(mkInput({ downXPx: 200, utilityActive: true, jetpackRadialDeadZonePx: 50 }));
+    const up = t.processUp(1100);
+    expect(up).toEqual([{ kind: "utility_thrust_end" }]);
   });
 
   it("utility active ON worm still enters aim mode", () => {

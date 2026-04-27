@@ -99,6 +99,11 @@ export class Worm {
   jetPackFuel = 100;
   jetPackThrustV = false;
   jetPackThrustH: -1 | 0 | 1 = 0;
+  // Continuous 2D vector thrust (new API). vx: -1=left, +1=right; vy: -1=up, +1=down.
+  // When setJetPackThrustVector is called these override the discrete fields in applyJetPackForce.
+  jetPackThrustVx = 0;
+  jetPackThrustVy = 0;
+  private _useVectorThrust = false;
 
   constructor(init: WormInit) {
     this.id = init.id;
@@ -210,6 +215,9 @@ export class Worm {
       this.jetPackActive = false;
       this.jetPackThrustV = false;
       this.jetPackThrustH = 0;
+      this.jetPackThrustVx = 0;
+      this.jetPackThrustVy = 0;
+      this._useVectorThrust = false;
     } else {
       if (this.jetPackFuel <= 0) return;
       this.jetPackActive = true;
@@ -222,6 +230,22 @@ export class Worm {
 
   setJetPackHorizontal(dir: -1 | 0 | 1): void {
     this.jetPackThrustH = dir;
+    this._useVectorThrust = false;
+  }
+
+  /**
+   * Continuous 2D thrust vector. vx: -1=left, +1=right; vy: -1=up, +1=down.
+   * Magnitude clamped to <= 1 on the client before sending; server also clamps defensively.
+   */
+  setJetPackThrustVector(vx: number, vy: number): void {
+    const len = Math.hypot(vx, vy);
+    if (len > 1) {
+      vx /= len;
+      vy /= len;
+    }
+    this.jetPackThrustVx = vx;
+    this.jetPackThrustVy = vy;
+    this._useVectorThrust = true;
   }
 
   /**
@@ -235,6 +259,9 @@ export class Worm {
       this.jetPackActive = false;
       this.jetPackThrustV = false;
       this.jetPackThrustH = 0;
+      this.jetPackThrustVx = 0;
+      this.jetPackThrustVy = 0;
+      this._useVectorThrust = false;
       return;
     }
 
@@ -243,8 +270,15 @@ export class Worm {
     const SIDE_FORCE = 8;
     const FUEL_PER_SECOND = 30; // percent per second
 
-    const fx = this.jetPackThrustH * SIDE_FORCE;
-    const fy = this.jetPackThrustV ? -UP_FORCE : 0;
+    let fx: number;
+    let fy: number;
+    if (this._useVectorThrust) {
+      fx = this.jetPackThrustVx * SIDE_FORCE;
+      fy = this.jetPackThrustVy * UP_FORCE;
+    } else {
+      fx = this.jetPackThrustH * SIDE_FORCE;
+      fy = this.jetPackThrustV ? -UP_FORCE : 0;
+    }
 
     if (fx !== 0 || fy !== 0) {
       this.body.applyForce({ x: fx, y: fy }, this.body.getPosition(), true);
@@ -256,6 +290,9 @@ export class Worm {
       this.jetPackActive = false;
       this.jetPackThrustV = false;
       this.jetPackThrustH = 0;
+      this.jetPackThrustVx = 0;
+      this.jetPackThrustVy = 0;
+      this._useVectorThrust = false;
     }
   }
 
@@ -265,6 +302,9 @@ export class Worm {
     this.jetPackFuel = 100;
     this.jetPackThrustV = false;
     this.jetPackThrustH = 0;
+    this.jetPackThrustVx = 0;
+    this.jetPackThrustVy = 0;
+    this._useVectorThrust = false;
   }
 
   // ---- Health ----
@@ -290,6 +330,9 @@ export class Worm {
     this.jetPackActive = false;
     this.jetPackThrustV = false;
     this.jetPackThrustH = 0;
+    this.jetPackThrustVx = 0;
+    this.jetPackThrustVy = 0;
+    this._useVectorThrust = false;
   }
 
   // ---- Foot contact ----

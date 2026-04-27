@@ -46,6 +46,7 @@ describe("OfflineSimAdapter (type contract)", () => {
       "endTurn",
       "toggleRope",
       "toggleJetPack",
+      "setJetPackThrustVector",
       "update",
       "destroy",
       "onEvent",
