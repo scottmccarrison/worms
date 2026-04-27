@@ -203,7 +203,7 @@ export class TurnTransition {
     if (this.pendingWormId) {
       // Prefer authoritative sim-state position (not stale sprite graphics).
       const simPos = this.simAdapter?.getWormPosition(this.pendingWormId);
-      if (simPos && simPos.alive) {
+      if (simPos?.alive) {
         panX = simPos.xPx;
         panY = simPos.yPx;
       } else {
