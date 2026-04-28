@@ -45,7 +45,6 @@ import { fire } from "../weapons/fire.js";
 import type { FireResult as WeaponFireResult } from "../weapons/fire.js";
 import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
 
-const OFF_MAP_MARGIN_PX = 200;
 const MAX_PROJECTILES = 8;
 
 export interface SimEventTerrainCut {
@@ -202,6 +201,9 @@ export class Simulation {
   readonly widthPx: number;
   readonly heightPx: number;
   readonly seed: number;
+  private readonly killMinXMeters: number;
+  private readonly killMaxXMeters: number;
+  private readonly killMaxYMeters: number;
   private readonly worms: Map<string, Worm> = new Map();
   private readonly projectiles: Projectile[] = [];
   private readonly pendingDetonate: Projectile[] = [];
@@ -231,6 +233,10 @@ export class Simulation {
     this.heightPx = init.heightPx;
     this.seed = init.seed;
     this.getLogCtx = init.logCtx ?? (() => ({}));
+    const marginXPx = Math.max(200, this.widthPx * 0.1);
+    this.killMinXMeters = -marginXPx / 30;
+    this.killMaxXMeters = (this.widthPx + marginXPx) / 30;
+    this.killMaxYMeters = (this.heightPx + 200) / 30; // Y margin stays fixed at 200px (bottom kill is fall-out-of-pit, not visual)
     this.world = createPhysicsWorld(init.gravity ?? { x: 0, y: 10 });
     this.terrain = new Terrain({
       world: this.world,
@@ -503,7 +509,7 @@ export class Simulation {
       proj.tickTunnel(dtMs, this.terrain);
       // Wind: apply horizontal force per tick to in-flight projectiles.
       // WIND_FORCE is Newtons per unit wind; tunable in src/tuning.ts.
-      if (this.wind !== 0) {
+      if (this.wind !== 0 && (proj.config.affectedByWind ?? true)) {
         // Mirror of src/tuning.ts wind.forceNewtonsPerUnit - keep in sync.
         // 0.8 N/unit gives ~9 m/s^2 lateral accel at wind=0.8 on a 0.07kg projectile,
         // approximately gravity strength - meaningful but not trajectory-breaking.
@@ -545,13 +551,14 @@ export class Simulation {
     //    plus a margin) is marked dead. Absorbs issue #53.
     //    Top boundary intentionally excluded: gravity returns airborne worms;
     //    turn timer caps duration. Fix for issue #141.
-    const killMinX = -OFF_MAP_MARGIN_PX / 30; // meters
-    const killMaxX = (this.widthPx + OFF_MAP_MARGIN_PX) / 30;
-    const killMaxY = (this.heightPx + OFF_MAP_MARGIN_PX) / 30;
     for (const worm of this.worms.values()) {
       if (!worm.alive) continue;
       const pos = worm.body.getPosition();
-      if (pos.x < killMinX || pos.x > killMaxX || pos.y > killMaxY) {
+      if (
+        pos.x < this.killMinXMeters ||
+        pos.x > this.killMaxXMeters ||
+        pos.y > this.killMaxYMeters
+      ) {
         worm.kill();
         if (!this.diedThisTick.has(worm.id)) {
           this.diedThisTick.add(worm.id);

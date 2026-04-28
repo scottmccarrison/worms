@@ -9,6 +9,7 @@ export const shotgun: WeaponConfig = {
   iconColor: 0x444444,
   iconLabel: "S",
   shotsPerActivation: 2,
+  affectedByWind: false,
   explosion: {
     terrainRadiusPx: 20,
     damageRadiusPx: 30,

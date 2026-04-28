@@ -13,6 +13,7 @@ export const dynamite: WeaponConfig = {
   fuseMs: 5000,
   restitution: 0.2,
   powerCapMps: 2, // tiny - dynamite drops at feet, barely any arc
+  affectedByWind: false,
   explosion: {
     terrainRadiusPx: 70,
     damageRadiusPx: 85,

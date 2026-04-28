@@ -4,6 +4,7 @@
  * passes these configs into fire() / explode() directly - the
  * Simulation owns the world + terrain + projectiles list.
  */
+// MUST mirror src/weapons/types.ts - kept in sync manually.
 
 export type WeaponArchetype = "hitscan" | "projectile" | "throwable";
 
@@ -38,5 +39,12 @@ export interface WeaponConfig {
    * (uniformly sampled in [-spread, +spread]). Used by Minigun.
    */
   hitscanSpreadRad?: number;
+  /**
+   * If false, wind force is not applied to this weapon's projectiles. Default true.
+   * Hitscan weapons set this explicitly to false for self-documentation; they
+   * never go through the wind-apply loop today, but the explicit flag prevents
+   * a future regression if they ever do.
+   */
+  affectedByWind?: boolean;
   explosion: ExplosionConfig;
 }
