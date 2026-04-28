@@ -64,6 +64,8 @@ const MAP_WHITELIST = [
   "canyon_legacy",
   "plateau",
   "terraworld",
+  "terraworld_v1",
+  "canyon_v1",
 ] as const;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_CLIENTS = 8;

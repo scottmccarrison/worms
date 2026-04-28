@@ -8,6 +8,7 @@ import { islandGenerator } from "./generators/island";
 import { plateauGenerator } from "./generators/plateau";
 import { spireGenerator } from "./generators/spire";
 import { terraworldGenerator } from "./generators/terraworld";
+import { terraworldV1Generator } from "./generators/terraworldV1";
 import type { MapConfig, MapGenerator } from "./types";
 
 type RegistryEntry = { config: MapConfig; generator: MapGenerator };
@@ -127,6 +128,27 @@ export const MAPS: Record<string, RegistryEntry> = {
       generator: { id: "terraworld", seed: 0 },
     },
     generator: terraworldGenerator,
+  },
+  terraworld_v1: {
+    config: {
+      id: "terraworld_v1",
+      name: "Terraworld v1",
+      description: "Pipeline-based terraworld using the v1 substrate + carving passes.",
+      maxWorms: 4,
+      generator: { id: "terraworld_v1", seed: 0 },
+    },
+    generator: terraworldV1Generator,
+  },
+  canyon_v1: {
+    config: {
+      id: "canyon_v1",
+      name: "Canyon v1",
+      description: "Pipeline-based canyon (theme=canyon) for offline testing.",
+      maxWorms: 4,
+      generator: { id: "canyon_v1", seed: 0, options: { themeTag: "canyon" } },
+      visibleInLobby: false,
+    },
+    generator: terraworldV1Generator,
   },
 };
 
