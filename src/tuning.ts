@@ -225,7 +225,7 @@ export const tuning: Tuning = {
     longPressMs: 400,
   },
   maps: {
-    defaultId: "terraworld", // registry lookup; falls back to firstId() if invalid
+    defaultId: "terraworld_v1", // registry lookup; falls back to firstId() if invalid
   },
   caves: {
     // 24 gives 2560x1024 a ~107x43 grid. Each cell is ~1 worm tall, so

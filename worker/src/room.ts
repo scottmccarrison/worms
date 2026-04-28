@@ -162,8 +162,9 @@ export class Room implements DurableObject {
       code: this.code ?? "",
       phase: "lobby",
       hostSessionId: "",
-      // ADR-003: default to the procgen world as the canonical starting biome
-      selectedMapId: "terraworld",
+      // ADR-003: default to the procgen world as the canonical starting biome.
+      // terraworld_v1 is the 14-pass pipeline (replaces legacy terraworld since PR 6).
+      selectedMapId: "terraworld_v1",
       players: {},
       teamOrder: [],
       currentTeamId: "",
