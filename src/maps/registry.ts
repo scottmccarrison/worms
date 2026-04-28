@@ -122,10 +122,12 @@ export const MAPS: Record<string, RegistryEntry> = {
   terraworld: {
     config: {
       id: "terraworld",
-      name: "Terraworld",
-      description: "Procedural heightmap surface with grass, dirt, and stone strata.",
+      name: "Terraworld (legacy)",
+      description:
+        "Procedural heightmap surface with grass, dirt, and stone strata. Superseded by terraworld_v1.",
       maxWorms: 4,
       generator: { id: "terraworld", seed: 0 },
+      visibleInLobby: false,
     },
     generator: terraworldGenerator,
   },
