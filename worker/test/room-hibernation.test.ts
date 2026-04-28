@@ -28,7 +28,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { type SimulationInit, Simulation } from "../src/sim/simulation.js";
+import { Simulation, type SimulationInit } from "../src/sim/simulation.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

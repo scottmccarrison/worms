@@ -22,7 +22,9 @@
  */
 
 import type { Contact, ContactImpulse } from "planck";
+import type { ObjectRenderState } from "../../../shared/protocol.js";
 import { type LogContext, dlog } from "../debug/logger.js";
+import { ObjectInstance, type ObjectUserData } from "../entities/objectInstance.js";
 import {
   Projectile,
   type ProjectileRenderState,
@@ -35,7 +37,6 @@ import {
   type WormRenderState,
   type WormUserData,
 } from "../entities/worm.js";
-import { ObjectInstance, type ObjectUserData } from "../entities/objectInstance.js";
 import { toMeters, toPixels } from "../physics/scale.js";
 import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
@@ -43,7 +44,6 @@ import { type ExplodeResult, explode } from "../weapons/explode.js";
 import { fire } from "../weapons/fire.js";
 import type { FireResult as WeaponFireResult } from "../weapons/fire.js";
 import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
-import type { ObjectRenderState } from "../../../shared/protocol.js";
 
 const OFF_MAP_MARGIN_PX = 200;
 const MAX_PROJECTILES = 8;
