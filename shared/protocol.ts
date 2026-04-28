@@ -174,12 +174,37 @@ export interface ProjectileRenderState {
 }
 
 /**
+ * Render-ready world-object state. Catalog kind drives sprite + behavior.
+ * Positions are in pixels (matching WormRenderState convention). One entry
+ * per object instance in the match.
+ *
+ * Tombstone semantics: an object marked dead=true is broadcast for one tick
+ * post-destruction so client interpolation does not glitch on a missing id,
+ * then reaped from the map.
+ */
+export interface ObjectRenderState {
+  id: string;
+  /** Catalog kind: "barrel", "weapon_crate", "mine", etc. Drives sprite + client behavior. */
+  kind: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  /** Stays true for one tick before removal. */
+  dead: boolean;
+  /** Per-kind packed flags. Bit 0 = opened (chest), bit 1 = armed (mine). PR 1 leaves at 0. */
+  flags: number;
+}
+
+/**
  * Full sim snapshot at a given server tick. Broadcast at 20Hz.
  */
 export interface SimState {
   tick: number;
   worms: WormRenderState[];
   projectiles: ProjectileRenderState[];
+  objects: ObjectRenderState[];
   activeTeamId: string;
   activeWormId: string;
   /** ms-epoch time at which the active turn ends (client ticks down locally). */
@@ -234,6 +259,21 @@ export interface WormDiedEvent {
   wormId: string;
 }
 
+/** Spawn VFX trigger. Fired once per object creation. */
+export interface ObjectSpawnEvent {
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
+}
+
+/** Destroy VFX trigger. Fired once per object death. */
+export interface ObjectDestroyEvent {
+  id: string;
+  /** Optional cause for VFX selection. */
+  cause: "explode" | "open" | "remove";
+}
+
 /**
  * Sent to the originating client (not broadcast) when a fire input is
  * rejected. The client shows a brief toast above the active worm so the
@@ -285,6 +325,8 @@ export type ServerMsg =
   | ({ type: "fire_event" } & FireEvent)
   | ({ type: "damage_event" } & DamageEvent)
   | ({ type: "worm_died" } & WormDiedEvent)
+  | ({ type: "object_spawn" } & ObjectSpawnEvent)
+  | ({ type: "object_destroy" } & ObjectDestroyEvent)
   | { type: "error"; code: string; message: string }
   | FireRejectedMessage;
 

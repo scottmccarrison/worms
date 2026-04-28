@@ -587,7 +587,7 @@ export class Room implements DurableObject {
       let simTickEvents: SimEvent[] = [];
       let simTickState: Pick<
         SimState,
-        "tick" | "worms" | "projectiles" | "wind" | "waterLevelPx"
+        "tick" | "worms" | "projectiles" | "objects" | "wind" | "waterLevelPx"
       > | null = null;
       if (lobby.phase === "playing" && this.sim) {
         this.drainInputs();
@@ -912,6 +912,14 @@ export class Room implements DurableObject {
     };
     await this.persistSimBootstrap();
 
+    // PR 1 debug: hardcode 3 barrels for end-to-end testing.
+    // PR 3 will replace this with worldgen output.
+    const initialObjects = [
+      { kind: "barrel", xPx: 600,  yPx: 400 },
+      { kind: "barrel", xPx: 1280, yPx: 400 },
+      { kind: "barrel", xPx: 1960, yPx: 400 },
+    ];
+
     this.sim = new Simulation({
       widthPx: WORLD_WIDTH_PX,
       heightPx: WORLD_HEIGHT_PX,
@@ -919,6 +927,7 @@ export class Room implements DurableObject {
       teams: simTeams,
       seed,
       logCtx: () => this.logCtx(),
+      initialObjects,
     });
     await this.persistSim();
 

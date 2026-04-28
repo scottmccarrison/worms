@@ -716,6 +716,149 @@ describe("Simulation - isAllSettled", () => {
   });
 });
 
+describe("Simulation - objects", () => {
+  it("spawns initial objects from init.initialObjects", () => {
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: twoTeams(),
+      seed: 1234,
+      initialObjects: [{ kind: "barrel", xPx: 200, yPx: 100 }],
+    });
+    // Tick once to let physics settle (and any events drain).
+    sim.tick(50);
+    const state = sim.toSimState();
+    expect(state.objects).toHaveLength(1);
+    expect(state.objects[0]?.kind).toBe("barrel");
+  });
+
+  it("emits object_spawn event for initial objects", () => {
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: twoTeams(),
+      seed: 1234,
+      initialObjects: [{ kind: "barrel", xPx: 200, yPx: 100 }],
+    });
+    const result = sim.tick(50);
+    const spawnEvent = result.events.find((e) => e.type === "object_spawn");
+    expect(spawnEvent).toBeDefined();
+    expect((spawnEvent as { kind: string }).kind).toBe("barrel");
+  });
+
+  it("damages barrel on projectile contact and barrel is reaped after dying", () => {
+    // Place barrel directly in the path of a bazooka shot.
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 200, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          spawns: [{ xPx: 900, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 42,
+      initialObjects: [{ kind: "barrel", xPx: 350, yPx: FLOOR_Y - 40 }],
+    });
+
+    // Settle worms.
+    for (let i = 0; i < 20; i++) sim.tick(50);
+
+    // Aim horizontally at the barrel.
+    sim.applyAimAngle("Red-1", 0);
+    sim.applyAimPower("Red-1", 1.0);
+    sim.applySelectWeapon("Red-1", "bazooka");
+    sim.applyFire("Red-1");
+
+    // Tick until the barrel is gone from toSimState().
+    const { events } = tickUntil(
+      sim,
+      () => sim.toSimState().objects.length === 0,
+      200,
+    );
+    // The barrel should eventually be destroyed.
+    expect(sim.toSimState().objects).toHaveLength(0);
+    void events;
+  });
+
+  it("emits object_destroy event when barrel dies", () => {
+    const sim = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: [
+        {
+          id: "red",
+          wormIds: ["Red-1"],
+          spawns: [{ xPx: 200, yPx: FLOOR_Y - 40 }],
+        },
+        {
+          id: "blue",
+          wormIds: ["Blue-1"],
+          spawns: [{ xPx: 900, yPx: FLOOR_Y - 40 }],
+        },
+      ],
+      seed: 42,
+      initialObjects: [{ kind: "barrel", xPx: 350, yPx: FLOOR_Y - 40 }],
+    });
+
+    for (let i = 0; i < 20; i++) sim.tick(50);
+
+    sim.applyAimAngle("Red-1", 0);
+    sim.applyAimPower("Red-1", 1.0);
+    sim.applySelectWeapon("Red-1", "bazooka");
+    sim.applyFire("Red-1");
+
+    const { events } = tickUntil(
+      sim,
+      (evs) => evs.some((e) => e.type === "object_destroy"),
+      200,
+    );
+    const destroyEvent = events.find((e) => e.type === "object_destroy");
+    expect(destroyEvent).toBeDefined();
+    expect((destroyEvent as { cause: string }).cause).toBe("explode");
+  });
+
+  it("survives hibernation round-trip with barrel", () => {
+    const sim1 = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: twoTeams(),
+      seed: 1234,
+      initialObjects: [{ kind: "barrel", xPx: 400, yPx: 100 }],
+    });
+    for (let i = 0; i < 5; i++) sim1.tick(50);
+
+    const serialized = sim1.serialize();
+    expect(serialized.objects).toHaveLength(1);
+    expect(serialized.objects[0]?.kind).toBe("barrel");
+
+    // Restore into a freshly-constructed sim (same teams, no initialObjects).
+    const sim2 = new Simulation({
+      widthPx: WIDTH,
+      heightPx: HEIGHT,
+      mask: makeFlatMask(),
+      teams: twoTeams(),
+      seed: 1234,
+    });
+    sim2.restore(serialized);
+
+    const state = sim2.toSimState();
+    expect(state.objects).toHaveLength(1);
+    expect(state.objects[0]?.kind).toBe("barrel");
+  });
+});
+
 describe("Simulation - aim input", () => {
   it("applyAimAngle clamps to [-PI/2, PI/2]", () => {
     const sim = makeSim(twoTeams());

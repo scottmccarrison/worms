@@ -35,6 +35,7 @@ import {
   type WormRenderState,
   type WormUserData,
 } from "../entities/worm.js";
+import { ObjectInstance, type ObjectUserData } from "../entities/objectInstance.js";
 import { toMeters, toPixels } from "../physics/scale.js";
 import { createPhysicsWorld } from "../physics/world.js";
 import type { PlanckWorld } from "../physics/world.js";
@@ -42,6 +43,7 @@ import { type ExplodeResult, explode } from "../weapons/explode.js";
 import { fire } from "../weapons/fire.js";
 import type { FireResult as WeaponFireResult } from "../weapons/fire.js";
 import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
+import type { ObjectRenderState } from "../../../shared/protocol.js";
 
 const OFF_MAP_MARGIN_PX = 200;
 const MAX_PROJECTILES = 8;
@@ -76,7 +78,27 @@ export interface SimEventWormDied {
   wormId: string;
 }
 
-export type SimEvent = SimEventTerrainCut | SimEventFire | SimEventDamage | SimEventWormDied;
+export interface SimEventObjectSpawn {
+  type: "object_spawn";
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
+}
+
+export interface SimEventObjectDestroy {
+  type: "object_destroy";
+  id: string;
+  cause: "explode" | "open" | "remove";
+}
+
+export type SimEvent =
+  | SimEventTerrainCut
+  | SimEventFire
+  | SimEventDamage
+  | SimEventWormDied
+  | SimEventObjectSpawn
+  | SimEventObjectDestroy;
 
 export interface SimTickResult {
   tick: number;
@@ -88,6 +110,7 @@ export interface SimState {
   tick: number;
   worms: WormRenderState[];
   projectiles: ProjectileRenderState[];
+  objects: ObjectRenderState[];
   wind: number;
   waterLevelPx: number;
 }
@@ -107,6 +130,7 @@ export interface SimulationInit {
   teams: SimTeamInit[];
   seed: number;
   logCtx?: () => LogContext;
+  initialObjects?: Array<{ kind: string; xPx: number; yPx: number }>;
 }
 
 /** Snapshot for DO storage / hibernation recovery. */
@@ -143,6 +167,16 @@ export interface SerializedSim {
     vy: number;
     fuseRemainingMs: number | null;
   }>;
+  objects: Array<{
+    id: string;
+    kind: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    flags: number;
+  }>;
   terrainCutSeq: number;
   wind: number;
   waterLevelPx: number;
@@ -171,6 +205,9 @@ export class Simulation {
   private readonly pendingDetonate: Projectile[] = [];
   private projectileIdCounter = 0;
   private tickCount = 0;
+  private readonly objects: Map<string, ObjectInstance> = new Map();
+  private objectIdCounter = 0;
+  private pendingObjectHits: Array<{ obj: ObjectInstance; projectile: Projectile }> = [];
   /** Tick-scoped events appended during world step / apply passes. */
   private events: SimEvent[] = [];
   /** Worms already marked dead this tick; dedupes worm_died events. */
@@ -215,6 +252,10 @@ export class Simulation {
         });
         this.worms.set(wormId, worm);
       }
+    }
+
+    for (const seed of init.initialObjects ?? []) {
+      this.spawnObject(seed.kind, seed.xPx, seed.yPx);
     }
 
     this.world.on("begin-contact", this.onBeginContact);
@@ -486,6 +527,16 @@ export class Simulation {
       this.projectiles.splice(i, 1);
     }
 
+    // 4a. Apply pending projectile-vs-object hits collected during begin-contact.
+    for (const hit of this.pendingObjectHits) {
+      hit.obj.takeDamage(1);
+      hit.projectile.markDetonated();
+    }
+    this.pendingObjectHits = [];
+
+    // 4b. Reap dead objects (applies explosion effects, emits object_destroy events).
+    this.reapDeadObjects();
+
     // 5. Off-map kill: any worm pushed outside the map (in any direction,
     //    plus a margin) is marked dead. Absorbs issue #53.
     //    Top boundary intentionally excluded: gravity returns airborne worms;
@@ -565,10 +616,13 @@ export class Simulation {
     for (const w of this.worms.values()) worms.push(w.toRenderState());
     const projectiles: ProjectileRenderState[] = [];
     for (const p of this.projectiles) projectiles.push(p.toRenderState());
+    const objects: ObjectRenderState[] = [];
+    for (const o of this.objects.values()) objects.push(o.toRenderState());
     return {
       tick: this.tickCount,
       worms,
       projectiles,
+      objects,
       wind: this.wind,
       waterLevelPx: this.waterLevelPx,
     };
@@ -618,6 +672,7 @@ export class Simulation {
         vy: p.body.getLinearVelocity().y,
         fuseRemainingMs: p.fuseRemainingMs,
       })),
+      objects: Array.from(this.objects.values()).map((o) => o.serialize()),
       terrainCutSeq: 0,
       wind: this.wind,
       waterLevelPx: this.waterLevelPx,
@@ -679,6 +734,15 @@ export class Simulation {
         this.projectileIdCounter = n;
       }
     }
+    // Restore objects. Serialized positions are in pixels (ObjectInstance.serialize uses toRenderState).
+    for (const os of state.objects ?? []) {
+      const obj = this.spawnObject(os.kind, os.x, os.y);
+      obj.body.setLinearVelocity({ x: toMeters(os.vx), y: toMeters(os.vy) });
+      obj.hp = os.hp;
+      obj.flags = os.flags;
+    }
+    // Drain the spawn events generated by restore so they don't replay as new events.
+    this.events = [];
   }
 
   // ---- Turn-arbiter feed ----
@@ -723,6 +787,45 @@ export class Simulation {
     }
     if (this.projectiles.length > 0) return false;
     return true;
+  }
+
+  // ---- Object management ----
+
+  spawnObject(kind: string, xPx: number, yPx: number): ObjectInstance {
+    const id = `obj_${++this.objectIdCounter}`;
+    const obj = new ObjectInstance({ id, kind, world: this.world, xPx, yPx });
+    this.objects.set(id, obj);
+    this.events.push({ type: "object_spawn", id, kind, x: xPx, y: yPx });
+    return obj;
+  }
+
+  private reapDeadObjects(): void {
+    for (const [id, obj] of this.objects) {
+      if (!obj.dead) continue;
+      if (obj.destroyCause === "explode" && obj.config.onDestroy) {
+        const pos = obj.body.getPosition();
+        const xPx = toPixels(pos.x);
+        const yPx = toPixels(pos.y);
+        const cfg = obj.config.onDestroy.explode;
+        const result = explode({
+          world: this.world,
+          terrain: this.terrain,
+          worms: this.worms.values(),
+          centerPx: { x: xPx, y: yPx },
+          config: {
+            terrainRadiusPx: cfg.radiusPx,
+            damageRadiusPx: cfg.radiusPx,
+            maxDamage: cfg.damagePx,
+            impulseMag: 3,
+          },
+          firedByWormId: null,
+        });
+        this.emitExplodeEvents(result, null);
+      }
+      this.events.push({ type: "object_destroy", id, cause: obj.destroyCause });
+      this.world.destroyBody(obj.body);
+      this.objects.delete(id);
+    }
   }
 
   // ---- private ----
@@ -808,6 +911,22 @@ export class Simulation {
 
         if (!isFirerSelfContact && (ud.projectile.fuseRemainingMs === null || isWormContact)) {
           this.pendingDetonate.push(ud.projectile);
+        }
+      }
+    }
+
+    // Projectile-vs-object contact: queue damage; the projectile also detonates.
+    const bodyA = a.getBody();
+    const bodyB = b.getBody();
+    const userDataA = bodyA.getUserData() as { kind?: string } | null;
+    const userDataB = bodyB.getUserData() as { kind?: string } | null;
+    if (userDataA?.kind === "object" || userDataB?.kind === "object") {
+      const objData = (userDataA?.kind === "object" ? userDataA : userDataB) as ObjectUserData;
+      const otherData = userDataA?.kind === "object" ? userDataB : userDataA;
+      if (otherData?.kind === "projectile") {
+        const projData = otherData as ProjectileUserData;
+        if (!projData.projectile.detonated && !objData.object.dead) {
+          this.pendingObjectHits.push({ obj: objData.object, projectile: projData.projectile });
         }
       }
     }
