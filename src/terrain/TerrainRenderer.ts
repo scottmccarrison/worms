@@ -21,6 +21,13 @@ export interface TerrainRendererInit {
   /** Pre-drawn source mask; copied into the internal buffer on construction. */
   sourceMask: HTMLCanvasElement;
   textureKey?: string;
+  /**
+   * When true, the source mask already has final RGB colors (e.g. produced
+   * by a v1 pipeline generator using paintWorldToContext). The renderer
+   * skips applyStratumPaint so material colors survive. Default false:
+   * legacy generators leave RGB unpainted and rely on stratumPaint.
+   */
+  prePainted?: boolean;
 }
 
 export class TerrainRenderer {
@@ -49,7 +56,9 @@ export class TerrainRenderer {
     this.ctx = ctx;
     this.ctx.drawImage(init.sourceMask, 0, 0);
 
-    applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
+    if (!init.prePainted) {
+      applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
+    }
 
     // A previous TerrainRenderer instance in the same scene session (e.g.
     // game 1 -> return to lobby -> game 2) leaves its canvas texture

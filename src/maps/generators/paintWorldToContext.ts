@@ -1,8 +1,5 @@
 import type { ThemePalette } from "../themes";
-import { MATERIAL_DIRT, MATERIAL_ROCK, MATERIAL_STONE } from "../world";
-
-// TODO: import from "../world" once WS-A merges and exports MATERIAL_CRUST
-const MATERIAL_CRUST = 4;
+import { MATERIAL_CRUST, MATERIAL_DIRT, MATERIAL_ROCK, MATERIAL_STONE } from "../world";
 
 interface Rgb {
   r: number;
