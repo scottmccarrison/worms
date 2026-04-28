@@ -13,6 +13,7 @@ export const holyGrenade: WeaponConfig = {
   fuseMs: 4000,
   restitution: 0.6,
   powerCapMps: 14,
+  affectedByWind: false,
   explosion: {
     terrainRadiusPx: 80,
     damageRadiusPx: 100,

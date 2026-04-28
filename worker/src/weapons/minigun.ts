@@ -10,6 +10,7 @@ export const minigun: WeaponConfig = {
   iconLabel: "M",
   shotsPerActivation: 12,
   hitscanSpreadRad: 0.08, // ~4.6 degrees of spread per shot
+  affectedByWind: false,
   explosion: {
     terrainRadiusPx: 12,
     damageRadiusPx: 20,

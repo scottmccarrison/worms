@@ -14,6 +14,7 @@ export const drill: WeaponConfig = {
   restitution: 0, // no bounce - tunnels into terrain on first contact
   fuseMs: 3500, // after 3.5s, detonate
   tunnel: { cutRadiusPx: 14, cutIntervalMs: 40 }, // carves a tunnel every 40ms
+  affectedByWind: false,
   explosion: {
     terrainRadiusPx: 40,
     damageRadiusPx: 55,
