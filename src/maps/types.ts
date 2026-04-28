@@ -47,10 +47,14 @@ export type MapGenerator = (
   heightPx: number,
   opts: { seed: number } & Record<string, number | string | boolean>,
   // biome-ignore lint/suspicious/noConfusingVoidType: legacy generators declare `() => void`; see jsdoc.
-) => void | { spawnList: SpawnList };
+) => void | { spawnList: SpawnList; materialMap?: Uint8Array };
 
 export interface LoadedMap {
   config: MapConfig;
   mask: HTMLCanvasElement;
   spawnPoints: SurfacePoint[];
+  /** Per-pixel material codes from world generation. Optional; legacy generators may not produce it. */
+  materialMap?: Uint8Array;
+  widthPx?: number;
+  heightPx?: number;
 }

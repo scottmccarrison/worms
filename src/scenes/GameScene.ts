@@ -1,5 +1,5 @@
 import * as Phaser from "phaser";
-import { unpackMask } from "../../shared/maskPack";
+import { unpackMask, unpackMaterialBytes } from "../../shared/maskPack";
 import { WORLD_HEIGHT_PX, WORLD_WIDTH_PX } from "../../shared/worldConfig";
 import { dlogUnthrottled } from "../debug/logger";
 import { mountTuningPanel, registerMapCycleFn } from "../debug/tuningPanel";
@@ -121,6 +121,7 @@ export class GameScene extends Phaser.Scene {
   // these instead of calling loadMap() locally so server physics + client
   // visuals align pixel-perfect.
   private serverMask: string | null = null;
+  private serverMaterialMapBase64: string | null = null;
   private serverWidthPx: number | null = null;
   private serverHeightPx: number | null = null;
 
@@ -159,6 +160,8 @@ export class GameScene extends Phaser.Scene {
      *  mode uses this as the source of truth for visual terrain; offline
      *  falls back to loadMap(). */
     mask?: string;
+    /** Per-pixel material map (4-bit packed, base64) from game_started. Optional. */
+    materialMapBase64?: string;
     /** Authoritative spawn points from the server (paired with mask). */
     spawnPoints?: Array<{ xPx: number; yPx: number }>;
     widthPx?: number;
@@ -173,6 +176,7 @@ export class GameScene extends Phaser.Scene {
     this.isNetworked = !!this.room;
     this.mySessionId = this.room?.sessionId ?? "";
     this.serverMask = data?.mask ?? null;
+    this.serverMaterialMapBase64 = data?.materialMapBase64 ?? null;
     this.serverWidthPx = data?.widthPx ?? null;
     this.serverHeightPx = data?.heightPx ?? null;
     // spawnPoints in game_started are for the server's physics only; the
@@ -219,11 +223,29 @@ export class GameScene extends Phaser.Scene {
           ? decodeServerMaskToCanvas(this.serverMask, worldW, worldH)
           : loadMap(this.mapId, worldW, worldH, this.seedOverride).mask;
         dlogUnthrottled("scene", "create.step", { step: "mask_decoded" });
+        // Decode material map if present in game_started payload.
+        let serverMaterialMap: Uint8Array | undefined;
+        if (this.serverMaterialMapBase64) {
+          const raw = atob(this.serverMaterialMapBase64);
+          const packed = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) packed[i] = raw.charCodeAt(i);
+          const pixelCount = worldW * worldH;
+          const expectedPackedLen = Math.ceil(pixelCount / 2);
+          if (packed.length !== expectedPackedLen) {
+            console.warn(
+              `[GameScene] materialMapBase64 packed length ${packed.length} != expected ${expectedPackedLen} (ceil(${pixelCount}/2)); ignoring materialMap`,
+            );
+          } else {
+            serverMaterialMap = unpackMaterialBytes(packed, pixelCount);
+          }
+        }
         this.terrainRenderer = new TerrainRenderer({
           scene: this,
           widthPx: worldW,
           heightPx: worldH,
           sourceMask: maskCanvas,
+          materialMap: serverMaterialMap,
+          hardness: tuning.worldgen.materialHardness,
         });
         dlogUnthrottled("scene", "create.step", { step: "terrain_renderer_built" });
         this.networkedSim = new NetworkedSimAdapter({

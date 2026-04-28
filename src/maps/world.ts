@@ -76,6 +76,21 @@ export interface World {
 }
 
 /**
+ * Returns true if a circular cut of radius `cutRadiusPx` may erase a pixel
+ * of the given material. CRUST/DIRT/AIR are always cuttable; ROCK and STONE
+ * gate by configurable minimum-radius thresholds.
+ */
+export function gateCutByMaterial(
+  material: number,
+  cutRadiusPx: number,
+  hardness: { rockMinRadiusPx: number; stoneMinRadiusPx: number },
+): boolean {
+  if (material === MATERIAL_ROCK) return cutRadiusPx >= hardness.rockMinRadiusPx;
+  if (material === MATERIAL_STONE) return cutRadiusPx >= hardness.stoneMinRadiusPx;
+  return true;
+}
+
+/**
  * Allocates a World ready for pipeline execution.
  *
  * - Validates seed range (must be a non-negative integer less than 2^32).

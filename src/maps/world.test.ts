@@ -1,5 +1,73 @@
 import { describe, expect, it } from "vitest";
-import { HEIGHTMAP_UNINIT, MASK_AIR, MATERIAL_AIR, MAX_PIXEL_COUNT, createWorld } from "./world";
+import {
+  HEIGHTMAP_UNINIT,
+  MASK_AIR,
+  MATERIAL_AIR,
+  MATERIAL_CRUST,
+  MATERIAL_DIRT,
+  MATERIAL_ROCK,
+  MATERIAL_STONE,
+  MAX_PIXEL_COUNT,
+  createWorld,
+  gateCutByMaterial,
+} from "./world";
+
+const DEFAULT_HARDNESS = { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
+
+describe("gateCutByMaterial", () => {
+  it("AIR is always cuttable", () => {
+    expect(gateCutByMaterial(MATERIAL_AIR, 1, DEFAULT_HARDNESS)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_AIR, 0, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("DIRT is always cuttable", () => {
+    expect(gateCutByMaterial(MATERIAL_DIRT, 1, DEFAULT_HARDNESS)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_DIRT, 100, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("CRUST is always cuttable", () => {
+    expect(gateCutByMaterial(MATERIAL_CRUST, 1, DEFAULT_HARDNESS)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_CRUST, 0, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("ROCK is cuttable at exactly rockMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_ROCK, 30, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("ROCK is cuttable above rockMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_ROCK, 31, DEFAULT_HARDNESS)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_ROCK, 100, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("ROCK survives below rockMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_ROCK, 29, DEFAULT_HARDNESS)).toBe(false);
+    expect(gateCutByMaterial(MATERIAL_ROCK, 1, DEFAULT_HARDNESS)).toBe(false);
+    expect(gateCutByMaterial(MATERIAL_ROCK, 0, DEFAULT_HARDNESS)).toBe(false);
+  });
+
+  it("STONE is cuttable at exactly stoneMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_STONE, 60, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("STONE is cuttable above stoneMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_STONE, 61, DEFAULT_HARDNESS)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_STONE, 200, DEFAULT_HARDNESS)).toBe(true);
+  });
+
+  it("STONE survives below stoneMinRadiusPx", () => {
+    expect(gateCutByMaterial(MATERIAL_STONE, 59, DEFAULT_HARDNESS)).toBe(false);
+    expect(gateCutByMaterial(MATERIAL_STONE, 29, DEFAULT_HARDNESS)).toBe(false);
+    expect(gateCutByMaterial(MATERIAL_STONE, 0, DEFAULT_HARDNESS)).toBe(false);
+  });
+
+  it("respects custom hardness values", () => {
+    const custom = { rockMinRadiusPx: 10, stoneMinRadiusPx: 20 };
+    expect(gateCutByMaterial(MATERIAL_ROCK, 10, custom)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_ROCK, 9, custom)).toBe(false);
+    expect(gateCutByMaterial(MATERIAL_STONE, 20, custom)).toBe(true);
+    expect(gateCutByMaterial(MATERIAL_STONE, 19, custom)).toBe(false);
+  });
+});
 
 describe("createWorld", () => {
   it("returns a World with correct dimensions, seed, and themeTag", () => {

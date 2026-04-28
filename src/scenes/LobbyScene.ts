@@ -1,6 +1,6 @@
 import * as Phaser from "phaser";
 import { CODE_ALPHABET } from "../../shared/codeAlphabet";
-import { packMask } from "../../shared/maskPack";
+import { packMask, packMaterialBytes } from "../../shared/maskPack";
 import { dlogUnthrottled } from "../debug/logger";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, lobbyIds } from "../maps/registry";
@@ -492,6 +492,7 @@ export class LobbyScene extends Phaser.Scene {
           seed: msg.seed,
           teams: msg.teams,
           mask: msg.mask,
+          materialMapBase64: msg.materialMapBase64,
           spawnPoints: msg.spawnPoints,
           widthPx: msg.widthPx,
           heightPx: msg.heightPx,
@@ -848,7 +849,11 @@ export class LobbyScene extends Phaser.Scene {
       const packed = packMask(bytes);
       const mask = bytesToBase64(packed);
       const spawnPoints = loaded.spawnPoints.map((s) => ({ xPx: s.xPx, yPx: s.yPx }));
-      room.send({ type: "start_game", mask, spawnPoints });
+      // Pack and encode the material map if the generator produced one.
+      const materialMapBase64 = loaded.materialMap
+        ? bytesToBase64(packMaterialBytes(loaded.materialMap))
+        : undefined;
+      room.send({ type: "start_game", mask, materialMapBase64, spawnPoints });
     } catch (err) {
       console.warn("[start_game] host could not generate mask, sending without:", err);
       room.send({ type: "start_game" });

@@ -81,5 +81,5 @@ export const terraworldV1Generator: MapGenerator = (ctx, widthPx, heightPx, opts
   }
   paintWorldToContext(ctx, world.mask, world.materialMap, world.theme.palette, widthPx, heightPx);
   paintDecorationToContext(ctx, world.caveAmbient, world.surfaceDressing);
-  return { spawnList: world.spawnList };
+  return { spawnList: world.spawnList, materialMap: world.materialMap };
 };

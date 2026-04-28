@@ -316,6 +316,8 @@ export type ServerMsg =
       /** Authoritative map mask (base64 Uint8Array of solid/air bytes,
        *  widthPx * heightPx bytes, row-major). Clients decode + render. */
       mask: string;
+      /** Per-pixel material map (4-bit packed, base64). Optional; absent for legacy maps. */
+      materialMapBase64?: string;
       /** Surface spawn points derived from the mask. */
       spawnPoints: Array<{ xPx: number; yPx: number }>;
     }
@@ -351,6 +353,8 @@ export type ClientMsg =
        *  pixel-identical terrain. Omitted for backcompat; server falls
        *  back to its flat test map. */
       mask?: string;
+      /** Per-pixel material map (4-bit packed, base64). Optional; absent for legacy maps. */
+      materialMapBase64?: string;
       /** Host-generated surface spawn points derived from the mask. */
       spawnPoints?: Array<{ xPx: number; yPx: number }>;
     }
