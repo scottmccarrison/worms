@@ -672,7 +672,9 @@ export class Simulation {
         vy: p.body.getLinearVelocity().y,
         fuseRemainingMs: p.fuseRemainingMs,
       })),
-      objects: Array.from(this.objects.values()).map((o) => o.serialize()),
+      objects: Array.from(this.objects.values())
+        .filter((o) => !o.dead)
+        .map((o) => o.serialize()),
       terrainCutSeq: 0,
       wind: this.wind,
       waterLevelPx: this.waterLevelPx,
@@ -813,8 +815,20 @@ export class Simulation {
   }
 
   private reapDeadObjects(): void {
+    // Pass 1: actually remove tombstoned objects from the previous tick.
+    // These have already had their destroy event + explosion fired and
+    // appeared in one SimState broadcast with dead=true; now they go away.
     for (const [id, obj] of this.objects) {
-      if (!obj.dead) continue;
+      if (!obj.dead || !obj.tombstoned) continue;
+      this.world.destroyBody(obj.body);
+      this.objects.delete(id);
+    }
+    // Pass 2: handle freshly-dead objects. Fire side effects + destroy event
+    // immediately, but keep the entry in the map (with dead=true) so it
+    // appears in the next SimState broadcast as a tombstone for the client
+    // to fade out. Pass 1 of the next tick's reap will remove the body.
+    for (const [id, obj] of this.objects) {
+      if (!obj.dead || obj.tombstoned) continue;
       if (obj.destroyCause === "explode" && obj.config.onDestroy) {
         const pos = obj.body.getPosition();
         const xPx = toPixels(pos.x);
@@ -836,8 +850,7 @@ export class Simulation {
         this.emitExplodeEvents(result, null);
       }
       this.events.push({ type: "object_destroy", id, cause: obj.destroyCause });
-      this.world.destroyBody(obj.body);
-      this.objects.delete(id);
+      obj.tombstoned = true;
     }
   }
 
@@ -940,6 +953,11 @@ export class Simulation {
         const projData = otherData as ProjectileUserData;
         if (!projData.projectile.detonated && !objData.object.dead) {
           this.pendingObjectHits.push({ obj: objData.object, projectile: projData.projectile });
+          // Detonate the projectile too. Mirrors worm contact (line 926):
+          // a projectile hitting an object should fire its own explosion
+          // (damage radius affects nearby worms) in addition to the
+          // object's onDestroy explosion when the object dies.
+          this.pendingDetonate.push(projData.projectile);
         }
       }
     }

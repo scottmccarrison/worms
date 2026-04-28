@@ -32,6 +32,14 @@ export class ObjectInstance {
   readonly body: Body;
   hp: number;
   dead: boolean = false;
+  /**
+   * Set by reap pass 1 once the destroy event + side effects have fired.
+   * Pass 2 (next tick's reap) destroys the body and removes from the map.
+   * Keeping a dead-but-not-tombstoned object in the map for one tick lets
+   * the client see one SimState broadcast with dead=true, providing a
+   * stable id to fade out instead of seeing the object vanish.
+   */
+  tombstoned: boolean = false;
   /** Cause set by destroy() for the broadcast. */
   destroyCause: "explode" | "open" | "remove" = "remove";
   /** Per-kind packed flags. Subclasses define bit semantics. */
