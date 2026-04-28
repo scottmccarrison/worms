@@ -6,14 +6,17 @@ import { generateHeightmapPass } from "../passes/generateHeightmap";
 import { paintMaterialBandsPass } from "../passes/paintMaterialBands";
 import { paintSubstrateMaskPass } from "../passes/paintSubstrateMask";
 import { paintSurfaceCrustPass } from "../passes/paintSurfaceCrust";
+import { placeCaveAmbientPass } from "../passes/placeCaveAmbient";
+import { placeSurfaceDressingPass } from "../passes/placeSurfaceDressing";
 import { resetPass } from "../passes/reset";
 import { Pipeline } from "../pipeline";
 import type { MapGenerator } from "../types";
 import { createWorld } from "../world";
+import { paintDecorationToContext } from "./paintDecorationToContext";
 import { paintWorldToContext } from "./paintWorldToContext";
 
 /**
- * v1 pipeline pass order (9 of 14 passes; spawn + validation deferred to PR 5+):
+ * v1 pipeline pass order (11 of 14 passes; spawn + validation deferred to PR 6):
  *  1. Reset
  *  2. DefineTheme
  *  3. GenerateHeightmap
@@ -23,6 +26,8 @@ import { paintWorldToContext } from "./paintWorldToContext";
  *  7. CarveCaves
  *  8. FinalizeMask
  *  9. PaintSurfaceCrust          (PR 4)
+ * 10. PlaceCaveAmbient           (PR 5)
+ * 11. PlaceSurfaceDressing       (PR 5)
  */
 const PASSES = [
   resetPass,
@@ -34,6 +39,8 @@ const PASSES = [
   carveCavesPass,
   finalizeMaskPass,
   paintSurfaceCrustPass,
+  placeCaveAmbientPass,
+  placeSurfaceDressingPass,
 ];
 
 /**
@@ -64,4 +71,5 @@ export const terraworldV1Generator: MapGenerator = (ctx, widthPx, heightPx, opts
     );
   }
   paintWorldToContext(ctx, world.mask, world.materialMap, world.theme.palette, widthPx, heightPx);
+  paintDecorationToContext(ctx, world.caveAmbient, world.surfaceDressing);
 };
