@@ -154,4 +154,46 @@ describe("terraworldV1 integration", () => {
     }
     expect(grassHits).toBeGreaterThan(0);
   });
+
+  it("default theme: generator returns spawnList with non-empty left and right", () => {
+    const W = 800;
+    const H = 600;
+    const ctx = makeCtx(W, H);
+    const result = terraworldV1Generator(ctx, W, H, { seed: 42 });
+    expect(result).toBeDefined();
+    expect(result?.spawnList.left.length).toBeGreaterThan(0);
+    expect(result?.spawnList.right.length).toBeGreaterThan(0);
+    // Left spawns are all left of midline; right spawns are all on right.
+    const midX = Math.floor(W / 2);
+    for (const p of result?.spawnList.left ?? []) expect(p.xPx).toBeLessThan(midX);
+    for (const p of result?.spawnList.right ?? []) expect(p.xPx).toBeGreaterThanOrEqual(midX);
+  });
+
+  it("default theme: spawnList.left and spawnList.right are sorted by xPx ascending", () => {
+    const W = 800;
+    const H = 600;
+    const ctx = makeCtx(W, H);
+    const result = terraworldV1Generator(ctx, W, H, { seed: 42 });
+    const left = result?.spawnList.left ?? [];
+    const right = result?.spawnList.right ?? [];
+    for (let i = 1; i < left.length; i++) {
+      const prev = left[i - 1];
+      const curr = left[i];
+      if (prev && curr) expect(curr.xPx).toBeGreaterThanOrEqual(prev.xPx);
+    }
+    for (let i = 1; i < right.length; i++) {
+      const prev = right[i - 1];
+      const curr = right[i];
+      if (prev && curr) expect(curr.xPx).toBeGreaterThanOrEqual(prev.xPx);
+    }
+  });
+
+  it("snow theme: generator returns a populated spawnList (caves theme works too)", () => {
+    const W = 800;
+    const H = 600;
+    const ctx = makeCtx(W, H);
+    const result = terraworldV1Generator(ctx, W, H, { seed: 42, themeTag: "snow" });
+    expect(result?.spawnList.left.length).toBeGreaterThan(0);
+    expect(result?.spawnList.right.length).toBeGreaterThan(0);
+  });
 });

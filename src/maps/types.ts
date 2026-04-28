@@ -1,4 +1,5 @@
 import type { SurfacePoint } from "../worm/spawnPoints";
+import type { SpawnList } from "./world";
 
 export interface MapConfig {
   id: string;
@@ -31,12 +32,22 @@ export interface MapConfig {
   readonly prePainted?: boolean;
 }
 
+/**
+ * Pipeline-based generators (terraworldV1) return their world.spawnList so
+ * loadMap can ship authoritative team-partitioned spawn data downstream.
+ * Legacy generators return void; the absence is treated as "fall back to
+ * legacy findSpawnPoints scan."
+ *
+ * `void` (rather than `undefined`) is required so existing legacy generators
+ * declared `() => void` continue to satisfy the type without modification.
+ */
 export type MapGenerator = (
   ctx: CanvasRenderingContext2D,
   widthPx: number,
   heightPx: number,
   opts: { seed: number } & Record<string, number | string | boolean>,
-) => void;
+  // biome-ignore lint/suspicious/noConfusingVoidType: legacy generators declare `() => void`; see jsdoc.
+) => void | { spawnList: SpawnList };
 
 export interface LoadedMap {
   config: MapConfig;
