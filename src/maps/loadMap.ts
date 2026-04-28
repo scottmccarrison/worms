@@ -22,8 +22,16 @@ export function loadMap(
   // Precedence: explicit override (multiplayer host's authoritative seed) >
   // config seed > runtime default. Falsy 0 is treated like "unset" to match
   // the original behavior.
+  //
+  // Date.now() returns ~1.7e12 (post-2024), which exceeds 2^32. The v1
+  // pipeline's createWorld validates seed < 2^32 and throws on out-of-range,
+  // so we mask the fallback to uint32 via `>>> 0`. Legacy generators don't
+  // care, but masking is harmless for them. Without this mask, terraworld_v1
+  // and canyon_v1 always throw on the host, fall through to the flat-mask
+  // fallback in LobbyScene.handleStart, and players spawn in a 4-worm cluster
+  // at (120-460, 904) on a featureless rectangle.
   const seed =
-    seedOverride !== undefined ? seedOverride : entry.config.generator.seed || Date.now();
+    seedOverride !== undefined ? seedOverride : entry.config.generator.seed || Date.now() >>> 0;
   const generatorResult = entry.generator(ctx, widthPx, heightPx, {
     ...entry.config.generator.options,
     seed,
