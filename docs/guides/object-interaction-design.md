@@ -109,18 +109,19 @@ Concrete approach in our stack:
 
 This unifies pickups, mines, chests, doors, switches under one mechanism.
 
-### 6.4 Sparse server state, event-driven sync
+### 6.4 Server-authoritative state, event-driven sync
 
-We use Colyseus's `MapSchema` per object type. Concrete sketch (full version in section 9.2):
+We extend the existing `SimState` snapshot pattern (`shared/protocol.ts`). The Durable Object broadcasts a full `SimState` at 20Hz containing every worm and projectile; we add a third array for world objects:
 
-- `MatchState.worms: MapSchema<WormState>` - 4-8 entries, dense state per worm
-- `MatchState.projectiles: MapSchema<ProjectileState>` - high-churn, spawn/despawn each turn
-- `MatchState.worldObjects: MapSchema<WorldObjectState>` - 10-30 entries, mostly static
-- Decorations and terrain are NOT in schema (see section 9.3)
+- `SimState.worms: WormRenderState[]` - existing, 4-8 entries
+- `SimState.projectiles: ProjectileRenderState[]` - existing, high-churn
+- `SimState.objects: ObjectRenderState[]` - NEW, world-fixed and match-spawned objects with mutable state
 
-Tightly typed primitives (`uint8`, `int16`, `float32`) save bytes per delta. Off-schema runtime fields (the planck `Body`, the input buffer) are server-only with no `@type` decoration.
+Decorations and terrain are not in `SimState`. Decorations live client-side only; terrain ships as a packed mask once at match start (`shared/maskPack.ts`) and is patched per-explosion via `terrain_cut` events (see section 9.3).
 
-Tombstone-on-delete pattern (steal from Excalidraw): when an object dies, mark `dead: true` for one tick before GC, so a late-arriving message referencing the object does not crash on a missing entity.
+VFX-only events (`object_spawn`, `object_destroy`) follow the existing `terrain_cut` / `fire_event` / `damage_event` pattern: fire-and-forget triggers for sound, particles, screen shake. Authoritative state continues to arrive via `sim_state`.
+
+Tombstone-on-delete pattern (steal from Excalidraw): when an object dies, set `dead: true` and keep it in the array for one tick before removal, so any in-flight client interpolation does not glitch on a missing object id.
 
 ### 6.5 Data-driven prop catalog
 
@@ -161,83 +162,80 @@ URL: https://github.com/Akip2/torket-game
 
 A Worms Armageddon clone in TypeScript + Phaser + Colyseus + Matter.js. Last commit 2026-04-26. It is the closest stack-and-genre match we found.
 
+We steal Torket's **class architecture** (GameBody hierarchy, parallel runtime + state maps, label-based collision dispatch). We do NOT steal its **schema design or transport**, because Torket runs Colyseus with binary delta sync and we run hand-rolled JSON over a Cloudflare Durable Object (see section 11).
+
 Patterns we are stealing:
 
 - **`GameBody` abstract base** with `addToWorld` / `removeFromWorld`. Subclasses per object type (PlayerBody, BulletBody, TerrainBlock, BarrelBody). Uniform lifecycle.
-- **Two parallel server maps**: `Map<id, GameBody>` (runtime, the truth) plus `MapSchema<EntitySchema>` (the wire). Schema is a projection of body state, not the source of truth.
+- **Two parallel server maps**: a runtime `Map<id, GameBody>` (the truth) plus a wire-format projection (their `MapSchema`, our `ObjectRenderState[]` in `SimState`). The runtime map owns the planck body and game logic; the wire projection is regenerated each tick.
 - **Label-based collision dispatch** with structured prefixes. Per-frame collision events route by label prefix to per-type handlers.
-- **Ephemeral broadcast for projectiles**, MapSchema for persistent entities. Confirms our match-spawned vs world-fixed split with working code.
-- **Per-domain managers** (PhysicsManager, PlayerManagerServer, TerrainManagerServer) keep the Room class lean.
+- **Per-domain managers** (PhysicsManager, PlayerManagerServer, TerrainManagerServer) keep the Room class lean. Our equivalent: split `Simulation` responsibilities across helper classes rather than letting the DO grow.
 
 Patterns we are avoiding:
 
-- Bullets-not-in-schema: a player joining mid-flight does not see them. Acceptable for projectiles; not acceptable for persistent gadgets like mines. Mines must go in MapSchema.
-- `playerRef: any` in client-side code: defeats Colyseus codegen typing. Use generated types.
-- Full terrain rebuild on every cut: O(N) world rebuild fine at small scale but tanks under heavy explosion load. Replace with incremental update.
+- Torket broadcasts bullets ephemerally so a mid-flight join does not see them. We do not have this problem because our `SimState` snapshots include every projectile and object every tick. Late joiners get the full picture on first snapshot.
+- Untyped `any` references for state objects on the client. We have generated types from `shared/protocol.ts`; use them.
+- Full terrain rebuild on every cut. O(N) rebuild is fine at small scale but tanks under heavy explosion load. Replace with incremental update if it becomes a hot spot.
 
-### 9.2 colyseus/realtime-tanks-demo (canonical schema reference)
+### 9.2 Wire format: extend `shared/protocol.ts`
 
-URL: https://github.com/colyseus/realtime-tanks-demo
+We do not introduce a schema framework. We extend the existing TypeScript-interface protocol that lives at `shared/protocol.ts` and is broadcast as plain JSON. The existing pattern is full `SimState` snapshots at 20Hz plus fire-and-forget VFX events.
 
-The canonical Colyseus tank-style game. Schema design we mirror almost wholesale.
+Additions:
 
 ```ts
-class WormState extends Schema {
-  @type("string") name = "";
-  @type("uint8")  team = 0;
-  @type("float32") x = 0;
-  @type("float32") y = 0;
-  @type("float32") vx = 0;
-  @type("float32") vy = 0;
-  @type("float32") angle = 0;
-  @type("int16")  hp = 100;
-  @type("uint8")  weapon = 0;
-  @type("uint8")  ammo = 0;
-  // off-schema (no @type): planck.Body, inputBuffer, lastShotAt
+// shared/protocol.ts (additions)
+
+/**
+ * Render-ready world-object state. Catalog kind drives sprite + behavior.
+ * Positions are in pixels (matching WormRenderState convention). One entry
+ * per object instance in the match.
+ */
+export interface ObjectRenderState {
+  id: string;
+  /** Catalog kind: "barrel", "weapon_crate", "mine", "spawn_pad", etc. */
+  kind: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  /** Stays true for one tick before removal so client interp does not glitch. */
+  dead: boolean;
+  /** Per-kind packed flags. e.g. bit 0 = opened (chest), bit 1 = armed (mine). */
+  flags: number;
 }
 
-class ProjectileState extends Schema {
-  @type("uint8")  kind = 0;
-  @type("string") owner = "";
-  @type("float32") x = 0;
-  @type("float32") y = 0;
-  @type("float32") vx = 0;
-  @type("float32") vy = 0;
-  @type("uint16") fuse = 0;
+export interface SimState {
+  // ...existing fields (tick, worms, projectiles, activeTeamId, ...)
+  objects: ObjectRenderState[];  // NEW
 }
 
-class WorldObjectState extends Schema {
-  @type("uint8")  kind = 0;
-  @type("float32") x = 0;
-  @type("float32") y = 0;
-  @type("int16")  hp = 0;
-  @type("boolean") dead = false;
-  // per-kind extras packed into a small record
+/** Spawn VFX trigger. Fired once per object creation. */
+export interface ObjectSpawnEvent {
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
 }
 
-class MatchState extends Schema {
-  @type("uint8")  phase = 0;
-  @type("string") activeTurn = "";
-  @type("uint16") timeRemaining = 0;
-  @type({ map: WormState })        worms        = new MapSchema<WormState>();
-  @type({ map: ProjectileState })  projectiles  = new MapSchema<ProjectileState>();
-  @type({ map: WorldObjectState }) worldObjects = new MapSchema<WorldObjectState>();
+/** Destroy VFX trigger. Fired once per object death. */
+export interface ObjectDestroyEvent {
+  id: string;
+  /** Optional cause for VFX selection. */
+  cause?: "explode" | "open" | "remove";
 }
 ```
 
-Tick rate: `setSimulationInterval(() => step(), 1000/30)`. Patch rate decoupled if needed via `setPatchRate(50)`.
+Server-side, the `Simulation` class (`worker/src/sim/simulation.ts`) gains an `objects: Map<string, ObjectInstance>` parallel to its existing worm and projectile maps. Each tick, `Simulation.toSimState()` projects the map to an array of `ObjectRenderState`. Spawn and destroy events broadcast immediately, like the existing `terrain_cut` flow in `worker/src/room.ts`.
 
-### 9.3 Terrain via sendBytes, not schema
+Persistence: the `Simulation` already serializes for DO hibernation. Object serialization joins that path. Planck bodies are recreated on resume from the serialized state, same pattern as worms.
 
-`unity-demo-tanks` puts a 1D `MapSchema<number>` for a destructible grid. For our continuous mask this is wrong: per-cell delta encoding adds too much overhead for a ~50KB blob.
+### 9.3 Terrain sync via packed mask, unchanged
 
-Pattern (from `endel/colyseus-0.15-protocol-buffers`):
+Terrain is not in `SimState` and the object addition does not change that. The existing `shared/maskPack.ts` (1-bit-per-pixel packing, `packMask` / `unpackMask`) handles match-start delivery. Per-explosion mutations broadcast via the existing `terrain_cut` event with `{ x, y, r, seq }`.
 
-- At match start: `client.sendBytes("terrain", uint8)` ships the full mask once.
-- Per explosion: `client.sendBytes("terrain:hole", packedXYR)` ships a small fixed-size patch.
-- Schema never sees the terrain.
-
-This is the right shape regardless of the hosting question (section 11).
+Object architecture sits above this layer. World-fixed objects are anchored to terrain coordinates but their physics bodies are independent. When terrain underneath an object disappears, planck gravity drops the body. No "terrain-object link" data structure exists or is needed.
 
 ### 9.4 Patterns we DO NOT borrow
 
@@ -257,36 +255,40 @@ These need explicit decisions during implementation. The bible is silent on them
 
 ---
 
-## 11. Open question, blocking design completion
+## 11. Hosting model, verified
 
-**Is Colyseus officially supported on Cloudflare Workers?**
+We do **not** use Colyseus. The earlier ADR-001 plan for Colyseus + Fly.io was superseded; the actual stack is:
 
-Per agent research, Colyseus issue #851 (Durable Objects) is open with no PRs. PartyKit (CF acquisition) is the de-facto CF-native equivalent. There is no `@colyseus/cloudflare-workers` adapter shipping.
+- **Cloudflare Workers.** `worker/wrangler.toml` routes `mccarrison.me/worms` and `mccarrison.me/worms/*` to a Worker. Static assets served from `../dist` via the `[assets]` binding.
+- **Durable Object class `Room`.** One DO per match, SQLite-backed (`new_sqlite_classes = ["Room"]` migration). Owns the lobby, the simulation, and the WebSocket connections.
+- **Hand-rolled JSON over hibernation-safe WebSocket.** No schema framework. Wire format is the TypeScript interfaces in `shared/protocol.ts`. `shared/protocol.ts:11-14` calls this out explicitly: "Transport is hand-rolled JSON over a single hibernation-safe WebSocket per client (no @colyseus/schema patch deltas)."
+- **Planck simulation inside the DO.** `worker/src/sim/simulation.ts` owns the planck world. A 50ms (20Hz) DO alarm advances the sim, drains inputs, broadcasts state, persists for hibernation, schedules the next alarm.
+- **Full-state `sim_state` broadcasts each tick.** Plus fire-and-forget VFX events: `terrain_cut`, `fire_event`, `damage_event`, `worm_died`, `game_over`. See `worker/src/room.ts:11-14`.
+- **Hibernation-aware persistence.** `state.storage.put` saves lobby, rosters, arbiter, and serialized sim. The DO can hibernate mid-match and resume cleanly.
 
-But our codebase has `worker/src/room.ts` running Colyseus. So either:
+Implications for object architecture:
 
-1. We have a custom adapter, or something works locally but will not scale.
-2. We are running on Node hosted somewhere and `worker/` is misleading naming.
-3. There is a recent unofficial adapter we are using.
+1. **Schema design is a TypeScript interface in `shared/protocol.ts`**, not a schema-framework class. Section 9.2 reflects this.
+2. **Sim tick rate is fixed at 20Hz.** Object simulation cost rolls up into the existing planck step in `Simulation.advance`.
+3. **Object state must serialize for DO hibernation.** Planck bodies are recreated on resume from serialized object state, same pattern as worms.
+4. **CF Workers CPU-time per request is the binding constraint**, not bandwidth. Per-tick alarm execution must stay under the limit even with the full object catalog active. We measure before scaling object count.
+5. **Bandwidth is not a concern at our scale.** Per `shared/protocol.ts:13`: "Total state is <1 KB so this is trivially cheap at our scale." Adding ~30 objects at ~50 bytes each is ~1.5KB per snapshot, still cheap at 20Hz.
 
-**This must be verified before final schema and tick-rate decisions are made.** Hosting model affects:
-
-- What runtime APIs are available (timers, WebSocket lifecycle, persistent state)
-- What CPU and memory budgets we have per match
-- How match state survives across reconnects
-- Whether per-tick simulation at 30 Hz is realistic or aspirational
-
-The next session step is to read `worker/package.json`, `wrangler.toml` if present, deploy configs, and any deployment docs. Until that is done, sections 6.4 and 9.2 are sketches, not commitments.
+The Colyseus-on-CF-Workers question (Colyseus issue #851) was a red herring. We are not running Colyseus anywhere.
 
 ---
 
 ## 12. Next steps
 
-In order of dependency:
+Hosting verification (former step 1) is complete; section 11 captures the finding. Remaining work in dependency order:
 
-1. **Verify hosting model** (section 11). Until done, all schema design is provisional.
-2. **Clone Akip2/torket-game and read end-to-end**. Especially `GameBody.ts`, `MyRoom.ts`, `TerrainManagerServer.ts`, `PhysicsManager.ts`. Roughly 30 minutes of reading.
-3. **Clone colyseus/realtime-tanks-demo and read schema + room.** Cross-reference with Torket. Roughly 20 minutes.
-4. **Write `docs/plans/object-interaction-pr1.md`** with concrete first-PR scope: probably just the `GameBody` base class plus one trivial prop type (a barrel) end-to-end through gen, schema, sensor interaction, and despawn. Establish the pattern before scaling.
+1. **Read Akip2/torket-game end-to-end** for class architecture only. Focus on `GameBody.ts` and per-domain manager classes. Skip their schema and transport layers; those do not apply to us. Roughly 30 minutes of reading.
+2. **Extend `shared/protocol.ts`**: add `ObjectRenderState`, the `objects: ObjectRenderState[]` field on `SimState`, and `ObjectSpawnEvent` / `ObjectDestroyEvent`.
+3. **Add the prop catalog** at `data/props.json` (or `src/objects/catalog.ts`) with one starter prop type (a barrel) plus a `loadProps()` consumer.
+4. **Implement `ObjectInstance` server class** in `worker/src/sim/`: planck body wrapper, `Map<id, ObjectInstance>` in `Simulation`, `toRenderState()` projection, hibernation-safe serialization.
+5. **Wire `object_spawn` and `object_destroy` event broadcasts** following the existing `terrain_cut` pattern in `worker/src/room.ts`.
+6. **Add label-based collision dispatch** (`barrel:<id>`, `pickup:<id>`, etc.) to the Simulation's contact listener.
+7. **Write `docs/plans/object-interaction-pr1.md`** with concrete first-PR scope: barrel as proof-of-concept end-to-end through gen, sim, sync, sensor, despawn. Establish the pattern before scaling.
+8. **Write `docs/guides/adding-a-prop.md`** alongside the first PR, paralleling `adding-a-weapon.md`.
 
 Each subsequent prop type is an additive change once the base pattern lands.
