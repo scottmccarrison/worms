@@ -15,6 +15,7 @@
  * Calls log a warning and drop.
  */
 
+import type { ObjectRenderState } from "../../shared/protocol";
 import { dlogUnthrottled, setLogContext } from "../debug/logger";
 import type {
   ClientMsg,
@@ -410,6 +411,14 @@ export class NetworkedSimAdapter implements SimAdapter {
         type: p.type,
       };
     });
+  }
+
+  /**
+   * Latest object list from the current server frame. Objects are reconciled
+   * by GameScene each render tick against its objectSprites map.
+   */
+  getObjects(): ObjectRenderState[] {
+    return this.currFrame?.state.objects ?? [];
   }
 
   // -------------------------------------------------------------------------
