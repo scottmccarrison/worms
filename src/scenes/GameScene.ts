@@ -10,8 +10,9 @@ import { firstId, getById, nextId } from "../maps/registry";
 import type { NetClient } from "../net/client";
 import { clearRoomToken, readRoomToken, saveRoomToken } from "../net/clientStorage";
 import { runReconnectLoop } from "../net/reconnectLoop";
-import type { TeamInit as NetTeamInit } from "../net/types";
+import type { TeamInit as NetTeamInit, ObjectDestroyMessage } from "../net/types";
 import type { RoomHandle } from "../net/wsClient";
+import { ObjectSprite } from "../objects/objectSprite";
 import { NetworkedSimAdapter } from "../sim/NetworkedSimAdapter";
 import { OfflineSimAdapter } from "../sim/OfflineSimAdapter";
 import type { RenderableWorm, SimAdapter, SimEvent } from "../sim/SimAdapter";
@@ -66,6 +67,8 @@ export class GameScene extends Phaser.Scene {
   private wormSprites: Map<string, WormSprite> = new Map();
   /** Fallback graphics for server-spawned projectiles (networked mode). */
   private projectileGraphics: Map<string, Phaser.GameObjects.Graphics> = new Map();
+  /** One sprite per world object (barrel, crate, etc) reconciled from sim_state (networked mode). */
+  private objectSprites: Map<string, ObjectSprite> = new Map();
 
   // ---- Wind + water HUD / rendering ----
   private windHUD: WindHUD | null = null;
@@ -184,6 +187,10 @@ export class GameScene extends Phaser.Scene {
     return url.searchParams.get("map");
   }
 
+  preload(): void {
+    this.load.image("barrel", "assets/objects/barrel.png");
+  }
+
   create(): void {
     dlogUnthrottled("scene", "GameScene.create", { isNetworked: this.isNetworked });
     try {
@@ -284,6 +291,8 @@ export class GameScene extends Phaser.Scene {
         this.wormSprites.clear();
         for (const g of this.projectileGraphics.values()) g.destroy();
         this.projectileGraphics.clear();
+        for (const obj of this.objectSprites.values()) obj.destroy();
+        this.objectSprites.clear();
         this.turnHUD?.destroy();
         this.weaponRadial?.destroy();
         this.aimHUD?.destroy();
@@ -470,6 +479,7 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     this.sim.update(deltaMs);
+    for (const sprite of this.objectSprites.values()) sprite.interpolate(deltaMs);
     this.renderFromAdapter();
     this.inputController.update(deltaMs);
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
@@ -492,6 +502,7 @@ export class GameScene extends Phaser.Scene {
     if (this.networkedSim) {
       this.renderNetworkedWorms();
       this.renderNetworkedProjectiles();
+      this.renderNetworkedObjects();
       // Feed networked projectile entries to CameraFollower each frame.
       if (this.cameraFollower) {
         const entries: Array<{ id: string; gfx: Phaser.GameObjects.GameObject }> = [];
@@ -540,6 +551,26 @@ export class GameScene extends Phaser.Scene {
       if (!live.has(id)) {
         g.destroy();
         this.projectileGraphics.delete(id);
+      }
+    }
+  }
+
+  private renderNetworkedObjects(): void {
+    if (!this.networkedSim) return;
+    const seenObjectIds = new Set<string>();
+    for (const objState of this.networkedSim.getObjects()) {
+      seenObjectIds.add(objState.id);
+      let sprite = this.objectSprites.get(objState.id);
+      if (!sprite) {
+        sprite = new ObjectSprite(this, objState);
+        this.objectSprites.set(objState.id, sprite);
+      }
+      sprite.applyState(objState);
+    }
+    for (const [id, sprite] of this.objectSprites) {
+      if (!seenObjectIds.has(id)) {
+        sprite.destroy();
+        this.objectSprites.delete(id);
       }
     }
   }
@@ -937,6 +968,16 @@ export class GameScene extends Phaser.Scene {
       loop: true,
       callback: () => this.refreshSpectatorBanner(),
     });
+
+    this.roomUnsubs.push(
+      this.room.onMessage("object_destroy", (e: ObjectDestroyMessage) => {
+        const sprite = this.objectSprites.get(e.id);
+        if (sprite) {
+          sprite.playDestroyVfx(e.cause);
+          this.objectSprites.delete(e.id);
+        }
+      }),
+    );
   }
 
   private refreshSpectatorBanner(): void {

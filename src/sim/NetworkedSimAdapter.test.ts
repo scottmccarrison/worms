@@ -150,6 +150,7 @@ function makeSimState(overrides: Partial<SimStateMessage> = {}): SimStateMessage
       },
     ],
     projectiles: [],
+    objects: [],
     activeTeamId: "red",
     activeWormId: "red-1",
     turnEndsAt: Date.now() + 30000,
