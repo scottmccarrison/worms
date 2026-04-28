@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HEIGHTMAP_UNINIT, MASK_AIR, MATERIAL_AIR, createWorld } from "./world";
+import { HEIGHTMAP_UNINIT, MASK_AIR, MATERIAL_AIR, MAX_PIXEL_COUNT, createWorld } from "./world";
 
 describe("createWorld", () => {
   it("returns a World with correct dimensions, seed, and themeTag", () => {
@@ -65,5 +65,14 @@ describe("createWorld", () => {
 
   it("throws for invalid heightPx (negative)", () => {
     expect(() => createWorld(0, 100, -5, "x")).toThrow(/heightPx must be a positive integer/);
+  });
+
+  it("throws when widthPx * heightPx exceeds the allocation cap", () => {
+    expect(() => createWorld(0, 20000, 20000, "x")).toThrow(/exceeds the allocation cap/);
+  });
+
+  it("accepts widthPx * heightPx exactly at the allocation cap", () => {
+    const side = Math.floor(Math.sqrt(MAX_PIXEL_COUNT));
+    expect(() => createWorld(0, side, side, "default")).not.toThrow();
   });
 });

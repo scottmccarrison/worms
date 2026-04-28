@@ -16,6 +16,11 @@ export const MASK_SOLID = 1;
  *  pass that should have written this column did not. */
 export const HEIGHTMAP_UNINIT = -2147483648; // INT32_MIN
 
+/** Maximum widthPx * heightPx for createWorld. ~100M pixels = 200MB across the
+ *  mask + materialMap pair. Anything larger is almost certainly a bug; the raw
+ *  Uint8Array allocation would either OOM or fail with a cryptic RangeError. */
+export const MAX_PIXEL_COUNT = 100_000_000;
+
 export interface SpawnPoint {
   xPx: number;
   yPx: number;
@@ -91,9 +96,14 @@ export function createWorld(
   if (!Number.isInteger(heightPx) || heightPx <= 0) {
     throw new Error(`createWorld: heightPx must be a positive integer, got ${heightPx}`);
   }
+  const pixelCount = widthPx * heightPx;
+  if (pixelCount > MAX_PIXEL_COUNT) {
+    throw new Error(
+      `createWorld: widthPx * heightPx (${pixelCount}) exceeds the allocation cap of ${MAX_PIXEL_COUNT}. Worlds beyond this size are likely a bug.`,
+    );
+  }
   const heightmap = new Int32Array(widthPx);
   heightmap.fill(HEIGHTMAP_UNINIT);
-  const pixelCount = widthPx * heightPx;
   return {
     widthPx,
     heightPx,
