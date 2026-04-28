@@ -79,4 +79,15 @@ describe("loadMap", () => {
     expect(result.config.id).toBe("canyon_v1");
     expect(result.spawnPoints.length).toBeGreaterThan(0);
   });
+
+  it("v1 map (terraworld_v1) without seedOverride: succeeds with Date.now() fallback (regression: createWorld would otherwise throw on seed >= 2^32)", () => {
+    // The terraworld_v1 registry entry has seed: 0 which intentionally falls
+    // through to Date.now() in loadMap. createWorld validates seed < 2^32, so
+    // loadMap must mask Date.now() to uint32 to prevent throwing. Pre-fix,
+    // this call threw and the host fell back to a flat mask + 4-worms-on-grid
+    // spawn pattern.
+    const result = loadMap("terraworld_v1", 2560, 1024);
+    expect(result.spawnPoints.length).toBeGreaterThan(0);
+    expect(result.config.id).toBe("terraworld_v1");
+  });
 });
