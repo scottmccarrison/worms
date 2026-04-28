@@ -734,9 +734,22 @@ export class Simulation {
         this.projectileIdCounter = n;
       }
     }
-    // Restore objects. Serialized positions are in pixels (ObjectInstance.serialize uses toRenderState).
+    // Restore objects. The constructor pre-spawns from initialObjects; we
+    // tear those down so restore is the single source of truth for object
+    // state. IDs from the serialized snapshot are preserved so any in-flight
+    // client references remain valid post-resume.
+    for (const obj of this.objects.values()) {
+      this.world.destroyBody(obj.body);
+    }
+    this.objects.clear();
+    let maxObjectId = 0;
     for (const os of state.objects ?? []) {
-      const obj = this.spawnObject(os.kind, os.x, os.y);
+      const n = Number.parseInt(os.id.replace("obj_", ""), 10);
+      if (Number.isFinite(n) && n > maxObjectId) maxObjectId = n;
+    }
+    this.objectIdCounter = maxObjectId;
+    for (const os of state.objects ?? []) {
+      const obj = this.spawnObject(os.kind, os.x, os.y, os.id);
       obj.body.setLinearVelocity({ x: toMeters(os.vx), y: toMeters(os.vy) });
       obj.hp = os.hp;
       obj.flags = os.flags;
@@ -791,8 +804,8 @@ export class Simulation {
 
   // ---- Object management ----
 
-  spawnObject(kind: string, xPx: number, yPx: number): ObjectInstance {
-    const id = `obj_${++this.objectIdCounter}`;
+  spawnObject(kind: string, xPx: number, yPx: number, idOverride?: string): ObjectInstance {
+    const id = idOverride ?? `obj_${++this.objectIdCounter}`;
     const obj = new ObjectInstance({ id, kind, world: this.world, xPx, yPx });
     this.objects.set(id, obj);
     this.events.push({ type: "object_spawn", id, kind, x: xPx, y: yPx });
