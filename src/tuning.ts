@@ -146,6 +146,11 @@ export interface Tuning {
        *  attempt-count density convention. */
       attemptFactor: number;
     };
+    surfaceDressing: {
+      /** Average horizontal spacing between surface dressing attempts, in pixels.
+       *  Attempts = floor(widthPx / spacingPx); each attempt picks a random column. */
+      spacingPx: number;
+    };
   };
   camera: {
     turnZoomOutMs: number;
@@ -265,6 +270,9 @@ export const tuning: Tuning = {
     },
     caveAmbient: {
       attemptFactor: 0.00015,
+    },
+    surfaceDressing: {
+      spacingPx: 40,
     },
   },
   camera: {
