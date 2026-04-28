@@ -140,6 +140,17 @@ export interface Tuning {
       /** Minimum spawns per team. Below this, ValidateSpawnCoherence logs a warning. */
       minPerTeam: number;
     };
+    caveAmbient: {
+      /** Attempts = widthPx * heightPx * attemptFactor. Each attempt picks a
+       *  random (x, y) and validates; invalid attempts no-op. Matches Terraria's
+       *  attempt-count density convention. */
+      attemptFactor: number;
+    };
+    surfaceDressing: {
+      /** Average horizontal spacing between surface dressing attempts, in pixels.
+       *  Attempts = floor(widthPx / spacingPx); each attempt picks a random column. */
+      spacingPx: number;
+    };
   };
   camera: {
     turnZoomOutMs: number;
@@ -256,6 +267,12 @@ export const tuning: Tuning = {
     spawn: {
       densityPx: 200,
       minPerTeam: 2,
+    },
+    caveAmbient: {
+      attemptFactor: 0.00015,
+    },
+    surfaceDressing: {
+      spacingPx: 40,
     },
   },
   camera: {

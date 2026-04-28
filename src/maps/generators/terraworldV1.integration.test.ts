@@ -25,20 +25,23 @@ describe("terraworldV1 integration", () => {
     expect(transparent).toBeGreaterThan(0);
   });
 
-  it("default theme: opaque pixels have RGB matching the theme palette (not legacy stratumPaint)", () => {
+  it("default theme: opaque pixels have RGB matching the theme palette or known decoration colors", () => {
     const W = 400;
     const H = 300;
     const ctx = makeCtx(W, H);
     terraworldV1Generator(ctx, W, H, { seed: 42 });
     const data = ctx.getImageData(0, 0, W, H).data;
     const palette = getTheme("default").palette;
-    // Pre-extract palette RGB triples
-    const colors = [palette.surface, palette.mid, palette.rock, palette.deep].map((hex) => ({
+    // Palette colors (from substrate + crust passes)
+    const paletteColors = [palette.surface, palette.mid, palette.rock, palette.deep].map((hex) => ({
       r: (hex >> 16) & 0xff,
       g: (hex >> 8) & 0xff,
       b: hex & 0xff,
     }));
-    // Sample a handful of opaque pixels; each must match one of the palette colors
+    // Decoration colors emitted by paintDecorationToContext on the default theme.
+    // Default theme has wantsCaveAmbient=false and wantsSurfaceDressing=true with sprite=grass_tuft.
+    const decorationColors = [{ r: 0x3a, g: 0x8a, b: 0x3a }];
+    const allowedColors = [...paletteColors, ...decorationColors];
     let matched = 0;
     let sampled = 0;
     for (let i = 0; i < data.length && sampled < 100; i += 4) {
@@ -47,7 +50,7 @@ describe("terraworldV1 integration", () => {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      if (colors.some((c) => c.r === r && c.g === g && c.b === b)) matched++;
+      if (allowedColors.some((c) => c.r === r && c.g === g && c.b === b)) matched++;
     }
     expect(sampled).toBeGreaterThan(0);
     expect(matched).toBe(sampled);
@@ -120,5 +123,35 @@ describe("terraworldV1 integration", () => {
       }
     }
     expect(differs).toBe(true);
+  });
+
+  it("snow theme: canvas contains at least one frost ambient pixel (#caf0ff)", () => {
+    // Larger canvas: at 400x300 the carved caves fall below the FinalizeMask
+    // hygiene threshold (1024px) and get stripped, leaving no AIR below the
+    // surface for PlaceCaveAmbient to land in. 800x600 produces a stable
+    // cave area where ambient features land.
+    const W = 800;
+    const H = 600;
+    const ctx = makeCtx(W, H);
+    terraworldV1Generator(ctx, W, H, { seed: 42, themeTag: "snow" });
+    const data = ctx.getImageData(0, 0, W, H).data;
+    let frostHits = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] === 0xca && data[i + 1] === 0xf0 && data[i + 2] === 0xff) frostHits++;
+    }
+    expect(frostHits).toBeGreaterThan(0);
+  });
+
+  it("default theme: canvas contains at least one grass_tuft dressing pixel (#3a8a3a)", () => {
+    const W = 400;
+    const H = 300;
+    const ctx = makeCtx(W, H);
+    terraworldV1Generator(ctx, W, H, { seed: 42 });
+    const data = ctx.getImageData(0, 0, W, H).data;
+    let grassHits = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] === 0x3a && data[i + 1] === 0x8a && data[i + 2] === 0x3a) grassHits++;
+    }
+    expect(grassHits).toBeGreaterThan(0);
   });
 });
