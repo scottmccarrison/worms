@@ -21,9 +21,10 @@ const DRESSING_COLORS: Record<string, string> = {
  * Cave ambient: 2x2 filled square at (xPx, yPx). Color from AMBIENT_COLORS
  * keyed by feature.type.
  *
- * Surface dressing: 2x3 filled rect anchored at (xPx, yPx) extending
- * upward (y - 2 to y + 1) so the dressing sits ON the surface. Color from
- * DRESSING_COLORS keyed by feature.sprite.
+ * Surface dressing: 2x3 filled rect at (xPx, yPx-2) covering rows
+ * (yPx-2, yPx-1, yPx). The pass sets yPx = surfY-1, so the rect's bottom
+ * row sits one pixel above the topmost substrate pixel - flush against
+ * the surface. Color from DRESSING_COLORS keyed by feature.sprite.
  *
  * Unknown type or sprite strings are silently skipped (Terraria
  * PlaceTile no-op-on-invalid convention).

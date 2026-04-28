@@ -42,7 +42,7 @@ export const placeCaveAmbientPass: Pass = {
       const cx = rngInt(rng, widthPx);
       const cy = rngInt(rng, heightPx);
       const surfY = heightmap[cx];
-      if (surfY === undefined || surfY >= heightPx) continue;
+      if (surfY === undefined || surfY < 0 || surfY >= heightPx) continue;
       if (cy <= surfY) continue;
       if (mask[cy * widthPx + cx] !== MASK_AIR) continue;
       world.caveAmbient.push({ xPx: cx, yPx: cy, type });
