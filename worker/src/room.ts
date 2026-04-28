@@ -257,6 +257,12 @@ export class Room implements DurableObject {
     let reloadMaterialMap: Uint8Array | undefined;
     if (bootstrap.materialMapBase64) {
       const packedMat = base64ToBytes(bootstrap.materialMapBase64);
+      const expectedPackedMatLen = Math.ceil(pixelCount / 2);
+      if (packedMat.length !== expectedPackedMatLen) {
+        throw new Error(
+          `reloadSim: materialMap packed length ${packedMat.length} != expected ${expectedPackedMatLen} (ceil(${pixelCount}/2))`,
+        );
+      }
       reloadMaterialMap = unpackMaterialBytes(packedMat, pixelCount);
     }
     this.sim = new Simulation({
@@ -887,6 +893,12 @@ export class Room implements DurableObject {
         if (hostMaterialMapBase64) {
           const packedMat = base64ToBytes(hostMaterialMapBase64);
           const pixelCount = WORLD_WIDTH_PX * WORLD_HEIGHT_PX;
+          const expectedPackedMatLen = Math.ceil(pixelCount / 2);
+          if (packedMat.length !== expectedPackedMatLen) {
+            throw new Error(
+              `materialMap packed length ${packedMat.length} != expected ${expectedPackedMatLen} (ceil(${pixelCount}/2))`,
+            );
+          }
           materialMap = unpackMaterialBytes(packedMat, pixelCount);
         }
       } catch (err) {

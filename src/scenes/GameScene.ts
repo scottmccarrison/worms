@@ -229,7 +229,15 @@ export class GameScene extends Phaser.Scene {
           const raw = atob(this.serverMaterialMapBase64);
           const packed = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) packed[i] = raw.charCodeAt(i);
-          serverMaterialMap = unpackMaterialBytes(packed, worldW * worldH);
+          const pixelCount = worldW * worldH;
+          const expectedPackedLen = Math.ceil(pixelCount / 2);
+          if (packed.length !== expectedPackedLen) {
+            console.warn(
+              `[GameScene] materialMapBase64 packed length ${packed.length} != expected ${expectedPackedLen} (ceil(${pixelCount}/2)); ignoring materialMap`,
+            );
+          } else {
+            serverMaterialMap = unpackMaterialBytes(packed, pixelCount);
+          }
         }
         this.terrainRenderer = new TerrainRenderer({
           scene: this,

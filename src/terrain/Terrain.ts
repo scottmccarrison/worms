@@ -69,6 +69,11 @@ export class Terrain {
     this.rowHeight = init.rowHeight ?? TERRAIN_ROW_HEIGHT;
     this.materialMap = init.materialMap ?? null;
     this.hardness = init.hardness ?? { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
+    if (this.materialMap !== null && this.materialMap.length !== this.widthPx * this.heightPx) {
+      throw new Error(
+        `Terrain: materialMap length ${this.materialMap.length} does not match ${this.widthPx}x${this.heightPx}`,
+      );
+    }
 
     // Create internal canvas buffer and copy source mask into it
     this.buffer = document.createElement("canvas");

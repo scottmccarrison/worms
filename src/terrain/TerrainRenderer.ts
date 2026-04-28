@@ -56,6 +56,11 @@ export class TerrainRenderer {
     this.textureKey = init.textureKey ?? "terrain";
     this.materialMap = init.materialMap ?? null;
     this.hardness = init.hardness ?? { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
+    if (this.materialMap !== null && this.materialMap.length !== this.widthPx * this.heightPx) {
+      throw new Error(
+        `TerrainRenderer: materialMap length ${this.materialMap.length} does not match ${this.widthPx}x${this.heightPx}`,
+      );
+    }
 
     this.buffer = document.createElement("canvas");
     this.buffer.width = this.widthPx;
