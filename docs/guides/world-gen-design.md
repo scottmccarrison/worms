@@ -197,6 +197,26 @@ If any answer is "I do not know," that is the signal to stop and research before
 
 ---
 
+## 11. Concrete data shapes (decided)
+
+This section captures data-layout decisions for the v1 pipeline. Each was made by applying the Process appendix's five questions to a specific architectural choice. Decisions are listed with their reasoning so future readers see *how* we got here, not just *what* we picked.
+
+### Mask and material map: Uint8Array, not HTMLCanvasElement
+
+**Decision:** The pipeline's mask and material map are `Uint8Array(widthPx * heightPx)`, one byte per pixel. Mask: 0 = air, 1 = solid. Material map: 0 = air, 1 = dirt, 2 = rock, 3 = stone, etc. The renderer materializes a canvas at the boundary; gen has no DOM dependencies.
+
+**Why (applying the five questions):**
+
+1. **Bible cite.** Silent. Section 5 of `world-gen-philosophy.md` says "single shared mutable canvas, communication via state only" - "canvas" is metaphorical there; the bible does not dictate byte layout. We are filling a worms-specific gap.
+2. **Consensus cite.** Design doc Section 5 deliberately did not lock down the v1 world-state shape ("no premature shape commitment"). The v1 pass list pinned the theme schema and the void-column sentinel, neither of which dictates the buffer type. No prior consensus.
+3. **Prior art.** The codebase already uses `Uint8Array(width * height)` server-side (`worker/src/entities/terrain.ts:52`) because Workers has no Canvas2D. The wire format is 1-bit-packed bytes (`shared/maskPack.js`). Two parallel `scanMaskForBoxes` implementations already bridge the client/server divide. Convergent pattern from researched prior art: native engines (Liero, Cortex Command, Noita) and falling-sand simulators (Sandspiel) uniformly choose flat indexed pixel buffers as canonical state. Browser-only Phaser Worms-likes use canvas-as-mask, but every example found is single-player without an authoritative server. Anything with a client/server or sim/render split converges on byte buffers.
+4. **Simplest sufficient.** Counter-intuitively, Uint8Array is the simpler path given existing topology. Host-authoritative gen with canvas requires `canvas -> getImageData -> bit-pack -> wire`. Uint8Array requires `Uint8Array -> bit-pack -> wire`. One fewer host-side conversion. The renderer materializes canvas once at scene start, not per-pass.
+5. **Assumption-that-bites.** Picking canvas locks in host-authoritative gen forever; bites if we ever want server-authoritative gen (cheat prevention, AI bots, lockstep recovery, validation hash) - cost to recover is rewriting all 14 passes. Picking Uint8Array assumes byte indexing is fast enough; bites if a hot pass turns out slower in bytes - localized, recoverable, can use `Uint32Array` aliasing per the Mozilla Hacks technique. The Option A bite is asymmetric and architectural; the Option B bite is narrow.
+
+**Implications.** Foundation `World` struct uses `Uint8Array` for mask and materialMap (always-allocated, no nulls). No DOM dependencies in the pipeline core; gen runs identically in browser, Node, Workers DO, V8 isolate. Renderer adapter at the boundary materializes canvas (one conversion, not 14). The existing `cellularAutomata.ts` already uses `Uint8Array` internally for its CA cells - the refactor is in input/output plumbing, not the algorithm. The existing `findSpawnPoints` takes `Uint8ClampedArray` (RGBA stride 4); the v1 version takes the 1-byte-per-pixel `Uint8Array` directly.
+
+---
+
 ## Done
 
 This document captures consensus on world-gen philosophy as of the conversation that produced it. The bible at `world-gen-philosophy.md` remains the unmodified extraction of Terraria's model. This doc is what we believe and what we are building. They are read together.
