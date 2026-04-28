@@ -20,6 +20,13 @@ export interface TerrainInit {
   sourceMask: HTMLCanvasElement;
   textureKey?: string; // default "terrain"
   rowHeight?: number; // default 5
+  /**
+   * When true, the source mask already has final RGB colors (e.g. produced
+   * by a v1 pipeline generator using paintWorldToContext). Skip
+   * applyStratumPaint so material colors survive. Default false: legacy
+   * generators rely on stratumPaint.
+   */
+  prePainted?: boolean;
 }
 
 export class Terrain {
@@ -65,8 +72,12 @@ export class Terrain {
 
     // Depth-stratum paint: grass/dirt/stone over the mask alpha. Matches
     // the networked TerrainRenderer so offline + networked look identical
-    // regardless of whether the generator painted its own RGB.
-    applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
+    // regardless of whether the generator painted its own RGB. Skipped
+    // when the source mask is already RGB-painted by a v1 pipeline
+    // generator (init.prePainted = true).
+    if (!init.prePainted) {
+      applyStratumPaint(this.ctx, this.widthPx, this.heightPx);
+    }
 
     // Register canvas with Phaser TextureManager. A previous Terrain
     // instance in the same scene session leaves its texture registered;

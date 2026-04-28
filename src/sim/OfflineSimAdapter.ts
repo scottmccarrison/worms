@@ -91,6 +91,7 @@ export class OfflineSimAdapter implements SimAdapter {
       widthPx: init.widthPx,
       heightPx: init.heightPx,
       sourceMask: init.loaded.mask,
+      prePainted: init.loaded.config.prePainted,
     });
 
     // Register contact listeners BEFORE spawning worms (matches old GameScene).

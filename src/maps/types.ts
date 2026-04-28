@@ -22,6 +22,13 @@ export interface MapConfig {
    * ADR-003 (procgen-first) legacy handcrafted maps are hidden here.
    */
   readonly visibleInLobby?: boolean;
+  /**
+   * When true, the generator has already painted final RGB to the canvas
+   * (via paintWorldToContext or similar materials-aware painter). Renderers
+   * skip applyStratumPaint so the materials-derived colors are preserved.
+   * Legacy generators leave this false/undefined and rely on stratumPaint.
+   */
+  readonly prePainted?: boolean;
 }
 
 export type MapGenerator = (

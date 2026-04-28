@@ -37,10 +37,10 @@ describe("getTheme", () => {
     }
   });
 
-  it("every theme palette has surface, mid, deep as numbers in valid RGB range (0-0xFFFFFF)", () => {
+  it("every theme palette has surface, mid, rock, deep as numbers in valid RGB range (0-0xFFFFFF)", () => {
     for (const tag of EXPECTED_TAGS) {
       const { palette } = getTheme(tag);
-      for (const channel of ["surface", "mid", "deep"] as const) {
+      for (const channel of ["surface", "mid", "rock", "deep"] as const) {
         const val = palette[channel];
         expect(typeof val, `${tag}.palette.${channel} should be number`).toBe("number");
         expect(val, `${tag}.palette.${channel} should be >= 0`).toBeGreaterThanOrEqual(0);

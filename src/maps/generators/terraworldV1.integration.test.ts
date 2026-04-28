@@ -1,5 +1,6 @@
 import { createCanvas } from "canvas";
 import { describe, expect, it } from "vitest";
+import { getTheme } from "../themes";
 import { terraworldV1Generator } from "./terraworldV1";
 
 function makeCtx(w: number, h: number) {
@@ -22,6 +23,34 @@ describe("terraworldV1 integration", () => {
     }
     expect(opaque).toBeGreaterThan(0);
     expect(transparent).toBeGreaterThan(0);
+  });
+
+  it("default theme: opaque pixels have RGB matching the theme palette (not legacy stratumPaint)", () => {
+    const W = 400;
+    const H = 300;
+    const ctx = makeCtx(W, H);
+    terraworldV1Generator(ctx, W, H, { seed: 42 });
+    const data = ctx.getImageData(0, 0, W, H).data;
+    const palette = getTheme("default").palette;
+    // Pre-extract palette RGB triples
+    const colors = [palette.surface, palette.mid, palette.rock, palette.deep].map((hex) => ({
+      r: (hex >> 16) & 0xff,
+      g: (hex >> 8) & 0xff,
+      b: hex & 0xff,
+    }));
+    // Sample a handful of opaque pixels; each must match one of the palette colors
+    let matched = 0;
+    let sampled = 0;
+    for (let i = 0; i < data.length && sampled < 100; i += 4) {
+      if (data[i + 3] !== 255) continue;
+      sampled++;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (colors.some((c) => c.r === r && c.g === g && c.b === b)) matched++;
+    }
+    expect(sampled).toBeGreaterThan(0);
+    expect(matched).toBe(sampled);
   });
 
   it("canyon theme: middle column has at least one transparent pixel (gap exists)", () => {
