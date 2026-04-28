@@ -236,7 +236,7 @@ export class Simulation {
     const marginXPx = Math.max(200, this.widthPx * 0.1);
     this.killMinXMeters = -marginXPx / 30;
     this.killMaxXMeters = (this.widthPx + marginXPx) / 30;
-    this.killMaxYMeters = (this.heightPx + 200) / 30; // Y stays fixed at 200
+    this.killMaxYMeters = (this.heightPx + 200) / 30; // Y margin stays fixed at 200px (bottom kill is fall-out-of-pit, not visual)
     this.world = createPhysicsWorld(init.gravity ?? { x: 0, y: 10 });
     this.terrain = new Terrain({
       world: this.world,
