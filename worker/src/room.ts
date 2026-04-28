@@ -915,7 +915,7 @@ export class Room implements DurableObject {
     // PR 1 debug: hardcode 3 barrels for end-to-end testing.
     // PR 3 will replace this with worldgen output.
     const initialObjects = [
-      { kind: "barrel", xPx: 600,  yPx: 400 },
+      { kind: "barrel", xPx: 600, yPx: 400 },
       { kind: "barrel", xPx: 1280, yPx: 400 },
       { kind: "barrel", xPx: 1960, yPx: 400 },
     ];

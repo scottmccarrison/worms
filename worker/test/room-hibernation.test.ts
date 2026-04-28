@@ -68,7 +68,13 @@ function makeSim(
  * (where the property does not exist yet) and runs correctly once WS-A
  * lands.
  */
-type ObjectLike = { id: string; kind: string; hp: number; dead: boolean; takeDamage(n: number): void };
+type ObjectLike = {
+  id: string;
+  kind: string;
+  hp: number;
+  dead: boolean;
+  takeDamage(n: number): void;
+};
 
 function getObjectsMap(sim: Simulation): Map<string, ObjectLike> | undefined {
   const cast = sim as unknown as { objects?: Map<string, ObjectLike> };
@@ -94,15 +100,20 @@ describe("Room DO hibernation: objects", () => {
     // WS-A adds `objects` to SimState; access via cast so the test
     // compiles before that field exists.
     const beforeState = sim.toSimState() as unknown as {
-      objects?: Array<{ id: string; kind: string; x: number; y: number; hp: number; dead: boolean }>;
+      objects?: Array<{
+        id: string;
+        kind: string;
+        x: number;
+        y: number;
+        hp: number;
+        dead: boolean;
+      }>;
     };
 
     // Guard: if WS-A's objects infrastructure has not been merged yet,
     // skip rather than fail. The test documents the expected contract.
     if (beforeState.objects === undefined) {
-      console.warn(
-        "[room-hibernation] SKIP: objects not in SimState yet - waiting for WS-A merge",
-      );
+      console.warn("[room-hibernation] SKIP: objects not in SimState yet - waiting for WS-A merge");
       return;
     }
 
@@ -156,9 +167,7 @@ describe("Room DO hibernation: objects", () => {
 
     // Guard: if WS-A's objects map has not been merged yet, skip.
     if (objMap === undefined || objMap === null) {
-      console.warn(
-        "[room-hibernation] SKIP: sim.objects not present yet - waiting for WS-A merge",
-      );
+      console.warn("[room-hibernation] SKIP: sim.objects not present yet - waiting for WS-A merge");
       return;
     }
 
@@ -214,9 +223,7 @@ describe("Room DO hibernation: objects", () => {
 
     // Guard: if WS-A's objects map has not been merged yet, skip.
     if (objMap === undefined || objMap === null) {
-      console.warn(
-        "[room-hibernation] SKIP: sim.objects not present yet - waiting for WS-A merge",
-      );
+      console.warn("[room-hibernation] SKIP: sim.objects not present yet - waiting for WS-A merge");
       return;
     }
 

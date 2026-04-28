@@ -780,11 +780,7 @@ describe("Simulation - objects", () => {
     sim.applyFire("Red-1");
 
     // Tick until the barrel is gone from toSimState().
-    const { events } = tickUntil(
-      sim,
-      () => sim.toSimState().objects.length === 0,
-      200,
-    );
+    const { events } = tickUntil(sim, () => sim.toSimState().objects.length === 0, 200);
     // The barrel should eventually be destroyed.
     expect(sim.toSimState().objects).toHaveLength(0);
     void events;
@@ -818,11 +814,7 @@ describe("Simulation - objects", () => {
     sim.applySelectWeapon("Red-1", "bazooka");
     sim.applyFire("Red-1");
 
-    const { events } = tickUntil(
-      sim,
-      (evs) => evs.some((e) => e.type === "object_destroy"),
-      200,
-    );
+    const { events } = tickUntil(sim, (evs) => evs.some((e) => e.type === "object_destroy"), 200);
     const destroyEvent = events.find((e) => e.type === "object_destroy");
     expect(destroyEvent).toBeDefined();
     expect((destroyEvent as { cause: string }).cause).toBe("explode");

@@ -61,10 +61,7 @@ export class ObjectInstance {
     });
 
     this.body.createFixture({
-      shape: new Box(
-        toMeters(config.hitbox.widthPx / 2),
-        toMeters(config.hitbox.heightPx / 2),
-      ),
+      shape: new Box(toMeters(config.hitbox.widthPx / 2), toMeters(config.hitbox.heightPx / 2)),
       density: 1,
       friction: 0.6,
       restitution: 0.1,
@@ -109,7 +106,16 @@ export class ObjectInstance {
   }
 
   /** For SerializedSim during DO hibernation. */
-  serialize(): { id: string; kind: string; x: number; y: number; vx: number; vy: number; hp: number; flags: number } {
+  serialize(): {
+    id: string;
+    kind: string;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    hp: number;
+    flags: number;
+  } {
     const state = this.toRenderState();
     return {
       id: state.id,
