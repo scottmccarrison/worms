@@ -5,6 +5,8 @@ export const MATERIAL_AIR = 0;
 export const MATERIAL_DIRT = 1;
 export const MATERIAL_ROCK = 2;
 export const MATERIAL_STONE = 3;
+/** Theme-specific surface crust (grass, snow, sand, scorched, etc.). Color comes from theme.palette.surface at render time. */
+export const MATERIAL_CRUST = 4;
 
 /** Mask byte values. */
 export const MASK_AIR = 0;
