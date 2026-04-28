@@ -1,4 +1,4 @@
-interface Tuning {
+export interface Tuning {
   world: { gravityY: number };
   retreat: {
     windowMs: number;
@@ -97,6 +97,47 @@ interface Tuning {
   wind: {
     forceNewtonsPerUnit: number;
   };
+  worldgen: {
+    /** Surface heightmap baseline as fraction of world height. Matches existing terraworld baseY = height * 0.55. */
+    surfaceBaselineFrac: number;
+    heightmap: {
+      /** Octave 1 (base): broad rolling-hills stride in pixels. Matches existing terraworld baseStride = 256. */
+      baseStride: number;
+      /** Octave 1 amplitude as fraction of world height. Matches existing baseAmp = height * 0.08. */
+      baseAmpFrac: number;
+      /** Octave 2 (detail): fine-noise stride. Matches existing detailStride = 96. */
+      detailStride: number;
+      /** Octave 2 amplitude as fraction of world height. Matches existing detailAmp = height * 0.02. */
+      detailAmpFrac: number;
+      /** Octave 3 (mountains): low-frequency peak stride. New for v1; gated by theme.flags.wantsPeaks. */
+      mountainStride: number;
+      /** Octave 3 amplitude as fraction of world height. */
+      mountainAmpFrac: number;
+      /** Smoothstep range over which the mountain octave's contribution ramps from 0 to full. Tuple [lo, hi] in [0, 1]. */
+      mountainSmoothstepLo: number;
+      mountainSmoothstepHi: number;
+    };
+    materialBands: {
+      /** Pixels of dirt material below the surface crust before transitioning to rock. */
+      dirtDepthPx: number;
+      /** Pixels of rock below the dirt band before transitioning to stone. Beyond this is stone. */
+      rockDepthPx: number;
+    };
+    crust: {
+      /** Pixels of theme-specific surface crust material (snow, grass, sand, etc.) overwriting the top of the dirt band. */
+      depthPx: number;
+    };
+    hygiene: {
+      /** Minimum mask-island size (in pixels) to keep during FinalizeMask. Smaller than this is removed as orphan debris. */
+      thresholdPx: number;
+    };
+    spawn: {
+      /** Minimum spacing between spawn candidates in pixels. */
+      densityPx: number;
+      /** Minimum spawns per team. Below this, ValidateSpawnCoherence logs a warning. */
+      minPerTeam: number;
+    };
+  };
   camera: {
     turnZoomOutMs: number;
     turnHoldMinMs: number;
@@ -187,6 +228,33 @@ export const tuning: Tuning = {
   },
   // Mirror of worker/src/sim/simulation.ts WIND_FORCE - keep in sync.
   wind: { forceNewtonsPerUnit: 0.8 },
+  worldgen: {
+    surfaceBaselineFrac: 0.55,
+    heightmap: {
+      baseStride: 256,
+      baseAmpFrac: 0.08,
+      detailStride: 96,
+      detailAmpFrac: 0.02,
+      mountainStride: 512,
+      mountainAmpFrac: 0.18,
+      mountainSmoothstepLo: 0.3,
+      mountainSmoothstepHi: 0.7,
+    },
+    materialBands: {
+      dirtDepthPx: 6,
+      rockDepthPx: 60,
+    },
+    crust: {
+      depthPx: 3,
+    },
+    hygiene: {
+      thresholdPx: 16,
+    },
+    spawn: {
+      densityPx: 200,
+      minPerTeam: 2,
+    },
+  },
   camera: {
     turnZoomOutMs: 800,
     turnHoldMinMs: 700,
