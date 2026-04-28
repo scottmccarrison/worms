@@ -27,6 +27,7 @@ export interface ThemeParams {
   minSpawnsPerTeam?: number;
   bandDirtDepthPx?: number;
   bandRockDepthPx?: number;
+  caveAmbientAttemptFactor?: number;
 }
 
 export interface ThemePalette {
