@@ -174,12 +174,33 @@ export interface ProjectileRenderState {
 }
 
 /**
+ * Render-ready object state. One entry per world object (barrel, crate, etc).
+ * Positions + velocities are in pixels / pixels-per-second.
+ *
+ * Stub matching the WS-A contract. WS-A's full version in
+ * feature/object-interaction-server will replace this at integration.
+ */
+export interface ObjectRenderState {
+  id: string;
+  kind: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  dead: boolean;
+  flags: number;
+}
+
+/**
  * Full sim snapshot at a given server tick. Broadcast at 20Hz.
  */
 export interface SimState {
   tick: number;
   worms: WormRenderState[];
   projectiles: ProjectileRenderState[];
+  /** World objects (barrels, crates, etc). Added in object-interaction PR 1. */
+  objects: ObjectRenderState[];
   activeTeamId: string;
   activeWormId: string;
   /** ms-epoch time at which the active turn ends (client ticks down locally). */
@@ -235,6 +256,17 @@ export interface WormDiedEvent {
 }
 
 /**
+ * A world object was destroyed. Clients play VFX and remove the sprite.
+ *
+ * Stub matching the WS-A contract. WS-A's full version will replace this at
+ * integration.
+ */
+export interface ObjectDestroyEvent {
+  id: string;
+  cause: "explode" | "open" | "remove";
+}
+
+/**
  * Sent to the originating client (not broadcast) when a fire input is
  * rejected. The client shows a brief toast above the active worm so the
  * player knows why their shot did not fire.
@@ -285,6 +317,7 @@ export type ServerMsg =
   | ({ type: "fire_event" } & FireEvent)
   | ({ type: "damage_event" } & DamageEvent)
   | ({ type: "worm_died" } & WormDiedEvent)
+  | ({ type: "object_destroy" } & ObjectDestroyEvent)
   | { type: "error"; code: string; message: string }
   | FireRejectedMessage;
 

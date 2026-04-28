@@ -18,6 +18,8 @@ export {
   type FireRejectedMessage,
   type LobbyPlayer,
   type LobbyState,
+  type ObjectDestroyEvent,
+  type ObjectRenderState,
   type ProjectileRenderState,
   type ServerMsg,
   type SimState,
@@ -51,3 +53,4 @@ export type FireEventMessage = Extract<ServerMsg, { type: "fire_event" }>;
 export type DamageEventMessage = Extract<ServerMsg, { type: "damage_event" }>;
 export type WormDiedMessage = Extract<ServerMsg, { type: "worm_died" }>;
 export type FireRejectedMsg = Extract<ServerMsg, { type: "fire_rejected" }>;
+export type ObjectDestroyMessage = Extract<ServerMsg, { type: "object_destroy" }>;
