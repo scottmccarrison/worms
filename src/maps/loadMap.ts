@@ -68,5 +68,12 @@ export function loadMap(
     });
   }
 
-  return { config: entry.config, mask: canvas, spawnPoints };
+  return {
+    config: entry.config,
+    mask: canvas,
+    spawnPoints,
+    materialMap: generatorResult?.materialMap,
+    widthPx,
+    heightPx,
+  };
 }

@@ -127,6 +127,8 @@ export interface SimulationInit {
   widthPx: number;
   heightPx: number;
   mask: Uint8Array;
+  /** Per-pixel material codes. Optional; absent for legacy maps - all cuts succeed. */
+  materialMap?: Uint8Array;
   teams: SimTeamInit[];
   seed: number;
   logCtx?: () => LogContext;
@@ -235,6 +237,8 @@ export class Simulation {
       widthPx: init.widthPx,
       heightPx: init.heightPx,
       mask: init.mask,
+      materialMap: init.materialMap, // optional, undefined for legacy maps
+      hardness: { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 }, // Mirror of src/tuning.ts worldgen.materialHardness
     });
 
     const ammoTemplate = defaultAmmoForMatch();

@@ -1,6 +1,7 @@
 import type { Scene } from "phaser";
 import { Box } from "planck";
 import type { Body } from "planck";
+import { gateCutByMaterial } from "../maps/world";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters } from "../physics/scale";
 import { applyStratumPaint } from "./stratumPaint";
@@ -27,6 +28,10 @@ export interface TerrainInit {
    * generators rely on stratumPaint.
    */
   prePainted?: boolean;
+  /** Per-pixel material codes. When provided, cuts gate hard materials by radius. */
+  materialMap?: Uint8Array;
+  /** Material hardness thresholds (mirrors src/tuning.ts worldgen.materialHardness). */
+  hardness?: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
 }
 
 export class Terrain {
@@ -40,6 +45,8 @@ export class Terrain {
   private readonly widthPx: number;
   private readonly heightPx: number;
   private readonly rowHeight: number;
+  private readonly materialMap: Uint8Array | null;
+  private readonly hardness: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
   private readonly bodyMeta: WeakMap<Body, TerrainBodyMeta> = new WeakMap();
   private readonly terrainBodies: Set<Body> = new Set();
   private readonly canvasTexture: Phaser.Textures.CanvasTexture;
@@ -60,6 +67,8 @@ export class Terrain {
     this.heightPx = init.heightPx;
     this.textureKey = init.textureKey ?? "terrain";
     this.rowHeight = init.rowHeight ?? TERRAIN_ROW_HEIGHT;
+    this.materialMap = init.materialMap ?? null;
+    this.hardness = init.hardness ?? { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
 
     // Create internal canvas buffer and copy source mask into it
     this.buffer = document.createElement("canvas");
@@ -133,15 +142,22 @@ export class Terrain {
     const yMin = Math.max(0, Math.floor(rawYMin / this.rowHeight) * this.rowHeight);
     const yMax = Math.min(this.heightPx, Math.ceil(rawYMax / this.rowHeight) * this.rowHeight);
 
-    // Step 3: Erase pixels via destination-out composite; restore composite
-    const prevOp = this.ctx.globalCompositeOperation;
-    this.ctx.globalCompositeOperation = "destination-out";
-    for (const cut of this.pending) {
-      this.ctx.beginPath();
-      this.ctx.arc(cut.x, cut.y, cut.r, 0, Math.PI * 2);
-      this.ctx.fill();
+    // Step 3: Erase pixels - bulk destination-out for legacy (no materialMap),
+    // or per-pixel material-aware path when materialMap is present.
+    if (this.materialMap === null) {
+      const prevOp = this.ctx.globalCompositeOperation;
+      this.ctx.globalCompositeOperation = "destination-out";
+      for (const cut of this.pending) {
+        this.ctx.beginPath();
+        this.ctx.arc(cut.x, cut.y, cut.r, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+      this.ctx.globalCompositeOperation = prevOp;
+    } else {
+      for (const cut of this.pending) {
+        this.applyMaterialAwareCut(cut);
+      }
     }
-    this.ctx.globalCompositeOperation = prevOp;
 
     // Step 4: Collect terrain bodies with rowY in [yMin - rowHeight, yMax + rowHeight]
     const victims: Body[] = [];
@@ -187,6 +203,35 @@ export class Terrain {
   /** Return a snapshot of the terrain mask pixels for spawn point scanning. */
   getMaskImageData(): ImageData {
     return this.ctx.getImageData(0, 0, this.widthPx, this.heightPx);
+  }
+
+  private applyMaterialAwareCut(cut: { x: number; y: number; r: number }): void {
+    if (this.materialMap === null) return;
+    const x0 = Math.max(0, Math.floor(cut.x - cut.r));
+    const x1 = Math.min(this.widthPx, Math.ceil(cut.x + cut.r));
+    const y0 = Math.max(0, Math.floor(cut.y - cut.r));
+    const y1 = Math.min(this.heightPx, Math.ceil(cut.y + cut.r));
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+
+    const imageData = this.ctx.getImageData(x0, y0, w, h);
+    const data = imageData.data;
+    const r2 = cut.r * cut.r;
+
+    for (let py = 0; py < h; py++) {
+      const worldY = y0 + py;
+      for (let px = 0; px < w; px++) {
+        const worldX = x0 + px;
+        const dx = worldX + 0.5 - cut.x;
+        const dy = worldY + 0.5 - cut.y;
+        if (dx * dx + dy * dy > r2) continue;
+        const material = this.materialMap[worldY * this.widthPx + worldX];
+        if (!gateCutByMaterial(material, cut.r, this.hardness)) continue;
+        data[(py * w + px) * 4 + 3] = 0;
+      }
+    }
+    this.ctx.putImageData(imageData, x0, y0);
   }
 
   private buildBodiesInRegion(yStart: number, yEnd: number): void {

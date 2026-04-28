@@ -12,6 +12,7 @@
  */
 
 import type { Scene } from "phaser";
+import { gateCutByMaterial } from "../maps/world";
 import { applyStratumPaint } from "./stratumPaint";
 
 export interface TerrainRendererInit {
@@ -28,6 +29,10 @@ export interface TerrainRendererInit {
    * legacy generators leave RGB unpainted and rely on stratumPaint.
    */
   prePainted?: boolean;
+  /** Per-pixel material codes. When provided, cutCircle gates hard materials by radius. */
+  materialMap?: Uint8Array;
+  /** Material hardness thresholds (mirrors src/tuning.ts worldgen.materialHardness). */
+  hardness?: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
 }
 
 export class TerrainRenderer {
@@ -38,6 +43,8 @@ export class TerrainRenderer {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly widthPx: number;
   private readonly heightPx: number;
+  private readonly materialMap: Uint8Array | null;
+  private readonly hardness: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
   private readonly canvasTexture: Phaser.Textures.CanvasTexture;
 
   /** Seen terrain_cut seqs for idempotent replay. */
@@ -47,6 +54,8 @@ export class TerrainRenderer {
     this.widthPx = init.widthPx;
     this.heightPx = init.heightPx;
     this.textureKey = init.textureKey ?? "terrain";
+    this.materialMap = init.materialMap ?? null;
+    this.hardness = init.hardness ?? { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
 
     this.buffer = document.createElement("canvas");
     this.buffer.width = this.widthPx;
@@ -81,19 +90,56 @@ export class TerrainRenderer {
    * `seq` is optional; when present we dedupe so duplicate `terrain_cut`
    * messages don't double-cut. This is the network path's equivalent of
    * Terrain.flushPendingCuts minus the body rebuild.
+   *
+   * When materialMap is present, uses per-pixel material gating so hard
+   * materials (ROCK, STONE) survive cuts below their configured radius thresholds.
+   * Without materialMap, falls back to the bulk destination-out path.
    */
   cutCircle(xPx: number, yPx: number, rPx: number, seq?: number): void {
     if (seq !== undefined) {
       if (this.seenSeqs.has(seq)) return;
       this.seenSeqs.add(seq);
     }
-    const prev = this.ctx.globalCompositeOperation;
-    this.ctx.globalCompositeOperation = "destination-out";
-    this.ctx.beginPath();
-    this.ctx.arc(xPx, yPx, rPx, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.globalCompositeOperation = prev;
+    if (this.materialMap === null) {
+      const prev = this.ctx.globalCompositeOperation;
+      this.ctx.globalCompositeOperation = "destination-out";
+      this.ctx.beginPath();
+      this.ctx.arc(xPx, yPx, rPx, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.globalCompositeOperation = prev;
+    } else {
+      this.applyMaterialAwareCut(xPx, yPx, rPx);
+    }
     this.canvasTexture.refresh();
+  }
+
+  private applyMaterialAwareCut(xPx: number, yPx: number, rPx: number): void {
+    if (this.materialMap === null) return;
+    const x0 = Math.max(0, Math.floor(xPx - rPx));
+    const x1 = Math.min(this.widthPx, Math.ceil(xPx + rPx));
+    const y0 = Math.max(0, Math.floor(yPx - rPx));
+    const y1 = Math.min(this.heightPx, Math.ceil(yPx + rPx));
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+
+    const imageData = this.ctx.getImageData(x0, y0, w, h);
+    const data = imageData.data;
+    const r2 = rPx * rPx;
+
+    for (let py = 0; py < h; py++) {
+      const worldY = y0 + py;
+      for (let px = 0; px < w; px++) {
+        const worldX = x0 + px;
+        const dx = worldX + 0.5 - xPx;
+        const dy = worldY + 0.5 - yPx;
+        if (dx * dx + dy * dy > r2) continue;
+        const material = this.materialMap[worldY * this.widthPx + worldX];
+        if (!gateCutByMaterial(material, rPx, this.hardness)) continue;
+        data[(py * w + px) * 4 + 3] = 0;
+      }
+    }
+    this.ctx.putImageData(imageData, x0, y0);
   }
 
   /** For debug: snapshot current mask pixels. */

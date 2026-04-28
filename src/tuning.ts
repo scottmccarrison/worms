@@ -127,6 +127,12 @@ export interface Tuning {
       /** Pixels of theme-specific surface crust material (snow, grass, sand, etc.) overwriting the top of the dirt band. */
       depthPx: number;
     };
+    materialHardness: {
+      /** Minimum cut radius (pixels) at or above which ROCK pixels can be removed. Below this, ROCK survives the cut. */
+      rockMinRadiusPx: number;
+      /** Minimum cut radius (pixels) at or above which STONE pixels can be removed. Below this, STONE survives the cut. */
+      stoneMinRadiusPx: number;
+    };
     hygiene: {
       /** Minimum mask-island size in pixels. Components smaller than this are
        *  removed as orphan debris by FinalizeMask. Default 1024 is approximately
@@ -260,6 +266,10 @@ export const tuning: Tuning = {
     },
     crust: {
       depthPx: 3,
+    },
+    materialHardness: {
+      rockMinRadiusPx: 30,
+      stoneMinRadiusPx: 60,
     },
     hygiene: {
       thresholdPx: 1024,

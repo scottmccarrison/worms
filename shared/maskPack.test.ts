@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { packMask, packedMaskByteLength, unpackMask } from "./maskPack";
+import {
+  packMask,
+  packMaterialBytes,
+  packedMaskByteLength,
+  unpackMask,
+  unpackMaterialBytes,
+} from "./maskPack";
 
 describe("maskPack", () => {
   it("round-trips small arrays", () => {
@@ -35,4 +41,47 @@ describe("maskPack", () => {
     }
     expect(mismatch).toBe(-1);
   }, 30000);
+});
+
+describe("packMaterialBytes / unpackMaterialBytes", () => {
+  it("round-trips an even-length array", () => {
+    const input = new Uint8Array([0, 1, 2, 3, 4, 0, 1, 2]);
+    const packed = packMaterialBytes(input);
+    const out = unpackMaterialBytes(packed, input.length);
+    expect(Array.from(out)).toEqual(Array.from(input));
+  });
+
+  it("round-trips an odd-length array", () => {
+    const input = new Uint8Array([3, 1, 4, 1, 5]);
+    const packed = packMaterialBytes(input);
+    const out = unpackMaterialBytes(packed, input.length);
+    expect(Array.from(out)).toEqual(Array.from(input));
+  });
+
+  it("round-trips all-zeros", () => {
+    const input = new Uint8Array(10);
+    const packed = packMaterialBytes(input);
+    const out = unpackMaterialBytes(packed, input.length);
+    expect(Array.from(out)).toEqual(Array.from(input));
+  });
+
+  it("round-trips all-fours (max material value in current schema)", () => {
+    const input = new Uint8Array(10).fill(4);
+    const packed = packMaterialBytes(input);
+    const out = unpackMaterialBytes(packed, input.length);
+    expect(Array.from(out)).toEqual(Array.from(input));
+  });
+
+  it("round-trips mixed materials (0..4)", () => {
+    const input = new Uint8Array([0, 1, 2, 3, 4, 4, 3, 2, 1, 0, 2, 2]);
+    const packed = packMaterialBytes(input);
+    const out = unpackMaterialBytes(packed, input.length);
+    expect(Array.from(out)).toEqual(Array.from(input));
+  });
+
+  it("packed length is ceil(n/2)", () => {
+    expect(packMaterialBytes(new Uint8Array(6)).length).toBe(3);
+    expect(packMaterialBytes(new Uint8Array(7)).length).toBe(4);
+    expect(packMaterialBytes(new Uint8Array(0)).length).toBe(0);
+  });
 });

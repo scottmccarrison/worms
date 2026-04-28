@@ -23,6 +23,7 @@ import {
   packMask as packMaskBytes,
   packedMaskByteLength,
   unpackMask,
+  unpackMaterialBytes,
 } from "../../shared/maskPack.js";
 
 import { type LogContext, dlog } from "./debug/logger.js";
@@ -118,6 +119,8 @@ interface SimBootstrap {
   heightPx: number;
   /** Base64-encoded initial terrain mask. */
   maskBase64: string;
+  /** Per-pixel material map (4-bit packed, base64). Optional; absent for legacy maps. */
+  materialMapBase64?: string;
   teams: Array<{
     id: string;
     wormIds: string[];
@@ -251,10 +254,16 @@ export class Room implements DurableObject {
       packedBytes.length === pixelCount
         ? packedBytes // legacy: old bootstrap stored unpacked form directly
         : unpackMask(packedBytes, pixelCount);
+    let reloadMaterialMap: Uint8Array | undefined;
+    if (bootstrap.materialMapBase64) {
+      const packedMat = base64ToBytes(bootstrap.materialMapBase64);
+      reloadMaterialMap = unpackMaterialBytes(packedMat, pixelCount);
+    }
     this.sim = new Simulation({
       widthPx: bootstrap.widthPx,
       heightPx: bootstrap.heightPx,
       mask,
+      materialMap: reloadMaterialMap,
       teams: bootstrap.teams,
       seed: bootstrap.seed,
       logCtx: () => this.logCtx(),
@@ -852,11 +861,15 @@ export class Room implements DurableObject {
     // Fallback to the flat test map is retained for backcompat / tests.
     const startMsg = msg as {
       mask?: string;
+      materialMapBase64?: string;
       spawnPoints?: Array<{ xPx: number; yPx: number }>;
     };
     const hostMask = typeof startMsg.mask === "string" ? startMsg.mask : null;
+    const hostMaterialMapBase64 =
+      typeof startMsg.materialMapBase64 === "string" ? startMsg.materialMapBase64 : null;
     const hostSpawns = Array.isArray(startMsg.spawnPoints) ? startMsg.spawnPoints : null;
     let mask: Uint8Array;
+    let materialMap: Uint8Array | undefined;
     let packedMaskBase64: string;
     let mapSpawns: Array<{ xPx: number; yPx: number }>;
     if (hostMask && hostSpawns && hostSpawns.length > 0) {
@@ -870,16 +883,24 @@ export class Room implements DurableObject {
         // Preserve the original packed base64 so game_started forwards the packed form.
         packedMaskBase64 = hostMask;
         mapSpawns = hostSpawns;
+        // Unpack the material map if provided by the host.
+        if (hostMaterialMapBase64) {
+          const packedMat = base64ToBytes(hostMaterialMapBase64);
+          const pixelCount = WORLD_WIDTH_PX * WORLD_HEIGHT_PX;
+          materialMap = unpackMaterialBytes(packedMat, pixelCount);
+        }
       } catch (err) {
         console.warn("[start_game] bad mask from host, using flat fallback:", err);
         mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
         packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
         mapSpawns = [];
+        materialMap = undefined;
       }
     } else {
       mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
       packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
       mapSpawns = [];
+      materialMap = undefined;
     }
 
     // Distribute map spawn points round-robin across teams + worms. If we
@@ -905,6 +926,7 @@ export class Room implements DurableObject {
       heightPx: WORLD_HEIGHT_PX,
       // Store the packed base64 so game_started forwards the packed wire form to clients.
       maskBase64: packedMaskBase64,
+      materialMapBase64: hostMaterialMapBase64 ?? undefined,
       teams: simTeams,
       seed,
       mapId: lobby.selectedMapId,
@@ -924,6 +946,7 @@ export class Room implements DurableObject {
       widthPx: WORLD_WIDTH_PX,
       heightPx: WORLD_HEIGHT_PX,
       mask,
+      materialMap,
       teams: simTeams,
       seed,
       logCtx: () => this.logCtx(),
@@ -973,6 +996,7 @@ export class Room implements DurableObject {
       widthPx: bootstrap.widthPx,
       heightPx: bootstrap.heightPx,
       mask: bootstrap.maskBase64,
+      materialMapBase64: bootstrap.materialMapBase64,
       spawnPoints: bootstrap.spawnPoints ?? [],
     };
   }

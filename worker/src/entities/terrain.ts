@@ -23,6 +23,10 @@ import type { Body } from "planck";
 import { toMeters } from "../physics/scale.js";
 import { TERRAIN_ROW_HEIGHT, scanMaskForBoxes } from "../terrain/terrainAlgorithm.js";
 
+// Mirror of src/maps/world.ts material constants - keep in sync.
+const MATERIAL_ROCK = 2;
+const MATERIAL_STONE = 3;
+
 export interface TerrainInit {
   world: World;
   widthPx: number;
@@ -30,6 +34,10 @@ export interface TerrainInit {
   /** Initial mask. Non-zero = solid. Copied into internal buffer. */
   mask: Uint8Array;
   rowHeight?: number;
+  /** Per-pixel material codes. If omitted, all cuts succeed (legacy behavior). */
+  materialMap?: Uint8Array;
+  /** Material hardness thresholds. If omitted, defaults to {30, 60} (mirror of src/tuning.ts worldgen.materialHardness). */
+  hardness?: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
 }
 
 export interface TerrainCut {
@@ -51,6 +59,8 @@ export class Terrain {
   private readonly world: World;
   private readonly mask: Uint8Array;
   private readonly rowHeight: number;
+  private readonly materialMap: Uint8Array | null;
+  private readonly hardness: { rockMinRadiusPx: number; stoneMinRadiusPx: number };
   private readonly bodyMeta: WeakMap<Body, TerrainBodyMeta> = new WeakMap();
   private readonly terrainBodies: Set<Body> = new Set();
 
@@ -63,10 +73,20 @@ export class Terrain {
         `Terrain: mask length ${init.mask.length} does not match ${init.widthPx}x${init.heightPx}`,
       );
     }
+    if (
+      init.materialMap !== undefined &&
+      init.materialMap.length !== init.widthPx * init.heightPx
+    ) {
+      throw new Error(
+        `Terrain: materialMap length ${init.materialMap.length} does not match ${init.widthPx}x${init.heightPx}`,
+      );
+    }
     this.world = init.world;
     this.widthPx = init.widthPx;
     this.heightPx = init.heightPx;
     this.rowHeight = init.rowHeight ?? TERRAIN_ROW_HEIGHT;
+    this.materialMap = init.materialMap ?? null;
+    this.hardness = init.hardness ?? { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 };
 
     // Copy the mask so the caller can drop its reference.
     this.mask = new Uint8Array(init.mask);
@@ -178,6 +198,11 @@ export class Terrain {
       for (let x = x0; x < x1; x++) {
         const dx = x + 0.5 - cxPx;
         if (dx * dx + dy2 <= r2) {
+          if (this.materialMap !== null) {
+            const mat = this.materialMap[rowOffset + x];
+            if (mat === MATERIAL_ROCK && rPx < this.hardness.rockMinRadiusPx) continue;
+            if (mat === MATERIAL_STONE && rPx < this.hardness.stoneMinRadiusPx) continue;
+          }
           this.mask[rowOffset + x] = 0;
         }
       }

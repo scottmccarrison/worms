@@ -23,3 +23,27 @@ export function unpackMask(packed: Uint8Array, pixelCount: number): Uint8Array {
 export function packedMaskByteLength(pixelCount: number): number {
   return Math.ceil(pixelCount / 8);
 }
+
+/**
+ * Pack a per-pixel material map (0..15) into 2 pixels per byte (4-bit each).
+ * Material range is 0..4 today; 4-bit packing leaves headroom.
+ * Byte i stores: lo nibble = pixel 2i, hi nibble = pixel 2i+1.
+ */
+export function packMaterialBytes(m: Uint8Array): Uint8Array {
+  const out = new Uint8Array(Math.ceil(m.length / 2));
+  for (let i = 0; i < m.length; i += 2) {
+    const lo = m[i] & 0xf;
+    const hi = (m[i + 1] ?? 0) & 0xf;
+    out[i >> 1] = lo | (hi << 4);
+  }
+  return out;
+}
+
+export function unpackMaterialBytes(packed: Uint8Array, length: number): Uint8Array {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    const b = packed[i >> 1] ?? 0;
+    out[i] = (i & 1) === 0 ? b & 0xf : (b >> 4) & 0xf;
+  }
+  return out;
+}
