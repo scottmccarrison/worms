@@ -1,4 +1,4 @@
-interface Tuning {
+export interface Tuning {
   world: { gravityY: number };
   retreat: {
     windowMs: number;
