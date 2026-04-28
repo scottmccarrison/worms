@@ -181,6 +181,42 @@ When that draft is written, this section gets updated to point at it.
 
 ---
 
+## Process appendix: guiding questions for architectural decisions
+
+Version 2 of world-gen (the directory of one-off mask drawers) felt right when we shipped it. It bit us when the architecture revealed itself as fickle. The shape of that mistake: we made decisions from confident-sounding first-principles reasoning without grounding them in references or research. The discipline below exists so version 3 (this pipeline) does not repeat that pattern.
+
+Apply these five questions at every architecturally-loaded step. Not every line of code, but every decision that locks in a contract, a data shape, an ordering rule, or a category boundary:
+
+1. **Bible cite.** Which section of `world-gen-philosophy.md` speaks to this? If the bible is silent, say so plainly. The bible is not a substitute for a decision, but knowing it is silent is itself information - it tells us we are filling in a gap the philosophy did not name, and that the choice we make is a worms-specific commitment, not a Terraria-derived one.
+2. **Consensus cite.** Which prior decision in `world-gen-design.md` or `world-gen-passes-v1.md` already constrains this? Reusing prior consensus is cheaper than re-litigating, and a new decision that contradicts an old one needs to be flagged as such, not silently introduced.
+3. **Prior art.** How do comparable shipped systems handle this? Have we *researched*, or are we *assuming*? First-principles reasoning is necessary but not sufficient. A confident-sounding architecture with no research is what produced version 2. If we cannot name a real shipped reference, we have not done the work.
+4. **Simplest sufficient.** Is this solving a problem we *have*, or one we *imagine*? Match the discipline that kept `SmoothMaskEdges` out of v1 (no evidence of need) and that resists pre-engineering for hypothetical scale. Speculative optimization is a category of mistake; the solution is to wait for measurement.
+5. **Assumption-that-bites.** What are we taking for granted that the implementation might invalidate? Name the specific way we would learn we were wrong. The hardcoded-island problem in version 2 was a takes-for-granted that bit us when we tried to scale; the canyon-void edge case in the original v1 draft was another. If we cannot name how we would discover the assumption was wrong, we have not stress-tested it.
+
+If any answer is "I do not know," that is the signal to stop and research before deciding. The cost of pausing for prior art is hours; the cost of making the wrong architectural call is rewriting a third version.
+
+---
+
+## 11. Concrete data shapes (decided)
+
+This section captures data-layout decisions for the v1 pipeline. Each was made by applying the Process appendix's five questions to a specific architectural choice. Decisions are listed with their reasoning so future readers see *how* we got here, not just *what* we picked.
+
+### Mask and material map: Uint8Array, not HTMLCanvasElement
+
+**Decision:** The pipeline's mask and material map are `Uint8Array(widthPx * heightPx)`, one byte per pixel. Mask: 0 = air, 1 = solid. Material map: 0 = air, 1 = dirt, 2 = rock, 3 = stone, etc. The renderer materializes a canvas at the boundary; gen has no DOM dependencies.
+
+**Why (applying the five questions):**
+
+1. **Bible cite.** Silent. Section 5 of `world-gen-philosophy.md` says "single shared mutable canvas, communication via state only" - "canvas" is metaphorical there; the bible does not dictate byte layout. We are filling a worms-specific gap.
+2. **Consensus cite.** Design doc Section 5 deliberately did not lock down the v1 world-state shape ("no premature shape commitment"). The v1 pass list pinned the theme schema and the void-column sentinel, neither of which dictates the buffer type. No prior consensus.
+3. **Prior art.** The codebase already uses `Uint8Array(width * height)` server-side (`worker/src/entities/terrain.ts:52`) because Workers has no Canvas2D. The wire format is 1-bit-packed bytes (`shared/maskPack.js`). Two parallel `scanMaskForBoxes` implementations already bridge the client/server divide. Convergent pattern from researched prior art: native engines (Liero, Cortex Command, Noita) and falling-sand simulators (Sandspiel) uniformly choose flat indexed pixel buffers as canonical state. Browser-only Phaser Worms-likes use canvas-as-mask, but every example found is single-player without an authoritative server. Anything with a client/server or sim/render split converges on byte buffers.
+4. **Simplest sufficient.** Counter-intuitively, Uint8Array is the simpler path given existing topology. Host-authoritative gen with canvas requires `canvas -> getImageData -> bit-pack -> wire`. Uint8Array requires `Uint8Array -> bit-pack -> wire`. One fewer host-side conversion. The renderer materializes canvas once at scene start, not per-pass.
+5. **Assumption-that-bites.** Picking canvas locks in host-authoritative gen forever; bites if we ever want server-authoritative gen (cheat prevention, AI bots, lockstep recovery, validation hash) - cost to recover is rewriting all 14 passes. Picking Uint8Array assumes byte indexing is fast enough; bites if a hot pass turns out slower in bytes - localized, recoverable, can use `Uint32Array` aliasing per the Mozilla Hacks technique. The Option A bite is asymmetric and architectural; the Option B bite is narrow.
+
+**Implications.** Foundation `World` struct uses `Uint8Array` for mask and materialMap (always-allocated, no nulls). No DOM dependencies in the pipeline core; gen runs identically in browser, Node, Workers DO, V8 isolate. Renderer adapter at the boundary materializes canvas (one conversion, not 14). The existing `cellularAutomata.ts` already uses `Uint8Array` internally for its CA cells - the refactor is in input/output plumbing, not the algorithm. The existing `findSpawnPoints` takes `Uint8ClampedArray` (RGBA stride 4); the v1 version takes the 1-byte-per-pixel `Uint8Array` directly.
+
+---
+
 ## Done
 
 This document captures consensus on world-gen philosophy as of the conversation that produced it. The bible at `world-gen-philosophy.md` remains the unmodified extraction of Terraria's model. This doc is what we believe and what we are building. They are read together.
