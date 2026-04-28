@@ -31,7 +31,8 @@ export const paintSurfaceCrustPass: Pass = {
 
     for (let x = 0; x < widthPx; x++) {
       const surfY = heightmap[x];
-      if (surfY === undefined || surfY >= heightPx) continue;
+      // Skip undefined, void columns (>= heightPx), or pre-validation negatives.
+      if (surfY === undefined || surfY < 0 || surfY >= heightPx) continue;
       const crustEnd = Math.min(surfY + crustDepth, heightPx);
       for (let y = surfY; y < crustEnd; y++) {
         const idx = y * widthPx + x;

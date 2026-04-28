@@ -1,5 +1,5 @@
 import type { ThemePalette } from "../themes";
-import { MATERIAL_CRUST, MATERIAL_DIRT, MATERIAL_ROCK, MATERIAL_STONE } from "../world";
+import { MASK_SOLID, MATERIAL_CRUST, MATERIAL_DIRT, MATERIAL_ROCK, MATERIAL_STONE } from "../world";
 
 interface Rgb {
   r: number;
@@ -62,7 +62,7 @@ export function paintWorldToContext(
   const data = imageData.data;
 
   for (let i = 0; i < mask.length; i++) {
-    if (mask[i] !== 1) continue; // air: leave at default 0/0/0/0
+    if (mask[i] !== MASK_SOLID) continue; // air: leave at default 0/0/0/0
     const dataIdx = i * 4;
     const m = materialMap[i];
     let rgb: Rgb;

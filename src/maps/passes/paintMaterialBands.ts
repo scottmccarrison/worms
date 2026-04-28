@@ -29,7 +29,9 @@ export const paintMaterialBandsPass: Pass = {
 
     for (let x = 0; x < widthPx; x++) {
       const surfY = heightmap[x];
-      if (surfY === undefined || surfY >= heightPx) continue;
+      // Skip undefined, void columns (>= heightPx), or pre-validation negatives.
+      // GenerateHeightmap clamps to [0, heightPx-1]; defend against invariant breaks.
+      if (surfY === undefined || surfY < 0 || surfY >= heightPx) continue;
       for (let y = surfY; y < heightPx; y++) {
         const idx = y * widthPx + x;
         if (mask[idx] !== MASK_SOLID) continue;
