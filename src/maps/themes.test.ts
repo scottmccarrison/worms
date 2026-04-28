@@ -8,6 +8,7 @@ const FLAG_KEYS: (keyof import("./themes").ThemeFlags)[] = [
   "noFloor",
   "wantsSurfaceCrust",
   "wantsCaveAmbient",
+  "wantsSurfaceDressing",
 ];
 
 describe("THEMES registry", () => {
@@ -55,5 +56,22 @@ describe("getTheme", () => {
     expect(() => getTheme("nonsense")).toThrowError(/Known themes:/);
     expect(() => getTheme("nonsense")).toThrowError(/default/);
     expect(() => getTheme("nonsense")).toThrowError(/canyon/);
+  });
+
+  it("wantsSurfaceDressing is true for all themes except plateau", () => {
+    const dressingEnabled: Record<string, boolean> = {
+      default: true,
+      canyon: true,
+      snow: true,
+      jungle: true,
+      plateau: false,
+      volcanic: true,
+    };
+    for (const tag of EXPECTED_TAGS) {
+      const theme = getTheme(tag);
+      expect(theme.flags.wantsSurfaceDressing, `${tag}.flags.wantsSurfaceDressing`).toBe(
+        dressingEnabled[tag],
+      );
+    }
   });
 });

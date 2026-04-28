@@ -140,6 +140,11 @@ export interface Tuning {
       /** Minimum spawns per team. Below this, ValidateSpawnCoherence logs a warning. */
       minPerTeam: number;
     };
+    surfaceDressing: {
+      /** Average horizontal spacing between surface dressing attempts, in pixels.
+       *  Attempts = floor(widthPx / spacingPx); each attempt picks a random column. */
+      spacingPx: number;
+    };
   };
   camera: {
     turnZoomOutMs: number;
@@ -256,6 +261,9 @@ export const tuning: Tuning = {
     spawn: {
       densityPx: 200,
       minPerTeam: 2,
+    },
+    surfaceDressing: {
+      spacingPx: 40,
     },
   },
   camera: {
