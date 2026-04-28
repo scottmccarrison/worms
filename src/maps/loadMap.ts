@@ -24,15 +24,31 @@ export function loadMap(
   // the original behavior.
   const seed =
     seedOverride !== undefined ? seedOverride : entry.config.generator.seed || Date.now();
-  entry.generator(ctx, widthPx, heightPx, {
+  const generatorResult = entry.generator(ctx, widthPx, heightPx, {
     ...entry.config.generator.options,
     seed,
   });
 
-  // Spawn points: use predefined if present, else scan the mask
+  // Spawn points: precedence is config preset > generator-returned spawnList >
+  // legacy canvas scan fallback.
   let spawnPoints: SurfacePoint[];
   if (entry.config.spawnPoints?.length) {
     spawnPoints = entry.config.spawnPoints;
+  } else if (generatorResult?.spawnList) {
+    // v1 pipeline generators return authoritative spawn data. Interleave the
+    // sides as [L0, R0, L1, R1, ...] so the worker's stride-2 round-robin
+    // (worker/src/room.ts:887-900) produces team-segregated assignment - team
+    // 0 ends up on the left, team 1 on the right. A naive [...left, ...right]
+    // concatenation would clump both teams on whichever side comes first.
+    const { left, right } = generatorResult.spawnList;
+    spawnPoints = [];
+    const maxLen = Math.max(left.length, right.length);
+    for (let i = 0; i < maxLen; i++) {
+      const l = left[i];
+      if (l) spawnPoints.push(l);
+      const r = right[i];
+      if (r) spawnPoints.push(r);
+    }
   } else {
     const imgData = ctx.getImageData(0, 0, widthPx, heightPx);
     // Derive a separate rng for spawn selection. XOR the seed with a constant

@@ -53,4 +53,30 @@ describe("loadMap", () => {
     expect(result.config.name).toBe("Open Field");
     expect(result.config.maxWorms).toBe(4);
   });
+
+  it("v1 map (terraworld_v1): returns spawnPoints from generator-returned spawnList, interleaved L/R", () => {
+    const result = loadMap("terraworld_v1", 1280, 720, 42);
+    expect(result.spawnPoints.length).toBeGreaterThan(0);
+    // With interleave order [L0, R0, L1, R1, ...], adjacent pairs should
+    // straddle the midline (one < midX, the next >= midX) until one side
+    // exhausts. Verify at least the first pair.
+    const midX = Math.floor(1280 / 2);
+    if (result.spawnPoints.length >= 2) {
+      const first = result.spawnPoints[0];
+      const second = result.spawnPoints[1];
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      if (first && second) {
+        // first is from left (xPx < midX), second is from right (xPx >= midX)
+        expect(first.xPx).toBeLessThan(midX);
+        expect(second.xPx).toBeGreaterThanOrEqual(midX);
+      }
+    }
+  });
+
+  it("v1 map (canyon_v1): returns non-empty spawnPoints through the v1 path", () => {
+    const result = loadMap("canyon_v1", 1280, 720, 42);
+    expect(result.config.id).toBe("canyon_v1");
+    expect(result.spawnPoints.length).toBeGreaterThan(0);
+  });
 });

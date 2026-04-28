@@ -1,6 +1,8 @@
 import { applyThemeHeightmapModsPass } from "../passes/applyThemeHeightmapMods";
 import { carveCavesPass } from "../passes/carveCaves";
 import { defineThemePass } from "../passes/defineTheme";
+import { distributeSpawnPointsPass } from "../passes/distributeSpawnPoints";
+import { finalCleanupPass } from "../passes/finalCleanup";
 import { finalizeMaskPass } from "../passes/finalizeMask";
 import { generateHeightmapPass } from "../passes/generateHeightmap";
 import { paintMaterialBandsPass } from "../passes/paintMaterialBands";
@@ -9,6 +11,7 @@ import { paintSurfaceCrustPass } from "../passes/paintSurfaceCrust";
 import { placeCaveAmbientPass } from "../passes/placeCaveAmbient";
 import { placeSurfaceDressingPass } from "../passes/placeSurfaceDressing";
 import { resetPass } from "../passes/reset";
+import { validateSpawnCoherencePass } from "../passes/validateSpawnCoherence";
 import { Pipeline } from "../pipeline";
 import type { MapGenerator } from "../types";
 import { createWorld } from "../world";
@@ -16,7 +19,7 @@ import { paintDecorationToContext } from "./paintDecorationToContext";
 import { paintWorldToContext } from "./paintWorldToContext";
 
 /**
- * v1 pipeline pass order (11 of 14 passes; spawn + validation deferred to PR 6):
+ * v1 pipeline pass order (14 of 14 passes; spec complete):
  *  1. Reset
  *  2. DefineTheme
  *  3. GenerateHeightmap
@@ -28,6 +31,9 @@ import { paintWorldToContext } from "./paintWorldToContext";
  *  9. PaintSurfaceCrust          (PR 4)
  * 10. PlaceCaveAmbient           (PR 5)
  * 11. PlaceSurfaceDressing       (PR 5)
+ * 12. DistributeSpawnPoints      (PR 6)
+ * 13. ValidateSpawnCoherence     (PR 6)
+ * 14. FinalCleanup               (PR 6)
  */
 const PASSES = [
   resetPass,
@@ -41,6 +47,9 @@ const PASSES = [
   paintSurfaceCrustPass,
   placeCaveAmbientPass,
   placeSurfaceDressingPass,
+  distributeSpawnPointsPass,
+  validateSpawnCoherencePass,
+  finalCleanupPass,
 ];
 
 /**
@@ -72,4 +81,5 @@ export const terraworldV1Generator: MapGenerator = (ctx, widthPx, heightPx, opts
   }
   paintWorldToContext(ctx, world.mask, world.materialMap, world.theme.palette, widthPx, heightPx);
   paintDecorationToContext(ctx, world.caveAmbient, world.surfaceDressing);
+  return { spawnList: world.spawnList };
 };
