@@ -128,7 +128,10 @@ export interface Tuning {
       depthPx: number;
     };
     hygiene: {
-      /** Minimum mask-island size (in pixels) to keep during FinalizeMask. Smaller than this is removed as orphan debris. */
+      /** Minimum mask-island size in pixels. Components smaller than this are
+       *  removed as orphan debris by FinalizeMask. Default 1024 is approximately
+       *  1.8 CA cells at default cellSizePx=24, calibrated to remove single-cell
+       *  orphans while preserving 2+ cell features. Adjust if cellSizePx changes. */
       thresholdPx: number;
     };
     spawn: {
@@ -248,7 +251,7 @@ export const tuning: Tuning = {
       depthPx: 3,
     },
     hygiene: {
-      thresholdPx: 16,
+      thresholdPx: 1024,
     },
     spawn: {
       densityPx: 200,
