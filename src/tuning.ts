@@ -211,7 +211,7 @@ export const tuning: Tuning = {
   worm: {
     radiusPx: 12,
     density: 1.0,
-    walkSpeedMps: 5.5,
+    walkSpeedMps: 2.5,
     aimSpeedRadPerSec: 2.0,
     maxHealth: 100,
     linearDamping: 0.1,
