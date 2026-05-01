@@ -101,9 +101,35 @@ describe("Drill utility", () => {
       expect(drill.isOnCooldown(1000, 800)).toBe(true);
     });
 
+    it("clears usesThisTurn so drill is available again next turn", () => {
+      drill.fire(0, 1000);
+      expect(drill.hasUsesRemaining(1)).toBe(false);
+      drill.resetForNewTurn();
+      expect(drill.hasUsesRemaining(1)).toBe(true);
+    });
+
     it("is idempotent when already disarmed", () => {
       drill.resetForNewTurn();
       expect(drill.isArmed()).toBe(false);
+    });
+  });
+
+  describe("hasUsesRemaining() / per-turn cap", () => {
+    it("starts with all uses remaining", () => {
+      expect(drill.hasUsesRemaining(1)).toBe(true);
+      expect(drill.hasUsesRemaining(3)).toBe(true);
+    });
+
+    it("returns false after the cap is reached", () => {
+      drill.fire(0, 100);
+      expect(drill.hasUsesRemaining(1)).toBe(false);
+    });
+
+    it("respects the cap argument independently of how many fires happened", () => {
+      drill.fire(0, 100);
+      expect(drill.hasUsesRemaining(2)).toBe(true);
+      drill.fire(0, 200);
+      expect(drill.hasUsesRemaining(2)).toBe(false);
     });
   });
 

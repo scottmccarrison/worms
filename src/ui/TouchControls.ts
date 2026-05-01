@@ -26,25 +26,29 @@ export interface TouchControlsInit {
 }
 
 /**
- * On-screen touch overlay with rope + jetpack buttons.
+ * On-screen touch overlay with rope + jetpack + drill buttons.
  *
- * Button visibility is controlled per-utility via `ropeEnabled` and
- * `jetPackEnabled` (both default true). In networked mode, pass
- * `ropeEnabled: false` to hide rope (not yet ported) while keeping
- * the jetpack button active.
+ * Button visibility is controlled per-utility via `ropeEnabled`,
+ * `jetPackEnabled`, and `drillEnabled` (all default true).
  *
- * The container is always constructed so `destroy()` and `hitsButton()`
- * work regardless of which buttons were created.
+ * `update()` should be called each frame from the scene; it refreshes
+ * button visuals based on the active worm's utility state (jet fuel
+ * level, drill uses-this-turn).
  */
 export class TouchControls {
   private readonly container: Phaser.GameObjects.Container;
   private ropeBtn: Phaser.GameObjects.Container | null = null;
   private jetBtn: Phaser.GameObjects.Container | null = null;
   drillBtn: Phaser.GameObjects.Container | null = null;
+  /** Per-button fuel/cooldown overlays drawn under the label. */
+  private jetFuelBar: Phaser.GameObjects.Graphics | null = null;
   private readonly scene: Phaser.Scene;
+  private readonly getActiveWorm: () => Worm | null;
+  private readonly buttonRadius: number;
 
   constructor(init: TouchControlsInit) {
     this.scene = init.scene;
+    this.getActiveWorm = init.getActiveWorm;
     // Always make an empty container so `destroy()` and `hitsButton()` have
     // a consistent target regardless of mode.
     this.container = this.scene.add.container(0, 0);
@@ -57,11 +61,11 @@ export class TouchControls {
     const jetPackEnabled = init.jetPackEnabled ?? true;
     const drillEnabled = init.drillEnabled ?? true;
 
-    const { getActiveWorm } = init;
     const radius = tuning.touch.buttonRadiusPx;
+    this.buttonRadius = radius;
     // End-turn button occupies the top-right 80px square (TurnHUD). Stack rope
-    // + jet along the LEFT edge so neither their tap areas nor the End button's
-    // hit area overlap.
+    // + jet + drill along the LEFT edge so neither their tap areas nor the End
+    // button's hit area overlap.
     const leftX = 60;
 
     if (ropeEnabled) {
@@ -82,10 +86,10 @@ export class TouchControls {
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
       ropeBtn.on("pointerdown", () => {
-        const w = getActiveWorm();
+        const w = this.getActiveWorm();
         if (!w) return;
         w.ropeUtility.isActive() ? w.ropeUtility.deactivate() : w.ropeUtility.activate();
-        this._flashButton(ropeBtn, w.ropeUtility.isActive());
+        this._setButtonAlpha(ropeBtn, w.ropeUtility.isActive());
       });
       ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
     }
@@ -98,28 +102,33 @@ export class TouchControls {
         label: "J",
         radius,
       });
-      // Offset by rope's footprint (+10px gap) even if rope is disabled, so
-      // the jet button sits at the same absolute position in both modes.
       jetBtn.setPosition(leftX + radius * 2 + 10, 60);
       jetBtn.setScrollFactor(0);
       this.jetBtn = jetBtn;
       this.container.add(jetBtn);
+
+      // Fuel bar - thin horizontal strip at the bottom of the button.
+      // Drawn here, redrawn each update() based on jetPackUtility.getFuelPercent().
+      this.jetFuelBar = this.scene.add.graphics();
+      jetBtn.add(this.jetFuelBar);
 
       jetBtn.setInteractive({
         hitArea: new Phaser.Geom.Circle(0, 0, radius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
       const jetDeactivate = (): void => {
-        const w = getActiveWorm();
+        const w = this.getActiveWorm();
         if (!w) return;
         if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-        this._setButtonAlpha(jetBtn, false);
+        // Visual refresh handled by update() next frame
       };
       jetBtn.on("pointerdown", () => {
-        const w = getActiveWorm();
+        const w = this.getActiveWorm();
         if (!w) return;
+        // Exhausted: tap is a no-op (JetPack.activate() already gates on fuel,
+        // but we skip the visual flash too).
+        if (w.jetPackUtility.getFuelPercent() <= 0) return;
         if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
-        this._setButtonAlpha(jetBtn, true);
       });
       jetBtn.on("pointerup", jetDeactivate);
       jetBtn.on("pointerupoutside", jetDeactivate);
@@ -145,21 +154,34 @@ export class TouchControls {
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
       drillBtn.on("pointerdown", () => {
-        const w = getActiveWorm();
+        const w = this.getActiveWorm();
         if (!w) return;
+        // Exhausted: tap is a no-op.
+        if (!w.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn)) return;
         if (w.drillUtility.isArmed()) {
           w.drillUtility.disarm();
-          this._setButtonAlpha(drillBtn, false);
         } else {
           // Mutually exclusive with rope/jet
           if (w.ropeUtility?.isActive()) w.ropeUtility.deactivate();
           if (w.jetPackUtility?.isActive()) w.jetPackUtility.deactivate();
           w.drillUtility.arm();
-          this._setButtonAlpha(drillBtn, true);
         }
+        // Visual refresh handled by update() next frame
       });
       drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
     }
+  }
+
+  /**
+   * Per-frame visual refresh. Reads the active worm's utility state and
+   * updates each button's alpha + (for jet) the fuel bar. Should be called
+   * from GameScene.update().
+   */
+  update(): void {
+    const w = this.getActiveWorm();
+    if (this.jetBtn) this._refreshJetButton(w);
+    if (this.drillBtn) this._refreshDrillButton(w);
+    if (this.ropeBtn) this._refreshRopeButton(w);
   }
 
   /**
@@ -176,7 +198,81 @@ export class TouchControls {
   }
 
   // ---------------------------------------------------------------------------
-  // Private helpers
+  // Private helpers - per-button refresh
+  // ---------------------------------------------------------------------------
+
+  private _refreshRopeButton(w: Worm | null): void {
+    if (!this.ropeBtn) return;
+    if (!w) {
+      this.ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+      return;
+    }
+    this._setButtonAlpha(this.ropeBtn, w.ropeUtility.isActive());
+  }
+
+  private _refreshJetButton(w: Worm | null): void {
+    if (!this.jetBtn || !this.jetFuelBar) return;
+    if (!w) {
+      this.jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+      this.jetFuelBar.clear();
+      return;
+    }
+    const fuelPct = w.jetPackUtility.getFuelPercent();
+    const exhausted = fuelPct <= 0;
+    if (exhausted) {
+      this.jetBtn.setAlpha(tuning.touch.buttonExhaustedAlpha);
+    } else if (w.jetPackUtility.isActive()) {
+      this.jetBtn.setAlpha(tuning.touch.buttonPressedAlpha);
+    } else {
+      this.jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    }
+    this._drawFuelBar(this.jetFuelBar, fuelPct);
+  }
+
+  private _refreshDrillButton(w: Worm | null): void {
+    if (!this.drillBtn) return;
+    if (!w) {
+      this.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+      return;
+    }
+    const remaining = w.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
+    if (!remaining) {
+      this.drillBtn.setAlpha(tuning.touch.buttonExhaustedAlpha);
+    } else if (w.drillUtility.isArmed()) {
+      this.drillBtn.setAlpha(tuning.touch.buttonPressedAlpha);
+    } else {
+      this.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    }
+  }
+
+  /**
+   * Draw a thin fuel bar at the bottom of a button. Local coords (button is
+   * a Container so 0,0 is button center).
+   * Bar color: green > 50%, yellow 20-50%, red < 20%.
+   */
+  private _drawFuelBar(g: Phaser.GameObjects.Graphics, pct: number): void {
+    g.clear();
+    const r = this.buttonRadius;
+    const barW = r * 1.6; // slightly inset from button edge
+    const barH = 4;
+    const barX = -barW / 2;
+    const barY = r - barH - 2; // 2px inset from bottom edge of circle
+    const clamped = Math.max(0, Math.min(1, pct));
+
+    // Background track
+    g.fillStyle(0x000000, 0.5);
+    g.fillRect(barX, barY, barW, barH);
+
+    if (clamped <= 0) return;
+
+    // Fill color tier
+    const fillColor = clamped > 0.5 ? 0x55cc44 : clamped > 0.2 ? 0xffaa00 : 0xff3322;
+    g.fillStyle(fillColor, 1.0);
+    g.fillRect(barX, barY, barW * clamped, barH);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers - construction
   // ---------------------------------------------------------------------------
 
   private _makeButton(opts: {
@@ -209,9 +305,5 @@ export class TouchControls {
 
   private _setButtonAlpha(btn: Phaser.GameObjects.Container, pressed: boolean): void {
     btn.setAlpha(pressed ? tuning.touch.buttonPressedAlpha : tuning.touch.buttonIdleAlpha);
-  }
-
-  private _flashButton(btn: Phaser.GameObjects.Container, active: boolean): void {
-    this._setButtonAlpha(btn, active);
   }
 }

@@ -7,6 +7,7 @@ export interface DrillCallbacks {
 export class Drill {
   private armed = false;
   private lastFiredAtMs = Number.NEGATIVE_INFINITY;
+  private usesThisTurn = 0;
 
   constructor(
     private readonly worm: Worm,
@@ -29,16 +30,23 @@ export class Drill {
     return nowMs - this.lastFiredAtMs < cooldownMs;
   }
 
-  /** Fire the drill at angleRad (radians). Records timestamp + auto-disarms. */
+  /** True if the worm still has drill uses left this turn. */
+  hasUsesRemaining(maxUsesPerTurn: number): boolean {
+    return this.usesThisTurn < maxUsesPerTurn;
+  }
+
+  /** Fire the drill at angleRad (radians). Records timestamp + counts use + auto-disarms. */
   fire(angleRad: number, nowMs: number): void {
     this.callbacks.onFire(this.worm, angleRad, nowMs);
     this.lastFiredAtMs = nowMs;
+    this.usesThisTurn += 1;
     this.armed = false;
   }
 
   /** Called at turn-start to clear lingering state from prior owner. */
   resetForNewTurn(): void {
     this.armed = false;
+    this.usesThisTurn = 0;
     // lastFiredAtMs stays - prevents drill spam across rapid turn rotations
   }
 }

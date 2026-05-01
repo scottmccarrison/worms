@@ -64,7 +64,21 @@ export class JetPack implements Utility {
     this.worm.setJetPackActive(false);
     this.flameGfx.setVisible(false);
     this.flameGfx.clear();
-    // Fuel stays depleted until turn end (Epic 5 will reset on turn cycle)
+    // Fuel stays depleted until turn end - resetForNewTurn() refills.
+  }
+
+  /**
+   * Returns the current fuel level as a 0..1 fraction of capacity.
+   * Used by TouchControls to render the fuel bar.
+   */
+  getFuelPercent(): number {
+    return this._fuel / tuning.jetpack.fuelCapacity;
+  }
+
+  /** Called at turn-start to refill fuel and ensure jet is deactivated. */
+  resetForNewTurn(): void {
+    if (this._active) this.deactivate();
+    this._fuel = tuning.jetpack.fuelCapacity;
   }
 
   /** Per-frame: apply thrust impulse and drain fuel. Called by GameScene.update. */
