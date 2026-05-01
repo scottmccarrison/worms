@@ -139,6 +139,14 @@ export class Worm {
     if (!this.isAlive) return;
     if (this.activeRope !== null) return; // rope controls own lateral physics
     if (this.jetPackActive) return; // walk keys intercepted by JetPack.setHorizontalInput
+    // Airborne: walk inputs do not override horizontal velocity. The worm
+    // keeps whatever momentum it had (from jet thrust, jump, or knockback)
+    // until it touches ground again. Facing still updates so aim direction
+    // tracks player intent.
+    if (this.footContactCount === 0) {
+      if (direction !== 0) this.setFacing(direction);
+      return;
+    }
     const vel = this.body.getLinearVelocity();
     const targetVx = direction * tuning.worm.walkSpeedMps;
     this.body.setLinearVelocity({ x: targetVx, y: vel.y });
