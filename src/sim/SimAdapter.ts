@@ -26,13 +26,24 @@ import type {
 } from "../../shared/protocol";
 import type { Team } from "../worm/Team";
 
+/** Drill fire VFX event emitted by OfflineSimAdapter when a drill cut lands. */
+export interface DrillFireEvent {
+  type: "drill_fire";
+  x: number;
+  y: number;
+  angleRad: number;
+  lengthPx: number;
+  widthPx: number;
+}
+
 /** Union of event types an adapter can emit upstream to the renderer. */
 export type SimEvent =
   | ({ type: "terrain_cut" } & TerrainCutEvent)
   | ({ type: "fire_event" } & FireEvent)
   | ({ type: "damage_event" } & DamageEvent)
   | ({ type: "worm_died" } & WormDiedEvent)
-  | FireRejectedMessage;
+  | FireRejectedMessage
+  | DrillFireEvent;
 
 /**
  * Renderer's view of a worm. Pixel-space coords so the renderer never
@@ -94,6 +105,8 @@ export interface SimAdapter {
   /** Rope / jetpack toggle. Offline-only per plan #65; networked adapter no-ops. */
   toggleRope(): void;
   toggleJetPack(): void;
+  /** Drill utility fire. Offline: cuts terrain rect. Networked: no-op (follow-up issue). */
+  executeDrill(wormId: string, angleRad: number): void;
   setJetPackThrust(active: boolean): void;
   setJetPackHorizontal(dir: -1 | 0 | 1): void;
   /** Continuous 2D thrust vector API. vx: -1=left, +1=right. vy: -1=up, +1=down (Y-down). */

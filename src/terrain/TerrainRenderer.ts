@@ -147,6 +147,66 @@ export class TerrainRenderer {
     this.ctx.putImageData(imageData, x0, y0);
   }
 
+  /**
+   * Cut a rotated rectangle out of the visual mask and refresh the GPU texture.
+   * Mirrors Terrain.cutRect for networked mode: no body rebuild (server-side only),
+   * just pixel erasure + texture push.
+   *
+   * Material hardness gating applied same as cutCircle when materialMap is present.
+   */
+  cutRect(
+    originX: number,
+    originY: number,
+    lengthPx: number,
+    widthPx: number,
+    angleRad: number,
+  ): void {
+    const dx = Math.cos(angleRad);
+    const dy = Math.sin(angleRad);
+    const perpX = -dy;
+    const perpY = dx;
+    const halfW = widthPx / 2;
+
+    const corners = [
+      [0, -halfW],
+      [lengthPx, -halfW],
+      [lengthPx, halfW],
+      [0, halfW],
+    ].map(([t, s]) => [
+      originX + (t ?? 0) * dx + (s ?? 0) * perpX,
+      originY + (t ?? 0) * dy + (s ?? 0) * perpY,
+    ]);
+    const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0] ?? 0))));
+    const x1 = Math.min(this.widthPx, Math.ceil(Math.max(...corners.map((c) => c[0] ?? 0))));
+    const y0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[1] ?? 0))));
+    const y1 = Math.min(this.heightPx, Math.ceil(Math.max(...corners.map((c) => c[1] ?? 0))));
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+
+    const imageData = this.ctx.getImageData(x0, y0, w, h);
+    const data = imageData.data;
+    for (let row = 0; row < h; row++) {
+      const worldY = y0 + row;
+      for (let col = 0; col < w; col++) {
+        const worldX = x0 + col;
+        const lx = worldX - originX;
+        const ly = worldY - originY;
+        const t = lx * dx + ly * dy;
+        const s = lx * perpX + ly * perpY;
+        if (t < 0 || t > lengthPx) continue;
+        if (s < -halfW || s > halfW) continue;
+        if (this.materialMap !== null) {
+          const material = this.materialMap[worldY * this.widthPx + worldX];
+          if (!gateCutByMaterial(material, halfW, this.hardness)) continue;
+        }
+        data[(row * w + col) * 4 + 3] = 0;
+      }
+    }
+    this.ctx.putImageData(imageData, x0, y0);
+    this.canvasTexture.refresh();
+  }
+
   /** For debug: snapshot current mask pixels. */
   getMaskImageData(): ImageData {
     return this.ctx.getImageData(0, 0, this.widthPx, this.heightPx);

@@ -29,8 +29,9 @@ describe("WeaponManager", () => {
 
   it("ammoFor returns -1 for infinite weapons", () => {
     expect(manager.ammoFor("bazooka")).toBe(-1);
-    expect(manager.ammoFor("shotgun")).toBe(-1);
-    expect(manager.ammoFor("handgrenade")).toBe(-1);
+    // shotgun/handgrenade are unregistered (simplify-combat); ammoFor returns 0 for unknown ids
+    expect(manager.ammoFor("shotgun")).toBe(0);
+    expect(manager.ammoFor("handgrenade")).toBe(0);
   });
 
   it("consumeOne leaves -1 as -1 for infinite weapons", () => {
@@ -56,9 +57,10 @@ describe("WeaponManager", () => {
   });
 
   it("select succeeds when ammo > 0 or infinite", () => {
-    const result = manager.select("shotgun");
+    // Only bazooka is registered after simplify-combat; selection stays on bazooka
+    const result = manager.select("bazooka");
     expect(result).toBe(true);
-    expect(manager.getSelected().id).toBe("shotgun");
+    expect(manager.getSelected().id).toBe("bazooka");
   });
 
   it("select fails when ammo is 0", () => {
@@ -74,16 +76,19 @@ describe("WeaponManager", () => {
     expect(manager.shotsFiredThisActivation).toBe(0);
   });
 
-  it("selectByKey selects by numeric key", () => {
-    const result = manager.selectByKey(3);
+  it("selectByKey selects by numeric key (bazooka is key=1, others unregistered)", () => {
+    const result = manager.selectByKey(1);
     expect(result).toBe(true);
-    expect(manager.getSelected().id).toBe("handgrenade");
+    expect(manager.getSelected().id).toBe("bazooka");
+    // Key 3 (handgrenade) is unregistered; selectByKey returns false
+    const missingResult = manager.selectByKey(3);
+    expect(missingResult).toBe(false);
   });
 });
 
 describe("weapon registry", () => {
-  it("has exactly 7 weapons registered", () => {
-    expect(allWeapons().length).toBe(7);
+  it("has exactly 1 weapon registered (simplify-combat: bazooka only)", () => {
+    expect(allWeapons().length).toBe(1);
   });
 
   it("all selectKeys are unique", () => {
@@ -92,11 +97,11 @@ describe("weapon registry", () => {
     expect(unique.size).toBe(keys.length);
   });
 
-  it("selectKeys cover 1-7 with no gaps", () => {
+  it("only bazooka (key=1) is registered", () => {
     const keys = allWeapons()
       .map((w) => w.selectKey)
       .sort((a, b) => a - b);
-    expect(keys).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(keys).toEqual([1]);
   });
 
   it("all weapon ids are unique", () => {

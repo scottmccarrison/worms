@@ -4,6 +4,7 @@ import type { Body, Fixture } from "planck";
 import type { PhysicsSystem } from "../physics/PhysicsSystem";
 import { toMeters, toPixels } from "../physics/scale";
 import { tuning } from "../tuning";
+import type { Drill } from "../utilities/Drill";
 import type { JetPack } from "../utilities/JetPack";
 import type { NinjaRope } from "../utilities/NinjaRope";
 import type { Team } from "./Team";
@@ -36,9 +37,10 @@ export class Worm {
   pendingDamage = 0;
   isAlive = true;
 
-  // Utility state - set from GameScene after construction, not in constructor
-  ropeUtility!: NinjaRope; // assigned by GameScene.create() after worm spawn
-  jetPackUtility!: JetPack; // assigned by GameScene.create() after worm spawn
+  // Utility state - set from OfflineSimAdapter after construction, not in constructor
+  ropeUtility!: NinjaRope; // assigned by OfflineSimAdapter after worm spawn
+  jetPackUtility!: JetPack; // assigned by OfflineSimAdapter after worm spawn
+  drillUtility!: Drill; // assigned by OfflineSimAdapter after worm spawn
   private activeRope: NinjaRope | null = null;
   private jetPackActive = false;
 
@@ -262,6 +264,7 @@ export class Worm {
     // Clean up utilities before destroying body (joints reference worm body)
     this.ropeUtility?.destroy();
     this.jetPackUtility?.destroy();
+    // drillUtility has no external resources to release (no joints/planck objects)
     if (this.body.isActive()) {
       // Clear userData before destroying to break circular ref for GC
       this.body.setUserData(null);

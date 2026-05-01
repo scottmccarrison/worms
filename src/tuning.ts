@@ -61,6 +61,14 @@ export interface Tuning {
     upwardForce: number;
     sideForce: number;
   };
+  drill: {
+    /** Length of the drill rect cut, pixels. */
+    lengthPx: number;
+    /** Width of the drill rect cut perpendicular to aim, pixels. */
+    widthPx: number;
+    /** Cooldown between drill fires, ms. */
+    cooldownMs: number;
+  };
   touch: {
     buttonRadiusPx: number;
     buttonIdleAlpha: number;
@@ -220,6 +228,11 @@ export const tuning: Tuning = {
     fuelPerSecond: 30,
     upwardForce: 15,
     sideForce: 8,
+  },
+  drill: {
+    lengthPx: 120,
+    widthPx: 24,
+    cooldownMs: 800,
   },
   touch: {
     buttonRadiusPx: 28,

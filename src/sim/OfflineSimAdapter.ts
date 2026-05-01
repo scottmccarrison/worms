@@ -36,6 +36,7 @@ import { PhysicsSystem } from "../physics/PhysicsSystem";
 import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
+import { Drill } from "../utilities/Drill";
 import { JetPack } from "../utilities/JetPack";
 import { NinjaRope } from "../utilities/NinjaRope";
 import { ProjectileManager } from "../weapons/ProjectileManager";
@@ -132,7 +133,7 @@ export class OfflineSimAdapter implements SimAdapter {
       this.allWorms.push(this.makeRenderableView(w));
     }
 
-    // Rope + JetPack utilities per worm.
+    // Rope, JetPack, and Drill utilities per worm.
     for (const w of this.wormList) {
       w.ropeUtility = new NinjaRope({
         scene: init.scene,
@@ -140,6 +141,9 @@ export class OfflineSimAdapter implements SimAdapter {
         worm: w,
       });
       w.jetPackUtility = new JetPack({ scene: init.scene, worm: w });
+      w.drillUtility = new Drill(w, {
+        onFire: (worm, angleRad, _nowMs) => this.executeDrill(worm.name, angleRad),
+      });
     }
 
     // --- Projectile manager + weapon managers ---
@@ -165,6 +169,7 @@ export class OfflineSimAdapter implements SimAdapter {
       onTurnStart: (team, worm) => {
         this.setInputAllowed(true);
         this.getWeaponManager(team)?.resetActivation();
+        worm.drillUtility?.resetForNewTurn();
         for (const sub of this.turnChangedSubs) sub(team.id, worm.name);
         // Offline sim is always immediately stable - fire stable subs on next microtask.
         queueMicrotask(() => {
@@ -319,6 +324,24 @@ export class OfflineSimAdapter implements SimAdapter {
     wm.shotsFiredThisActivation++;
     if (result.turnEndsImmediately) {
       this.turnManager.endTurnByPlayer();
+    }
+  }
+
+  executeDrill(wormId: string, angleRad: number): void {
+    const worm = this.wormList.find((w) => w.name === wormId);
+    if (!worm) return;
+    const { lengthPx, widthPx } = tuning.drill;
+    this.terrainInstance.cutRect(worm.xPx, worm.yPx, lengthPx, widthPx, angleRad);
+    // Emit VFX event so GameScene can play dust + screen shake in a future PR
+    for (const sub of this.eventSubs) {
+      sub({
+        type: "drill_fire",
+        x: worm.xPx,
+        y: worm.yPx,
+        angleRad,
+        lengthPx,
+        widthPx,
+      });
     }
   }
 

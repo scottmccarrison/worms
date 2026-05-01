@@ -311,6 +311,11 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.send({ type: "input_jetpack_vector", vx, vy });
   }
 
+  executeDrill(_wormId: string, _angleRad: number): void {
+    // Networked drill not yet implemented. See follow-up issue.
+    console.warn("[drill] networked drill not yet implemented");
+  }
+
   isJetPacking(): boolean {
     const activeId = this.getActiveWormId();
     return this.currFrame?.state.worms.find((w) => w.id === activeId)?.jetPackActive ?? false;

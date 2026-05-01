@@ -130,6 +130,106 @@ export class Terrain {
   }
 
   /**
+   * Cut a rotated rectangle out of terrain. Origin is the bottom-center of the
+   * rect (where the worm stands). Length extends in `angleRad` direction;
+   * width is perpendicular, centered on the aim line.
+   *
+   * Material hardness gating applies same as cutCircle.
+   * Immediately erases pixels, destroys affected bodies, rebuilds, and refreshes texture.
+   */
+  cutRect(
+    originX: number,
+    originY: number,
+    lengthPx: number,
+    widthPx: number,
+    angleRad: number,
+  ): void {
+    const dx = Math.cos(angleRad);
+    const dy = Math.sin(angleRad);
+    const perpX = -dy;
+    const perpY = dx;
+    const halfW = widthPx / 2;
+
+    // Compute pixel-space AABB of the rotated rect (4 corners)
+    const corners = [
+      [0, -halfW],
+      [lengthPx, -halfW],
+      [lengthPx, halfW],
+      [0, halfW],
+    ].map(([t, s]) => [
+      originX + (t ?? 0) * dx + (s ?? 0) * perpX,
+      originY + (t ?? 0) * dy + (s ?? 0) * perpY,
+    ]);
+    const rawMinX = Math.floor(Math.min(...corners.map((c) => c[0] ?? 0)));
+    const rawMaxX = Math.ceil(Math.max(...corners.map((c) => c[0] ?? 0)));
+    const rawMinY = Math.floor(Math.min(...corners.map((c) => c[1] ?? 0)));
+    const rawMaxY = Math.ceil(Math.max(...corners.map((c) => c[1] ?? 0)));
+
+    // Clamp to canvas bounds for pixel operations
+    const x0 = Math.max(0, rawMinX);
+    const x1 = Math.min(this.widthPx, rawMaxX);
+    const y0 = Math.max(0, rawMinY);
+    const y1 = Math.min(this.heightPx, rawMaxY);
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return;
+
+    // Erase pixels: per-pixel rect-inclusion test (same for both paths)
+    const imageData = this.ctx.getImageData(x0, y0, w, h);
+    const data = imageData.data;
+    for (let row = 0; row < h; row++) {
+      const worldY = y0 + row;
+      for (let col = 0; col < w; col++) {
+        const worldX = x0 + col;
+        const lx = worldX - originX;
+        const ly = worldY - originY;
+        const t = lx * dx + ly * dy;
+        const s = lx * perpX + ly * perpY;
+        if (t < 0 || t > lengthPx) continue;
+        if (s < -halfW || s > halfW) continue;
+        if (this.materialMap !== null) {
+          // Material hardness gate: use half-width as the "radius" analogue
+          const material = this.materialMap[worldY * this.widthPx + worldX];
+          if (!gateCutByMaterial(material, halfW, this.hardness)) continue;
+        }
+        data[(row * w + col) * 4 + 3] = 0;
+      }
+    }
+    this.ctx.putImageData(imageData, x0, y0);
+
+    // Rebuild bodies in the affected Y-band (same logic as flushPendingCuts)
+    const yMin = Math.max(0, Math.floor(rawMinY / this.rowHeight) * this.rowHeight);
+    const yMax = Math.min(this.heightPx, Math.ceil(rawMaxY / this.rowHeight) * this.rowHeight);
+
+    const victims: Body[] = [];
+    for (const body of this.terrainBodies) {
+      const meta = this.bodyMeta.get(body);
+      if (meta && meta.rowY >= yMin - this.rowHeight && meta.rowY <= yMax + this.rowHeight) {
+        victims.push(body);
+      }
+    }
+    for (const body of victims) {
+      this.physics.world.destroyBody(body);
+      this.bodyMeta.delete(body);
+      this.terrainBodies.delete(body);
+    }
+
+    const rebuildData = this.ctx.getImageData(0, yMin, this.widthPx, yMax - yMin);
+    const boxes = scanMaskForBoxes(
+      rebuildData.data,
+      this.widthPx,
+      yMax - yMin,
+      null,
+      this.rowHeight,
+    );
+    for (const box of boxes) {
+      this.createBody(box.cxPx, box.cyPx + yMin, box.wPx, box.hPx);
+    }
+
+    this.canvasTexture.refresh();
+  }
+
+  /**
    * Erase queued circles, destroy bodies in affected Y-band, rebuild, refresh texture.
    * Follows the 9-step sequence from the plan.
    */

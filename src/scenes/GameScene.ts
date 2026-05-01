@@ -27,9 +27,9 @@ import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { TurnTransition } from "../ui/TurnTransition";
 import { UtilityDPad } from "../ui/UtilityDPad";
-import { WeaponRadial } from "../ui/WeaponRadial";
+// WeaponRadial removed: only bazooka registered, weapon selector not needed
 import { WindHUD } from "../ui/WindHUD";
-import { allWeapons, defaultAmmoForMatch } from "../weapons/registry";
+import { allWeapons } from "../weapons/registry";
 import type { Team } from "../worm/Team";
 import type { Worm } from "../worm/Worm";
 import { WormSprite } from "../worm/WormSprite";
@@ -81,7 +81,6 @@ export class GameScene extends Phaser.Scene {
   private touchControls!: TouchControls;
   private turnHUD!: TurnHUD;
   private spectatorHUD: SpectatorHUD | null = null;
-  private weaponRadial!: WeaponRadial;
   private aimHUD!: AimHUD;
   /** Rope / jetpack d-pad. Offline-only (networked disables utilities per #65).
    * Shown when a utility is active, hidden otherwise; visibility + callbacks
@@ -316,7 +315,6 @@ export class GameScene extends Phaser.Scene {
         for (const obj of this.objectSprites.values()) obj.destroy();
         this.objectSprites.clear();
         this.turnHUD?.destroy();
-        this.weaponRadial?.destroy();
         this.aimHUD?.destroy();
         this.spectatorHUD?.destroy();
         this.utilityDPad?.destroy();
@@ -348,6 +346,20 @@ export class GameScene extends Phaser.Scene {
           this.sim.selectWeapon(weapon.id);
         },
         onFire: () => {
+          const activeWorm = this.getActiveWormAdapter();
+          if (activeWorm?.drillUtility?.isArmed()) {
+            const now = this.time.now;
+            if (!activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs)) {
+              // Fire in the current aim direction
+              const aimRad = activeWorm.aimAngle * activeWorm.facing;
+              activeWorm.drillUtility.fire(aimRad, now);
+              if (this.touchControls?.drillBtn) {
+                this.touchControls.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+              }
+            }
+            // Drill is a free action - do NOT trigger end-of-turn
+            return;
+          }
           this.sim.fire();
         },
         onCycleMap: () => {
@@ -368,17 +380,16 @@ export class GameScene extends Phaser.Scene {
         getActiveWorm: () => this.getActiveWormAdapter(),
         ropeEnabled: !this.isNetworked,
         jetPackEnabled: true,
-      });
-      this.weaponRadial = new WeaponRadial({
-        scene: this,
-        sim: this.sim,
-        getSelectedWeaponId: () => this.getSelectedWeaponId(),
-        getAmmoFor: (id) => this.getAmmoFor(id),
+        drillEnabled: true,
       });
       this.aimHUD = new AimHUD({
         scene: this,
         getActiveWorm: () => this.getActiveWormAdapter(),
         isInputAllowed: () => this.isInputAllowed(),
+        isDrillArmed: () => {
+          const w = this.getActiveWormAdapter();
+          return w?.drillUtility?.isArmed() ?? false;
+        },
       });
       this.turnHUD = new TurnHUD({
         scene: this,
@@ -505,7 +516,6 @@ export class GameScene extends Phaser.Scene {
     this.renderFromAdapter();
     this.inputController.update(deltaMs);
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
-    this.weaponRadial.update();
     this.aimHUD.update();
     this.windHUD?.update();
     this.waterRenderer?.update();
@@ -910,21 +920,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private getAmmoFor(id: string): number {
-    if (this.offlineSim) {
-      const team = this.offlineSim.turns.getActiveTeam();
-      return this.offlineSim.getWeaponManager(team)?.ammoFor(id) ?? 0;
-    }
-    if (this.networkedSim) {
-      // Networked mode reads authoritative ammo out of the active worm's
-      // sim_state entry. Until W1 ships, expose the match-default so the
-      // drawer still renders ammo numbers in dev.
-      const defaults = defaultAmmoForMatch();
-      return defaults[id] ?? 0;
-    }
-    return 0;
-  }
-
   private getSelectedWeaponId(): string {
     return this.sim.getActiveWeaponId() || allWeapons()[0]?.id || "";
   }
@@ -1101,7 +1096,6 @@ export class GameScene extends Phaser.Scene {
       // them to avoid double-triggering.
       if (this.turnHUD.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
-      if (this.weaponRadial?.hitsRadial(p)) return;
       if (this.utilityDPad?.hitsButton(p)) return;
       // Already tracking a gesture on a different pointer: ignore. Multi-touch
       // secondary fingers should route to buttons (above), not the gesture layer.
@@ -1205,6 +1199,26 @@ export class GameScene extends Phaser.Scene {
           // against worldX/worldY for a consistent drag distance check.
           const dragDist = Math.hypot(p.worldX - aimStart.x, p.worldY - aimStart.y);
           if (dragDist < tuning.weapons.dragDeadZonePx) continue;
+
+          // Drill branch: if drill is armed, fire drill instead of bazooka.
+          const activeWorm = this.getActiveWormAdapter();
+          if (activeWorm?.drillUtility?.isArmed()) {
+            const now = this.time.now;
+            if (!activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs)) {
+              // Compute aim angle same way as the drag-to-aim path
+              const wDx = activeWorm.xPx - p.worldX;
+              const wDy = activeWorm.yPx - p.worldY;
+              const drillAngle = Math.atan2(wDy, Math.abs(wDx)) * activeWorm.facing;
+              activeWorm.drillUtility.fire(drillAngle, now);
+              // Reset D button visual
+              if (this.touchControls.drillBtn) {
+                this.touchControls.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+              }
+            }
+            // Drill is a free action - do NOT trigger end-of-turn
+            continue;
+          }
+
           this.sim.fire();
         } else if (o.kind === "walk_release") {
           this.sim.walk(0);
@@ -1275,6 +1289,27 @@ function adaptRenderableToWormFacade(
         setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
       }
     : stubUtility;
+  // Drill facade: armed state is local only; fire no-ops in networked mode (follow-up issue).
+  const drillFacadeState = { armed: false, lastFiredAtMs: Number.NEGATIVE_INFINITY };
+  const drillUtility = {
+    arm: () => {
+      drillFacadeState.armed = true;
+    },
+    disarm: () => {
+      drillFacadeState.armed = false;
+    },
+    isArmed: () => drillFacadeState.armed,
+    isOnCooldown: (nowMs: number, cooldownMs: number) =>
+      nowMs - drillFacadeState.lastFiredAtMs < cooldownMs,
+    fire: (_angleRad: number, nowMs: number) => {
+      simRef?.executeDrill(view.id, _angleRad);
+      drillFacadeState.lastFiredAtMs = nowMs;
+      drillFacadeState.armed = false;
+    },
+    resetForNewTurn: () => {
+      drillFacadeState.armed = false;
+    },
+  };
   const facade = {
     get xPx() {
       return view.xPx;
@@ -1305,6 +1340,7 @@ function adaptRenderableToWormFacade(
     },
     ropeUtility: stubUtility,
     jetPackUtility,
+    drillUtility,
     // Input-method stubs: adapter-routed callbacks drive the wire sends.
     walk: (_dir: -1 | 0 | 1) => {
       void _dir;

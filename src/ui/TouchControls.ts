@@ -15,6 +15,10 @@ export interface TouchControlsInit {
    * When false (default true), the jetpack button is not rendered.
    */
   jetPackEnabled?: boolean;
+  /**
+   * When false (default true), the drill button is not rendered.
+   */
+  drillEnabled?: boolean;
   /** @deprecated Use ropeEnabled/jetPackEnabled instead. */
   networked?: boolean;
   /** Sim adapter used for jetpack toggle in networked mode. */
@@ -36,6 +40,7 @@ export class TouchControls {
   private readonly container: Phaser.GameObjects.Container;
   private ropeBtn: Phaser.GameObjects.Container | null = null;
   private jetBtn: Phaser.GameObjects.Container | null = null;
+  drillBtn: Phaser.GameObjects.Container | null = null;
   private readonly scene: Phaser.Scene;
 
   constructor(init: TouchControlsInit) {
@@ -50,6 +55,7 @@ export class TouchControls {
     // flag maps to ropeEnabled=false, jetPackEnabled=true for backward compat.
     const ropeEnabled = init.ropeEnabled ?? !init.networked;
     const jetPackEnabled = init.jetPackEnabled ?? true;
+    const drillEnabled = init.drillEnabled ?? true;
 
     const { getActiveWorm } = init;
     const radius = tuning.touch.buttonRadiusPx;
@@ -118,6 +124,39 @@ export class TouchControls {
       jetBtn.on("pointerout", jetDeactivate);
       jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
     }
+
+    if (drillEnabled) {
+      // --- Drill button (top-left, right of jetpack) ---
+      const drillBtn = this._makeButton({
+        fillColor: 0x22aa55,
+        strokeColor: 0x66dd99,
+        label: "D",
+        radius,
+      });
+      drillBtn.setPosition(leftX + (radius * 2 + 10) * 2, 60);
+      this.drillBtn = drillBtn;
+      this.container.add(drillBtn);
+
+      drillBtn.setInteractive({
+        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitAreaCallback: Phaser.Geom.Circle.Contains,
+      });
+      drillBtn.on("pointerdown", () => {
+        const w = getActiveWorm();
+        if (!w) return;
+        if (w.drillUtility.isArmed()) {
+          w.drillUtility.disarm();
+          this._setButtonAlpha(drillBtn, false);
+        } else {
+          // Mutually exclusive with rope/jet
+          if (w.ropeUtility?.isActive()) w.ropeUtility.deactivate();
+          if (w.jetPackUtility?.isActive()) w.jetPackUtility.deactivate();
+          w.drillUtility.arm();
+          this._setButtonAlpha(drillBtn, true);
+        }
+      });
+      drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+    }
   }
 
   /**
@@ -126,7 +165,7 @@ export class TouchControls {
    */
   hitsButton(pointer: Phaser.Input.Pointer): boolean {
     const hits = this.scene.input.hitTestPointer(pointer);
-    return hits.some((obj) => obj === this.ropeBtn || obj === this.jetBtn);
+    return hits.some((obj) => obj === this.ropeBtn || obj === this.jetBtn || obj === this.drillBtn);
   }
 
   destroy(): void {
