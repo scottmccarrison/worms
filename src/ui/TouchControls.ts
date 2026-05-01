@@ -116,23 +116,20 @@ export class TouchControls {
         hitArea: new Phaser.Geom.Circle(0, 0, radius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
-      const jetDeactivate = (): void => {
-        const w = this.getActiveWorm();
-        if (!w) return;
-        if (w.jetPackUtility.isActive()) w.jetPackUtility.deactivate();
-        // Visual refresh handled by update() next frame
-      };
+      // Toggle pattern matching R and D: tap engages jet, tap again disengages.
+      // Directional thrust comes from the UtilityDPad (which appears while jet is
+      // active). Press-and-hold on the J button is intentionally NOT used.
       jetBtn.on("pointerdown", () => {
         const w = this.getActiveWorm();
         if (!w) return;
-        // Exhausted: tap is a no-op (JetPack.activate() already gates on fuel,
-        // but we skip the visual flash too).
+        if (w.jetPackUtility.isActive()) {
+          w.jetPackUtility.deactivate();
+          return;
+        }
+        // Exhausted: tap is a no-op. JetPack.activate() also gates internally.
         if (w.jetPackUtility.getFuelPercent() <= 0) return;
-        if (!w.jetPackUtility.isActive()) w.jetPackUtility.activate();
+        w.jetPackUtility.activate();
       });
-      jetBtn.on("pointerup", jetDeactivate);
-      jetBtn.on("pointerupoutside", jetDeactivate);
-      jetBtn.on("pointerout", jetDeactivate);
       jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
     }
 
