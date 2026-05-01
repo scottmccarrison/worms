@@ -26,7 +26,6 @@ import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
 import { TurnHUD } from "../ui/TurnHUD";
 import { TurnTransition } from "../ui/TurnTransition";
-import { UtilityDPad } from "../ui/UtilityDPad";
 // WeaponRadial removed: only bazooka registered, weapon selector not needed
 import { WindHUD } from "../ui/WindHUD";
 import { allWeapons } from "../weapons/registry";
@@ -82,11 +81,6 @@ export class GameScene extends Phaser.Scene {
   private turnHUD!: TurnHUD;
   private spectatorHUD: SpectatorHUD | null = null;
   private aimHUD!: AimHUD;
-  /** Rope / jetpack d-pad. Offline-only (networked disables utilities per #65).
-   * Shown when a utility is active, hidden otherwise; visibility + callbacks
-   * are refreshed each frame in `update`. */
-  private utilityDPad: UtilityDPad | null = null;
-  private utilityDPadVisible = false;
   private turnTransition: TurnTransition | null = null;
   private cameraFollower: CameraFollower | null = null;
 
@@ -99,7 +93,7 @@ export class GameScene extends Phaser.Scene {
    * - "walk": tap-hold on a screen half, walking left/right
    * - null: no pointer is being tracked
    */
-  private activeGestureKind: "aim" | "walk" | "utility_thrust" | null = null;
+  private activeGestureKind: "aim" | "walk" | null = null;
   /** Pointer id that opened the active gesture. Only this id's move/up events
    * are honored; other pointers (multi-touch) are routed to their own buttons. */
   private activePointerId: number | null = null;
@@ -317,8 +311,6 @@ export class GameScene extends Phaser.Scene {
         this.turnHUD?.destroy();
         this.aimHUD?.destroy();
         this.spectatorHUD?.destroy();
-        this.utilityDPad?.destroy();
-        this.utilityDPad = null;
         this.windHUD?.destroy();
         this.windHUD = null;
         this.waterRenderer?.destroy();
@@ -407,18 +399,6 @@ export class GameScene extends Phaser.Scene {
       this.turnHUD = new TurnHUD({
         scene: this,
         onEndTurnPressed: () => this.sim.endTurn(),
-      });
-
-      // Utility d-pad: always mounted in both modes. Networked mode routes
-      // through the sim adapter (sends to server); offline routes to the
-      // local worm directly. Down button stays offline-only (rope extend).
-      this.utilityDPad = new UtilityDPad({
-        scene: this,
-        onLeft: (dir) => this.sim.setJetPackHorizontal(dir),
-        onUp: (active) => this.sim.setJetPackThrust(active),
-        onDown: (_active) => {
-          if (this.offlineSim) this.dispatchUtilityDown(_active);
-        },
       });
 
       // Replay the current turn so the HUD + input gates are correctly
@@ -533,7 +513,6 @@ export class GameScene extends Phaser.Scene {
     this.windHUD?.update();
     this.waterRenderer?.update();
     this.touchControls?.update();
-    this.refreshUtilityDPad();
     const selectedId = this.getSelectedWeaponId();
     const weapon = allWeapons().find((w) => w.id === selectedId);
     const bodies = this.offlineSim?.terrain.bodyCount() ?? 0;
@@ -838,6 +817,9 @@ export class GameScene extends Phaser.Scene {
   private handleTurnChanged(teamId: string, _wormId: string): void {
     dlogUnthrottled("scene", "GameScene.handleTurnChanged", { teamId, wormId: _wormId });
     if (!teamId) return;
+    // Clear any leaked jet joystick gesture state from the previous turn so
+    // the next worm doesn't spawn with thrust still applied.
+    this.touchControls?.resetGestureState();
     const team = this.sim.teams.find((t) => t.id === teamId);
     if (team) this.turnHUD?.showTurnBanner(team.name, team.color);
     this.refreshSpectatorBanner();
@@ -905,39 +887,6 @@ export class GameScene extends Phaser.Scene {
       return adaptRenderableToWormFacade(view, () => this.sim.isJetPacking(), this.sim);
     }
     return null;
-  }
-
-  /** Show the d-pad when the active worm has a utility engaged, hide when idle.
-   *  Works in both offline and networked mode. Runs every frame from `update`. */
-  private refreshUtilityDPad(): void {
-    if (!this.utilityDPad) return;
-    // Jetpack only - rope is aim-and-fire, swing is passive (no thrust controls).
-    const active = this.sim.isJetPacking();
-    if (active && !this.utilityDPadVisible) {
-      this.utilityDPad.show();
-      this.utilityDPadVisible = true;
-    } else if (!active && this.utilityDPadVisible) {
-      this.utilityDPad.hide();
-      this.utilityDPadVisible = false;
-    }
-    if (this.utilityDPadVisible) {
-      const w = this.getActiveWormAdapter();
-      if (w) {
-        const cam = this.cameras.main;
-        this.utilityDPad.update(w.xPx, w.yPx, cam.scrollX, cam.scrollY);
-      }
-    }
-  }
-
-  /** Down-button: rope extend only (jetpack has no "down"). */
-  private dispatchUtilityDown(active: boolean): void {
-    if (!this.offlineSim) return;
-    const worm = this.offlineSim.turns.getActiveWorm();
-    if (!worm) return;
-    if (worm.isRoped() && active) {
-      const rate = tuning.rope.adjustRateMps / 60;
-      worm.ropeUtility.adjust(+rate);
-    }
   }
 
   private getSelectedWeaponId(): string {
@@ -1116,7 +1065,6 @@ export class GameScene extends Phaser.Scene {
       // them to avoid double-triggering.
       if (this.turnHUD.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
-      if (this.utilityDPad?.hitsButton(p)) return;
       // Already tracking a gesture on a different pointer: ignore. Multi-touch
       // secondary fingers should route to buttons (above), not the gesture layer.
       if (this.activePointerId !== null) return;
@@ -1171,10 +1119,6 @@ export class GameScene extends Phaser.Scene {
           // walk message directly.
           this.sim.setFacing(o.dir);
           this.sim.walk(o.dir);
-        } else if (o.kind === "utility_thrust_start") {
-          this.activeGestureKind = "utility_thrust";
-          this.activePointerId = p.id;
-          this.sim.setJetPackThrustVector(o.nx, o.ny);
         }
         // "ignored": no-op. pointermove / pointerup for this pointer won't
         // match activePointerId (null), so they short-circuit.
@@ -1183,15 +1127,6 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on("pointermove", (p: Phaser.Input.Pointer) => {
       if (p.id !== this.activePointerId) return;
-      if (this.activeGestureKind === "utility_thrust") {
-        const moves = this.gestureTracker.processMove(p.worldX, p.worldY);
-        for (const m of moves) {
-          if (m.kind === "utility_thrust_move") {
-            this.sim.setJetPackThrustVector(m.nx, m.ny);
-          }
-        }
-        return;
-      }
       if (this.activeGestureKind !== "aim") return;
       const worm = this.getActiveWormAdapter();
       if (!worm || !this.isInputAllowed()) return;
@@ -1278,8 +1213,6 @@ export class GameScene extends Phaser.Scene {
           this.sim.jump();
         } else if (o.kind === "backflip") {
           this.sim.backflip();
-        } else if (o.kind === "utility_thrust_end") {
-          this.sim.setJetPackThrustVector(0, 0);
         }
       }
       void gestureKind; // retained for future metrics / debug.
@@ -1332,6 +1265,7 @@ function adaptRenderableToWormFacade(
     adjust: () => {},
     setHorizontalInput: () => {},
     setVerticalInput: () => {},
+    setThrustVector: (_nx: number, _ny: number) => {},
     getFuel: () => 0,
     // Networked mode: facade always reports full fuel + no exhaustion. Authoritative
     // state lives on the server; per-turn UX gating will land with networked drill.
@@ -1347,6 +1281,7 @@ function adaptRenderableToWormFacade(
         ...stubUtility,
         setHorizontalInput: (dir: -1 | 0 | 1) => simRef.setJetPackHorizontal(dir),
         setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
+        setThrustVector: (nx: number, ny: number) => simRef.setJetPackThrustVector(nx, ny),
       }
     : stubUtility;
   // Drill facade: armed state + uses-this-turn are local only; fire no-ops in
