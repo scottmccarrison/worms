@@ -3,5 +3,5 @@
  * Changing these requires a deploy; the wire mask length validation
  * derives from these via packedMaskByteLength().
  */
-export const WORLD_WIDTH_PX = 2560;
-export const WORLD_HEIGHT_PX = 1024;
+export const WORLD_WIDTH_PX = 4096;
+export const WORLD_HEIGHT_PX = 1280;
