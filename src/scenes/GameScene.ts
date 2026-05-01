@@ -349,15 +349,15 @@ export class GameScene extends Phaser.Scene {
           const activeWorm = this.getActiveWormAdapter();
           if (activeWorm?.drillUtility?.isArmed()) {
             const now = this.time.now;
-            if (!activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs)) {
-              // Fire in the current aim direction
+            const hasUses = activeWorm.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
+            const onCooldown = activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs);
+            if (hasUses && !onCooldown) {
               const aimRad = activeWorm.aimAngle * activeWorm.facing;
               activeWorm.drillUtility.fire(aimRad, now);
-              if (this.touchControls?.drillBtn) {
-                this.touchControls.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
-              }
+            } else if (!hasUses) {
+              activeWorm.drillUtility.disarm();
             }
-            // Drill is a free action - do NOT trigger end-of-turn
+            // Drill is a free action - do NOT trigger end-of-turn. TouchControls.update() refreshes button visuals next frame.
             return;
           }
           this.sim.fire();
@@ -519,6 +519,7 @@ export class GameScene extends Phaser.Scene {
     this.aimHUD.update();
     this.windHUD?.update();
     this.waterRenderer?.update();
+    this.touchControls?.update();
     this.refreshUtilityDPad();
     const selectedId = this.getSelectedWeaponId();
     const weapon = allWeapons().find((w) => w.id === selectedId);
@@ -1204,18 +1205,18 @@ export class GameScene extends Phaser.Scene {
           const activeWorm = this.getActiveWormAdapter();
           if (activeWorm?.drillUtility?.isArmed()) {
             const now = this.time.now;
-            if (!activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs)) {
+            const hasUses = activeWorm.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
+            const onCooldown = activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs);
+            if (hasUses && !onCooldown) {
               // Compute aim angle same way as the drag-to-aim path
               const wDx = activeWorm.xPx - p.worldX;
               const wDy = activeWorm.yPx - p.worldY;
               const drillAngle = Math.atan2(wDy, Math.abs(wDx)) * activeWorm.facing;
               activeWorm.drillUtility.fire(drillAngle, now);
-              // Reset D button visual
-              if (this.touchControls.drillBtn) {
-                this.touchControls.drillBtn.setAlpha(tuning.touch.buttonIdleAlpha);
-              }
+            } else if (!hasUses) {
+              activeWorm.drillUtility.disarm();
             }
-            // Drill is a free action - do NOT trigger end-of-turn
+            // Drill is a free action - do NOT trigger end-of-turn. TouchControls.update() refreshes button visuals next frame.
             continue;
           }
 
@@ -1281,6 +1282,10 @@ function adaptRenderableToWormFacade(
     setHorizontalInput: () => {},
     setVerticalInput: () => {},
     getFuel: () => 0,
+    // Networked mode: facade always reports full fuel + no exhaustion. Authoritative
+    // state lives on the server; per-turn UX gating will land with networked drill.
+    getFuelPercent: () => 1,
+    resetForNewTurn: () => {},
   };
   const jetPackUtility = simRef
     ? {
@@ -1289,8 +1294,15 @@ function adaptRenderableToWormFacade(
         setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
       }
     : stubUtility;
-  // Drill facade: armed state is local only; fire no-ops in networked mode (follow-up issue).
-  const drillFacadeState = { armed: false, lastFiredAtMs: Number.NEGATIVE_INFINITY };
+  // Drill facade: armed state + uses-this-turn are local only; fire no-ops in
+  // networked mode. Per-turn cap enforcement happens client-side here so the
+  // exhausted visual still works; once networked drill lands, the worker will
+  // be the source of truth.
+  const drillFacadeState = {
+    armed: false,
+    lastFiredAtMs: Number.NEGATIVE_INFINITY,
+    usesThisTurn: 0,
+  };
   const drillUtility = {
     arm: () => {
       drillFacadeState.armed = true;
@@ -1301,13 +1313,16 @@ function adaptRenderableToWormFacade(
     isArmed: () => drillFacadeState.armed,
     isOnCooldown: (nowMs: number, cooldownMs: number) =>
       nowMs - drillFacadeState.lastFiredAtMs < cooldownMs,
+    hasUsesRemaining: (maxUsesPerTurn: number) => drillFacadeState.usesThisTurn < maxUsesPerTurn,
     fire: (_angleRad: number, nowMs: number) => {
       simRef?.executeDrill(view.id, _angleRad);
       drillFacadeState.lastFiredAtMs = nowMs;
+      drillFacadeState.usesThisTurn += 1;
       drillFacadeState.armed = false;
     },
     resetForNewTurn: () => {
       drillFacadeState.armed = false;
+      drillFacadeState.usesThisTurn = 0;
     },
   };
   const facade = {

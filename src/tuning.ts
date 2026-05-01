@@ -68,11 +68,15 @@ export interface Tuning {
     widthPx: number;
     /** Cooldown between drill fires, ms. */
     cooldownMs: number;
+    /** Max drill fires per turn. Once exhausted, button shows exhausted state. */
+    usesPerTurn: number;
   };
   touch: {
     buttonRadiusPx: number;
     buttonIdleAlpha: number;
     buttonPressedAlpha: number;
+    /** Alpha for buttons whose utility is exhausted (jet fuel = 0, drill used). */
+    buttonExhaustedAlpha: number;
     /** Radius around the active worm (in pixels) where a pointerdown is
      * treated as aim-intent instead of walk-intent. */
     wormHitRadiusPx: number;
@@ -233,11 +237,13 @@ export const tuning: Tuning = {
     lengthPx: 120,
     widthPx: 24,
     cooldownMs: 800,
+    usesPerTurn: 1,
   },
   touch: {
     buttonRadiusPx: 28,
     buttonIdleAlpha: 0.55,
     buttonPressedAlpha: 1.0,
+    buttonExhaustedAlpha: 0.2,
     wormHitRadiusPx: 40,
     jetpackRadialDeadZonePx: 50,
     doubleTapMaxMs: 250,

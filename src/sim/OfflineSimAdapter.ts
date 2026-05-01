@@ -170,6 +170,7 @@ export class OfflineSimAdapter implements SimAdapter {
         this.setInputAllowed(true);
         this.getWeaponManager(team)?.resetActivation();
         worm.drillUtility?.resetForNewTurn();
+        worm.jetPackUtility?.resetForNewTurn();
         for (const sub of this.turnChangedSubs) sub(team.id, worm.name);
         // Offline sim is always immediately stable - fire stable subs on next microtask.
         queueMicrotask(() => {
