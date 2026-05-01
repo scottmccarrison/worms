@@ -275,13 +275,13 @@ export const tuning: Tuning = {
     surfaceBaselineFrac: 0.55,
     heightmap: {
       baseStride: 256,
-      baseAmpFrac: 0.08,
+      baseAmpFrac: 0.14,
       detailStride: 96,
       detailAmpFrac: 0.02,
-      mountainStride: 512,
-      mountainAmpFrac: 0.3,
-      mountainSmoothstepLo: 0.3,
-      mountainSmoothstepHi: 0.7,
+      mountainStride: 768,
+      mountainAmpFrac: 0.55,
+      mountainSmoothstepLo: 0.25,
+      mountainSmoothstepHi: 0.55,
     },
     materialBands: {
       dirtDepthPx: 6,
@@ -298,7 +298,7 @@ export const tuning: Tuning = {
       thresholdPx: 1024,
     },
     spawn: {
-      densityPx: 200,
+      densityPx: 450,
       minPerTeam: 2,
     },
     caveAmbient: {
