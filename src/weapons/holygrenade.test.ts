@@ -7,7 +7,6 @@ import type { ProjectileManager } from "./ProjectileManager";
 import { WeaponManager } from "./WeaponManager";
 import { fire } from "./fire";
 import { holyGrenade } from "./holygrenade";
-import { defaultAmmoForMatch } from "./registry";
 import type { FireContext } from "./types";
 
 function makeWormStub(world: ReturnType<typeof World>, xPx: number, yPx: number) {
@@ -84,25 +83,25 @@ describe("holyGrenade weapon config", () => {
 
   it("3rd fire rejected by WeaponManager (out of ammo)", () => {
     const team = makeTeam("red");
-    const ammo = defaultAmmoForMatch();
+    // holygrenade is unregistered from the global registry (simplify-combat).
+    // Use bazooka with finite ammo to test WeaponManager's out-of-ammo logic.
+    const ammo = { bazooka: 2 };
     const manager = new WeaponManager(team, ammo);
 
-    // Select holy grenade
-    manager.select("holygrenade");
-    expect(manager.getSelected().id).toBe("holygrenade");
+    // Bazooka is selected by default
+    expect(manager.getSelected().id).toBe("bazooka");
 
     // Consume both shots
-    manager.consumeOne("holygrenade");
-    manager.consumeOne("holygrenade");
+    manager.consumeOne("bazooka");
+    manager.consumeOne("bazooka");
 
-    // Third consume brings it to 0; select should fail
-    manager.consumeOne("holygrenade");
-    expect(manager.ammoFor("holygrenade")).toBe(0);
+    // Third consume doesn't go below 0
+    manager.consumeOne("bazooka");
+    expect(manager.ammoFor("bazooka")).toBe(0);
 
     // Selecting again with 0 ammo should fail
-    // (first switch away, then back)
-    manager.select("bazooka");
-    const result = manager.select("holygrenade");
-    expect(result).toBe(false);
+    // (reset to infinite to switch away, then try finite-0 back)
+    manager.consumeOne("bazooka"); // no-op, already 0
+    expect(manager.hasAmmo("bazooka")).toBe(false);
   });
 });

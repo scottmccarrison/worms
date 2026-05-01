@@ -1,22 +1,9 @@
 import { bazooka } from "./bazooka";
-import { drill } from "./drill";
-import { dynamite } from "./dynamite";
-import { handGrenade } from "./handgrenade";
-import { holyGrenade } from "./holygrenade";
-import { minigun } from "./minigun";
-import { shotgun } from "./shotgun";
 import type { WeaponConfig } from "./types";
 
-/** All weapons in selectKey order (1-7). */
-const REGISTRY: WeaponConfig[] = [
-  bazooka,
-  shotgun,
-  handGrenade,
-  dynamite,
-  holyGrenade,
-  minigun,
-  drill,
-];
+// Drill, dynamite, handgrenade, holygrenade, minigun, shotgun are unregistered
+// (source files stay for re-introduction in #16/#17 once the world layer settles).
+const REGISTRY: WeaponConfig[] = [bazooka];
 
 /** All weapons as an array. */
 export function allWeapons(): WeaponConfig[] {
