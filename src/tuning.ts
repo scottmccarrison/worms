@@ -234,8 +234,8 @@ export const tuning: Tuning = {
     sideForce: 8,
   },
   drill: {
-    lengthPx: 120,
-    widthPx: 24,
+    lengthPx: 220,
+    widthPx: 48,
     cooldownMs: 800,
     usesPerTurn: 1,
   },
