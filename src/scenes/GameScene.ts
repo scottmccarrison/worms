@@ -470,6 +470,15 @@ export class GameScene extends Phaser.Scene {
         simAdapter: this.networkedSim ?? undefined,
       });
 
+      // Initial turn cinematic: handleTurnChanged fired earlier (before
+      // TurnTransition existed) primed HUD/InputController state, but the
+      // camera zoom-out -> hold -> zoom-in animation needs TurnTransition
+      // wired up first. Replay it now so the game opens with the standard
+      // turn-start cinematic on the first worm.
+      if (initialTeamId) {
+        this.turnTransition.begin(initialTeamId, initialWormId);
+      }
+
       this.debugGfx = this.add.graphics();
       this.debugGfx.setDepth(10);
       this.hud = this.add
