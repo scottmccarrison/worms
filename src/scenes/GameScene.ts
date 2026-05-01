@@ -352,7 +352,12 @@ export class GameScene extends Phaser.Scene {
             const hasUses = activeWorm.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
             const onCooldown = activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs);
             if (hasUses && !onCooldown) {
-              const aimRad = activeWorm.aimAngle * activeWorm.facing;
+              // aimAngle is in worm-forward frame (-PI/2 = up, +PI/2 = down,
+              // 0 = forward in facing direction). cutRect needs a screen-frame
+              // angle, so combine with facing to get the screen direction.
+              const screenDx = Math.cos(activeWorm.aimAngle) * activeWorm.facing;
+              const screenDy = Math.sin(activeWorm.aimAngle);
+              const aimRad = Math.atan2(screenDy, screenDx);
               activeWorm.drillUtility.fire(aimRad, now);
             } else if (!hasUses) {
               activeWorm.drillUtility.disarm();
@@ -908,6 +913,13 @@ export class GameScene extends Phaser.Scene {
       this.utilityDPad.hide();
       this.utilityDPadVisible = false;
     }
+    if (this.utilityDPadVisible) {
+      const w = this.getActiveWormAdapter();
+      if (w) {
+        const cam = this.cameras.main;
+        this.utilityDPad.update(w.xPx, w.yPx, cam.scrollX, cam.scrollY);
+      }
+    }
   }
 
   /** Down-button: rope extend only (jetpack has no "down"). */
@@ -1208,10 +1220,10 @@ export class GameScene extends Phaser.Scene {
             const hasUses = activeWorm.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
             const onCooldown = activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs);
             if (hasUses && !onCooldown) {
-              // Compute aim angle same way as the drag-to-aim path
-              const wDx = activeWorm.xPx - p.worldX;
-              const wDy = activeWorm.yPx - p.worldY;
-              const drillAngle = Math.atan2(wDy, Math.abs(wDx)) * activeWorm.facing;
+              // Drill cuts in the direction the user dragged (worm -> pointer
+              // in screen-frame y-down). cutRect uses cos/sin directly so we
+              // pass a screen-frame angle.
+              const drillAngle = Math.atan2(p.worldY - activeWorm.yPx, p.worldX - activeWorm.xPx);
               activeWorm.drillUtility.fire(drillAngle, now);
             } else if (!hasUses) {
               activeWorm.drillUtility.disarm();
