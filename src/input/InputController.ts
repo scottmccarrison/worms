@@ -22,7 +22,6 @@ export interface InputControllerInit {
 export class InputController {
   private readonly scene: Phaser.Scene;
   private readonly onEndTurn: () => void;
-  private readonly onSelectWeapon: (n: number) => void;
   private readonly onFire: () => void;
   private readonly onCycleMap: () => void;
   private readonly onWalk: (dir: -1 | 0 | 1) => void;
@@ -52,16 +51,10 @@ export class InputController {
   private readonly keyTab: Phaser.Input.Keyboard.Key;
   private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
+  private readonly keyDrill: Phaser.Input.Keyboard.Key; // D (drill toggle - only when worm.isRoped/isJetPacking are false)
   private readonly keyEnter: Phaser.Input.Keyboard.Key;
   private readonly keyMapCycle: Phaser.Input.Keyboard.Key; // M
-  // Weapon keys
-  private readonly key1: Phaser.Input.Keyboard.Key;
-  private readonly key2: Phaser.Input.Keyboard.Key;
-  private readonly key3: Phaser.Input.Keyboard.Key;
-  private readonly key4: Phaser.Input.Keyboard.Key;
-  private readonly key5: Phaser.Input.Keyboard.Key;
-  private readonly key6: Phaser.Input.Keyboard.Key;
-  private readonly key7: Phaser.Input.Keyboard.Key;
+  // Weapon key 1-7 bindings removed: only bazooka remains (auto-selected).
   private readonly keyFire: Phaser.Input.Keyboard.Key; // F
   private readonly keyPowerDown: Phaser.Input.Keyboard.Key; // [
   private readonly keyPowerUp: Phaser.Input.Keyboard.Key; // ]
@@ -69,7 +62,7 @@ export class InputController {
   constructor(init: InputControllerInit) {
     this.scene = init.scene;
     this.onEndTurn = init.onEndTurn;
-    this.onSelectWeapon = init.onSelectWeapon;
+    void init.onSelectWeapon; // kept in interface for future re-introduction of weapon variety
     this.onFire = init.onFire;
     this.onCycleMap = init.onCycleMap;
     this.onWalk = init.onWalk ?? (() => {});
@@ -95,16 +88,10 @@ export class InputController {
     this.keyTab = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
     this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyDrill = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyMapCycle = kb.addKey(Phaser.Input.Keyboard.KeyCodes.M);
-    // Weapon keys
-    this.key1 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
-    this.key2 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
-    this.key3 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
-    this.key4 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR);
-    this.key5 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE);
-    this.key6 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SIX);
-    this.key7 = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SEVEN);
+    // Weapon keys 1-7 removed: only bazooka remains, auto-selected at turn start.
     this.keyFire = kb.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.keyPowerDown = kb.addKey(Phaser.Input.Keyboard.KeyCodes.OPEN_BRACKET);
     this.keyPowerUp = kb.addKey(Phaser.Input.Keyboard.KeyCodes.CLOSED_BRACKET);
@@ -129,6 +116,7 @@ export class InputController {
     if (this.activeWorm) {
       this.activeWorm.ropeUtility?.deactivate();
       this.activeWorm.jetPackUtility?.deactivate();
+      this.activeWorm.drillUtility?.disarm();
       this.activeWorm.setActive(false);
     }
     this.activeWorm = worm;
@@ -217,6 +205,17 @@ export class InputController {
         : worm.jetPackUtility.activate();
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.keyDrill)) {
+      if (worm.drillUtility.isArmed()) {
+        worm.drillUtility.disarm();
+      } else {
+        // Mutually exclusive with rope/jet
+        if (worm.ropeUtility?.isActive()) worm.ropeUtility.deactivate();
+        if (worm.jetPackUtility?.isActive()) worm.jetPackUtility.deactivate();
+        worm.drillUtility.arm();
+      }
+    }
+
     // ---------------------------------------------------------------------------
     // State-dependent movement dispatch
     // ---------------------------------------------------------------------------
@@ -279,22 +278,13 @@ export class InputController {
       }
       void prevAim;
 
-      // M cycles maps (dev affordance) - checked BEFORE weapon keys so it takes priority
+      // M cycles maps (dev affordance)
       if (Phaser.Input.Keyboard.JustDown(this.keyMapCycle)) {
         this.onCycleMap();
         return;
       }
 
-      // Weapon select (1-7)
-      if (Phaser.Input.Keyboard.JustDown(this.key1)) this.onSelectWeapon(1);
-      else if (Phaser.Input.Keyboard.JustDown(this.key2)) this.onSelectWeapon(2);
-      else if (Phaser.Input.Keyboard.JustDown(this.key3)) this.onSelectWeapon(3);
-      else if (Phaser.Input.Keyboard.JustDown(this.key4)) this.onSelectWeapon(4);
-      else if (Phaser.Input.Keyboard.JustDown(this.key5)) this.onSelectWeapon(5);
-      else if (Phaser.Input.Keyboard.JustDown(this.key6)) this.onSelectWeapon(6);
-      else if (Phaser.Input.Keyboard.JustDown(this.key7)) this.onSelectWeapon(7);
-
-      // Fire (F)
+      // Fire (F) - branches on drill vs bazooka inside GameScene's onFire handler
       if (Phaser.Input.Keyboard.JustDown(this.keyFire)) {
         this.onFire();
       }

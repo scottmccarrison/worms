@@ -5,6 +5,8 @@ interface AimHUDInit {
   scene: Phaser.Scene;
   getActiveWorm: () => Worm | null;
   isInputAllowed: () => boolean;
+  /** Returns true when drill is armed; power bar is hidden in drill mode. */
+  isDrillArmed?: () => boolean;
 }
 
 /**
@@ -21,10 +23,12 @@ export class AimHUD {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly getActiveWorm: () => Worm | null;
   private readonly isInputAllowed: () => boolean;
+  private readonly isDrillArmed: () => boolean;
 
   constructor(init: AimHUDInit) {
     this.getActiveWorm = init.getActiveWorm;
     this.isInputAllowed = init.isInputAllowed;
+    this.isDrillArmed = init.isDrillArmed ?? (() => false);
 
     this.gfx = init.scene.add.graphics();
     // No setScrollFactor(0): drawing uses world coords (worm.xPx/yPx),
@@ -80,26 +84,28 @@ export class AimHUD {
     this.gfx.fillStyle(0xffee00, 1.0);
     this.gfx.fillTriangle(endX, endY, leftX, leftY, rightX, rightY);
 
-    // Power bar below worm
-    const barX = wx - 10;
-    const barY = wy + 18;
+    // Power bar below worm - hidden when drill is armed (fixed-length cut, no power)
+    if (!this.isDrillArmed()) {
+      const barX = wx - 10;
+      const barY = wy + 18;
 
-    // Background
-    this.gfx.fillStyle(0x333333, 0.85);
-    this.gfx.fillRect(barX, barY, 20, 4);
+      // Background
+      this.gfx.fillStyle(0x333333, 0.85);
+      this.gfx.fillRect(barX, barY, 20, 4);
 
-    // Fill color: yellow < 50%, orange 50-80%, red >= 80%
-    const fillColor = power >= 0.8 ? 0xff3300 : power >= 0.5 ? 0xff8800 : 0xffee00;
-    const fillW = Math.round(20 * power);
-    this.gfx.fillStyle(fillColor, 1.0);
-    this.gfx.fillRect(barX, barY, fillW, 4);
+      // Fill color: yellow < 50%, orange 50-80%, red >= 80%
+      const fillColor = power >= 0.8 ? 0xff3300 : power >= 0.5 ? 0xff8800 : 0xffee00;
+      const fillW = Math.round(20 * power);
+      this.gfx.fillStyle(fillColor, 1.0);
+      this.gfx.fillRect(barX, barY, fillW, 4);
 
-    // Tick mark at 100% right edge
-    this.gfx.lineStyle(1, 0xffffff, 0.7);
-    this.gfx.beginPath();
-    this.gfx.moveTo(barX + 20, barY - 1);
-    this.gfx.lineTo(barX + 20, barY + 5);
-    this.gfx.strokePath();
+      // Tick mark at 100% right edge
+      this.gfx.lineStyle(1, 0xffffff, 0.7);
+      this.gfx.beginPath();
+      this.gfx.moveTo(barX + 20, barY - 1);
+      this.gfx.lineTo(barX + 20, barY + 5);
+      this.gfx.strokePath();
+    }
   }
 
   destroy(): void {
