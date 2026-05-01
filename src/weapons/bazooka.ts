@@ -15,6 +15,6 @@ export const bazooka: WeaponConfig = {
     terrainRadiusPx: 45,
     damageRadiusPx: 60,
     maxDamage: 50,
-    impulseMag: 60,
+    impulseMag: 25,
   },
 };
