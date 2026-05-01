@@ -1249,10 +1249,13 @@ export class GameScene extends Phaser.Scene {
             const hasUses = activeWorm.drillUtility.hasUsesRemaining(tuning.drill.usesPerTurn);
             const onCooldown = activeWorm.drillUtility.isOnCooldown(now, tuning.drill.cooldownMs);
             if (hasUses && !onCooldown) {
-              // Drill cuts in the direction the user dragged (worm -> pointer
-              // in screen-frame y-down). cutRect uses cos/sin directly so we
-              // pass a screen-frame angle.
-              const drillAngle = Math.atan2(p.worldY - activeWorm.yPx, p.worldX - activeWorm.xPx);
+              // Slingshot: drag-aim sets aimAngle in worm-forward frame and
+              // may have flipped facing during the drag. Convert (aimAngle,
+              // facing) to a screen-frame angle for cutRect. Matches bazooka's
+              // "drag away to fire toward" convention.
+              const screenDx = Math.cos(activeWorm.aimAngle) * activeWorm.facing;
+              const screenDy = Math.sin(activeWorm.aimAngle);
+              const drillAngle = Math.atan2(screenDy, screenDx);
               activeWorm.drillUtility.fire(drillAngle, now);
             } else if (!hasUses) {
               activeWorm.drillUtility.disarm();
