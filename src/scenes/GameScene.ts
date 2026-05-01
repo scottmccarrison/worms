@@ -100,6 +100,10 @@ export class GameScene extends Phaser.Scene {
   /** Origin of the active aim drag in screen px. Used by pointermove to compute
    * drag length vs dead-zone for fire-on-release. */
   private aimDragStart: { x: number; y: number } | null = null;
+  /** Touch walk direction, applied each frame in update() so a held tap
+   * keeps the worm walking. Without this, InputController.update() reads
+   * keyboard (0 when no keys held) and clobbers the velocity each frame. */
+  private touchWalkDir: -1 | 0 | 1 = 0;
 
   // ---- Init-time data ----
   private mapId: string = firstId();
@@ -508,6 +512,12 @@ export class GameScene extends Phaser.Scene {
     for (const sprite of this.objectSprites.values()) sprite.interpolate(deltaMs);
     this.renderFromAdapter();
     this.inputController.update(deltaMs);
+    // Touch walk: re-apply each frame so a held tap keeps moving the worm.
+    // Must run AFTER inputController.update() since the keyboard path
+    // unconditionally writes worm.walk(0) when no key is held.
+    if (this.touchWalkDir !== 0) {
+      this.sim.walk(this.touchWalkDir);
+    }
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
     this.aimHUD.update();
     this.windHUD?.update();
@@ -1119,6 +1129,10 @@ export class GameScene extends Phaser.Scene {
           // walk message directly.
           this.sim.setFacing(o.dir);
           this.sim.walk(o.dir);
+          // Track the held direction so update() re-applies the velocity
+          // each frame (otherwise InputController's keyboard path clobbers
+          // it with walk(0) on the next tick).
+          this.touchWalkDir = o.dir;
         }
         // "ignored": no-op. pointermove / pointerup for this pointer won't
         // match activePointerId (null), so they short-circuit.
@@ -1209,6 +1223,7 @@ export class GameScene extends Phaser.Scene {
           this.sim.fire();
         } else if (o.kind === "walk_release") {
           this.sim.walk(0);
+          this.touchWalkDir = 0;
         } else if (o.kind === "jump") {
           this.sim.jump();
         } else if (o.kind === "backflip") {
