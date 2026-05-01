@@ -85,6 +85,8 @@ export class TouchControls {
     // + jet + drill along the LEFT edge so neither their tap areas nor the End
     // button's hit area overlap.
     const leftX = 60;
+    // Top padding so the button row doesn't crowd the very top of the canvas.
+    const topY = 90;
 
     if (ropeEnabled) {
       // --- Rope button (top-left) ---
@@ -94,7 +96,7 @@ export class TouchControls {
         label: "R",
         radius,
       });
-      ropeBtn.setPosition(leftX, 60);
+      ropeBtn.setPosition(leftX, topY);
       ropeBtn.setScrollFactor(0);
       this.ropeBtn = ropeBtn;
       this.container.add(ropeBtn);
@@ -134,7 +136,7 @@ export class TouchControls {
         radius,
       });
       const jetBtnX = leftX + radius * 2 + 10;
-      const jetBtnY = 60;
+      const jetBtnY = topY;
       jetBtn.setPosition(jetBtnX, jetBtnY);
       jetBtn.setScrollFactor(0);
       this.jetBtn = jetBtn;
@@ -264,7 +266,7 @@ export class TouchControls {
         label: "D",
         radius,
       });
-      drillBtn.setPosition(leftX + (radius * 2 + 10) * 2, 60);
+      drillBtn.setPosition(leftX + (radius * 2 + 10) * 2, topY);
       drillBtn.setScrollFactor(0);
       this.drillBtn = drillBtn;
       this.container.add(drillBtn);
