@@ -81,14 +81,22 @@ export class TouchControls {
 
     const radius = tuning.touch.buttonRadiusPx;
     this.buttonRadius = radius;
-    // End-turn button occupies the top-right 80px square (TurnHUD). Stack rope
-    // + jet + drill along the LEFT edge so neither their tap areas nor the End
-    // button's hit area overlap.
-    const leftX = 60;
-    // Top padding so the button row doesn't crowd the very top of the canvas.
-    const topY = 90;
-    // Pixel gap between button visuals. Button centers are radius * 2 + gap apart.
-    const gap = 22;
+    // SNES-style face-button cluster, anchored bottom-left for thumb reach.
+    // Triangle: J at the top (anchor for the joystick slide); R + D form the
+    // base. J is set 220px above the bottom edge so a downward slide (which
+    // thrusts the worm UP via slingshot) has the full joystickMaxSlidePx
+    // budget before the finger leaves the canvas.
+    const sceneH = this.scene.scale.height;
+    const triangleCenterX = 130;
+    const triangleTopY = sceneH - 220;
+    const triangleBaseY = sceneH - 110;
+    const triangleHorizSpread = 60; // half-width: R is -spread, D is +spread from center
+    const rPosX = triangleCenterX - triangleHorizSpread;
+    const rPosY = triangleBaseY;
+    const jPosX = triangleCenterX;
+    const jPosY = triangleTopY;
+    const dPosX = triangleCenterX + triangleHorizSpread;
+    const dPosY = triangleBaseY;
     // Hit-test radius is generously larger than the visual radius so a finger
     // tap doesn't have to land dead-center to register.
     const hitRadius = Math.round(radius * 1.5);
@@ -101,7 +109,7 @@ export class TouchControls {
         label: "R",
         radius,
       });
-      ropeBtn.setPosition(leftX, topY);
+      ropeBtn.setPosition(rPosX, rPosY);
       ropeBtn.setScrollFactor(0);
       this.ropeBtn = ropeBtn;
       this.container.add(ropeBtn);
@@ -140,8 +148,8 @@ export class TouchControls {
         label: "J",
         radius,
       });
-      const jetBtnX = leftX + radius * 2 + gap;
-      const jetBtnY = topY;
+      const jetBtnX = jPosX;
+      const jetBtnY = jPosY;
       jetBtn.setPosition(jetBtnX, jetBtnY);
       jetBtn.setScrollFactor(0);
       this.jetBtn = jetBtn;
@@ -271,7 +279,7 @@ export class TouchControls {
         label: "D",
         radius,
       });
-      drillBtn.setPosition(leftX + (radius * 2 + gap) * 2, topY);
+      drillBtn.setPosition(dPosX, dPosY);
       drillBtn.setScrollFactor(0);
       this.drillBtn = drillBtn;
       this.container.add(drillBtn);
