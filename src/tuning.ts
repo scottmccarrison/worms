@@ -60,6 +60,8 @@ export interface Tuning {
     fuelPerSecond: number;
     upwardForce: number;
     sideForce: number;
+    joystickDeadZonePx: number;
+    joystickMaxSlidePx: number;
   };
   drill: {
     /** Length of the drill rect cut, pixels. */
@@ -209,7 +211,7 @@ export const tuning: Tuning = {
   worm: {
     radiusPx: 12,
     density: 1.0,
-    walkSpeedMps: 2.5,
+    walkSpeedMps: 5.5,
     aimSpeedRadPerSec: 2.0,
     maxHealth: 100,
     linearDamping: 0.1,
@@ -230,8 +232,10 @@ export const tuning: Tuning = {
   jetpack: {
     fuelCapacity: 100,
     fuelPerSecond: 30,
-    upwardForce: 15,
-    sideForce: 8,
+    upwardForce: 35,
+    sideForce: 18,
+    joystickDeadZonePx: 12,
+    joystickMaxSlidePx: 80,
   },
   drill: {
     lengthPx: 220,

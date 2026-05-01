@@ -34,6 +34,10 @@ export interface TouchControlsInit {
  * `update()` should be called each frame from the scene; it refreshes
  * button visuals based on the active worm's utility state (jet fuel
  * level, drill uses-this-turn).
+ *
+ * JetPack button uses a virtual-joystick (press-and-hold + slide).
+ * Press J to engage; slide finger from J center; thrust direction is
+ * the OPPOSITE of the slide direction (slingshot). Release to disengage.
  */
 export class TouchControls {
   private readonly container: Phaser.GameObjects.Container;
@@ -45,6 +49,20 @@ export class TouchControls {
   private readonly scene: Phaser.Scene;
   private readonly getActiveWorm: () => Worm | null;
   private readonly buttonRadius: number;
+
+  // Virtual joystick state for the J button.
+  private jetGestureActive = false;
+  private jetGesturePointerId = -1;
+  private jetButtonCenterX = 0;
+  private jetButtonCenterY = 0;
+
+  // Joystick visual indicator graphics (scrollFactor 0, always in viewport coords).
+  private jetIndicatorRing: Phaser.GameObjects.Graphics | null = null;
+  private jetIndicatorDot: Phaser.GameObjects.Graphics | null = null;
+
+  // Bound event handlers stored so we can remove them in destroy().
+  private _onPointerMove: ((p: Phaser.Input.Pointer) => void) | null = null;
+  private _onPointerUp: ((p: Phaser.Input.Pointer) => void) | null = null;
 
   constructor(init: TouchControlsInit) {
     this.scene = init.scene;
@@ -115,35 +133,118 @@ export class TouchControls {
         label: "J",
         radius,
       });
-      jetBtn.setPosition(leftX + radius * 2 + 10, 60);
+      const jetBtnX = leftX + radius * 2 + 10;
+      const jetBtnY = 60;
+      jetBtn.setPosition(jetBtnX, jetBtnY);
       jetBtn.setScrollFactor(0);
       this.jetBtn = jetBtn;
       this.container.add(jetBtn);
+
+      // Store J button center in screen coords (viewport coords, scrollFactor 0).
+      this.jetButtonCenterX = jetBtnX;
+      this.jetButtonCenterY = jetBtnY;
 
       // Fuel bar - thin horizontal strip at the bottom of the button.
       // Drawn here, redrawn each update() based on jetPackUtility.getFuelPercent().
       this.jetFuelBar = this.scene.add.graphics();
       jetBtn.add(this.jetFuelBar);
 
+      // Indicator graphics: ring (depth 99) and dot (depth 101).
+      // These are scene-level objects (not inside the container) so they stay in
+      // viewport coords via scrollFactor 0.
+      this.jetIndicatorRing = this.scene.add.graphics();
+      this.jetIndicatorRing.setScrollFactor(0);
+      this.jetIndicatorRing.setDepth(99);
+      this.jetIndicatorRing.setVisible(false);
+
+      this.jetIndicatorDot = this.scene.add.graphics();
+      this.jetIndicatorDot.setScrollFactor(0);
+      this.jetIndicatorDot.setDepth(101);
+      this.jetIndicatorDot.setVisible(false);
+
       jetBtn.setInteractive({
         hitArea: new Phaser.Geom.Circle(0, 0, radius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
-      // Toggle pattern matching R and D: tap engages jet, tap again disengages.
-      // Directional thrust comes from the UtilityDPad (which appears while jet is
-      // active). Press-and-hold on the J button is intentionally NOT used.
-      jetBtn.on("pointerdown", () => {
+
+      // Press-and-hold + virtual joystick pattern.
+      // Down: engage jet immediately if fuel > 0; begin tracking finger position.
+      // Move: compute thrust as opposite of slide direction (slingshot).
+      // Up: disengage jet, clear indicators.
+      jetBtn.on("pointerdown", (p: Phaser.Input.Pointer) => {
         const w = this.getActiveWorm();
         if (!w) return;
-        if (w.jetPackUtility.isActive()) {
-          w.jetPackUtility.deactivate();
+        // Exhausted: tap is a no-op.
+        if (w.jetPackUtility.getFuelPercent() <= 0) return;
+        // Mutually exclusive: deactivate rope/drill before engaging jet.
+        if (w.ropeUtility?.isActive()) w.ropeUtility.deactivate();
+        if (w.drillUtility?.isArmed()) w.drillUtility.disarm();
+        // Activate jet immediately.
+        if (!w.jetPackUtility.isActive()) {
+          w.jetPackUtility.activate();
+        }
+        // Start joystick tracking.
+        this.jetGestureActive = true;
+        this.jetGesturePointerId = p.id;
+        // Thrust starts at zero (neutral) until the finger slides.
+        w.jetPackUtility.setThrustVector(0, 0);
+        this._showJoystickIndicator(this.jetButtonCenterX, this.jetButtonCenterY);
+        jetBtn.setAlpha(tuning.touch.buttonPressedAlpha);
+      });
+
+      jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+
+      // Scene-level pointermove: update thrust while J is held and finger slides.
+      this._onPointerMove = (p: Phaser.Input.Pointer) => {
+        if (!this.jetGestureActive || p.id !== this.jetGesturePointerId) return;
+        const w = this.getActiveWorm();
+        if (!w || !w.jetPackUtility.isActive()) return;
+
+        const cx = this.jetButtonCenterX;
+        const cy = this.jetButtonCenterY;
+        // Use screen (viewport) coords - the button is scrollFactor 0.
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const dist = Math.hypot(dx, dy);
+
+        const deadZone = tuning.jetpack.joystickDeadZonePx;
+        const maxSlide = tuning.jetpack.joystickMaxSlidePx;
+
+        if (dist < deadZone) {
+          // In dead zone: zero thrust.
+          w.jetPackUtility.setThrustVector(0, 0);
+          this._updateJoystickDot(cx, cy);
           return;
         }
-        // Exhausted: tap is a no-op. JetPack.activate() also gates internally.
-        if (w.jetPackUtility.getFuelPercent() <= 0) return;
-        w.jetPackUtility.activate();
-      });
-      jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
+
+        // Slingshot: thrust direction is OPPOSITE of slide.
+        const nx = -(dx / dist);
+        const ny = -(dy / dist);
+        const mag = Math.min(1, (dist - deadZone) / (maxSlide - deadZone));
+        w.jetPackUtility.setThrustVector(nx * mag, ny * mag);
+
+        // Clamp dot to maxSlide radius visually.
+        const clampedDist = Math.min(dist, maxSlide);
+        const dotX = cx + (dx / dist) * clampedDist;
+        const dotY = cy + (dy / dist) * clampedDist;
+        this._updateJoystickDot(dotX, dotY);
+      };
+
+      // Scene-level pointerup: disengage jet.
+      this._onPointerUp = (p: Phaser.Input.Pointer) => {
+        if (!this.jetGestureActive || p.id !== this.jetGesturePointerId) return;
+        const w = this.getActiveWorm();
+        if (w?.jetPackUtility.isActive()) {
+          w.jetPackUtility.setThrustVector(0, 0);
+          w.jetPackUtility.deactivate();
+        }
+        this.jetGestureActive = false;
+        this.jetGesturePointerId = -1;
+        this._hideJoystickIndicator();
+      };
+
+      this.scene.input.on("pointermove", this._onPointerMove);
+      this.scene.input.on("pointerup", this._onPointerUp);
     }
 
     if (drillEnabled) {
@@ -205,7 +306,54 @@ export class TouchControls {
   }
 
   destroy(): void {
+    if (this._onPointerMove) {
+      this.scene.input.off("pointermove", this._onPointerMove);
+      this._onPointerMove = null;
+    }
+    if (this._onPointerUp) {
+      this.scene.input.off("pointerup", this._onPointerUp);
+      this._onPointerUp = null;
+    }
+    this.jetIndicatorRing?.destroy();
+    this.jetIndicatorRing = null;
+    this.jetIndicatorDot?.destroy();
+    this.jetIndicatorDot = null;
     this.container.destroy();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Joystick indicator helpers
+  // ---------------------------------------------------------------------------
+
+  /** Draw the joystick ring centered at (cx, cy) and show indicator graphics. */
+  private _showJoystickIndicator(cx: number, cy: number): void {
+    const maxSlide = tuning.jetpack.joystickMaxSlidePx;
+    if (this.jetIndicatorRing) {
+      this.jetIndicatorRing.clear();
+      this.jetIndicatorRing.lineStyle(2, 0xff9933, 0.4);
+      this.jetIndicatorRing.strokeCircle(cx, cy, maxSlide);
+      this.jetIndicatorRing.setVisible(true);
+    }
+    if (this.jetIndicatorDot) {
+      this.jetIndicatorDot.clear();
+      this.jetIndicatorDot.fillStyle(0xff9933, 0.9);
+      this.jetIndicatorDot.fillCircle(cx, cy, 6);
+      this.jetIndicatorDot.setVisible(true);
+    }
+  }
+
+  /** Redraw the dot at the clamped finger position. */
+  private _updateJoystickDot(x: number, y: number): void {
+    if (!this.jetIndicatorDot) return;
+    this.jetIndicatorDot.clear();
+    this.jetIndicatorDot.fillStyle(0xff9933, 0.9);
+    this.jetIndicatorDot.fillCircle(x, y, 6);
+  }
+
+  /** Hide both indicator graphics and clear gesture state. */
+  private _hideJoystickIndicator(): void {
+    this.jetIndicatorRing?.setVisible(false);
+    this.jetIndicatorDot?.setVisible(false);
   }
 
   // ---------------------------------------------------------------------------
@@ -234,6 +382,9 @@ export class TouchControls {
     const exhausted = fuelPct <= 0;
     if (exhausted) {
       this.jetBtn.setAlpha(tuning.touch.buttonExhaustedAlpha);
+    } else if (this.jetGestureActive) {
+      // Keep pressed alpha while joystick is held.
+      this.jetBtn.setAlpha(tuning.touch.buttonPressedAlpha);
     } else if (w.jetPackUtility.isActive()) {
       this.jetBtn.setAlpha(tuning.touch.buttonPressedAlpha);
     } else {

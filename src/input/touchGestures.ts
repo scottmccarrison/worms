@@ -30,9 +30,6 @@ export type GestureOutcome =
   | { kind: "aim_start"; xPx: number; yPx: number }
   | { kind: "aim_move"; xPx: number; yPx: number }
   | { kind: "aim_end" }
-  | { kind: "utility_thrust_start"; nx: number; ny: number }
-  | { kind: "utility_thrust_move"; nx: number; ny: number }
-  | { kind: "utility_thrust_end" }
   | { kind: "ignored" };
 
 /**
@@ -55,8 +52,8 @@ export interface GestureInput {
   longPressMs: number;
 }
 
-/** Internal gesture modes. Mirrors the plan: idle / aim / walk / utility_thrust. */
-type Mode = "idle" | "aim" | "walk" | "utility_thrust";
+/** Internal gesture modes. Mirrors the plan: idle / aim / walk. */
+type Mode = "idle" | "aim" | "walk";
 
 /**
  * Factory for a fresh tracker. Holds state across gestures (for double-tap
@@ -75,10 +72,6 @@ export function createGestureTracker(): {
   // Set on processDown when this gesture is the 2nd half of a double-tap so
   // processUp knows to emit "jump" instead of "walk_release".
   let pendingDoubleTap = false;
-  // Worm position captured on processDown for utility_thrust recomputation
-  // in processMove (pointer coords change but worm position stays stable).
-  let thrustWormXPx = 0;
-  let thrustWormYPx = 0;
 
   return {
     processDown(input: GestureInput): GestureOutcome[] {
@@ -104,22 +97,12 @@ export function createGestureTracker(): {
         return [{ kind: "aim_start", xPx: input.downXPx, yPx: input.downYPx }];
       }
 
-      // Utility active + not on worm -> radial thrust gesture.
-      // Vector from click to worm = thrust direction (inverted: "aim away
-      // from click" so tapping left of worm thrusts right, like aiming).
-      if (input.utilityActive) {
-        if (input.wormXPx === null || input.wormYPx === null) return [{ kind: "ignored" }];
-        const dx = input.wormXPx - input.downXPx;
-        const dy = input.wormYPx - input.downYPx;
-        const len = Math.hypot(dx, dy);
-        if (len < input.jetpackRadialDeadZonePx) return [{ kind: "ignored" }];
-        mode = "utility_thrust";
-        thrustWormXPx = input.wormXPx;
-        thrustWormYPx = input.wormYPx;
-        return [{ kind: "utility_thrust_start", nx: dx / len, ny: dy / len }];
-      }
+      // Utility active + not on worm: jetpack is now handled by the J-button
+      // virtual joystick in TouchControls. Off-worm taps while utility is
+      // active fall through to walk mode so the player can still reposition.
+      // utilityActive field is kept on GestureInput for compatibility (no behavior tied to it here).
 
-      // Off-worm, my turn, no utility -> WALK mode.
+      // Off-worm, my turn -> WALK mode.
       // Walk direction is relative to the active worm's position: tap left of
       // the worm walks left, tap right walks right. This reads as intuitive
       // no matter where the worm is on the map (if the worm is far-right and
@@ -140,18 +123,10 @@ export function createGestureTracker(): {
       if (mode === "aim") {
         return [{ kind: "aim_move", xPx, yPx }];
       }
-      if (mode === "utility_thrust") {
-        // Recompute thrust vector from current pointer position.
-        // We need the worm position but processMove doesn't carry it -
-        // store it from the processDown call via closure.
-        const dx = thrustWormXPx - xPx;
-        const dy = thrustWormYPx - yPx;
-        const len = Math.hypot(dx, dy);
-        if (len < 1) return [];
-        return [{ kind: "utility_thrust_move", nx: dx / len, ny: dy / len }];
-      }
       // WALK mode ignores movement: the walk continues held until release.
       // IDLE mode shouldn't receive moves (caller gates on activeGesture).
+      void xPx;
+      void yPx;
       return [];
     },
 
@@ -167,10 +142,6 @@ export function createGestureTracker(): {
 
       if (currentMode === "aim") {
         return [{ kind: "aim_end" }];
-      }
-
-      if (currentMode === "utility_thrust") {
-        return [{ kind: "utility_thrust_end" }];
       }
 
       if (currentMode === "walk" && (side === -1 || side === 1)) {

@@ -121,35 +121,34 @@ describe("touchGestures state machine", () => {
     expect(up).toEqual([]);
   });
 
-  it("utility active off-worm outside dead zone emits utility_thrust_start", () => {
+  it("utility active off-worm falls through to walk mode (jetpack now uses J-button joystick)", () => {
     const t = createGestureTracker();
-    // downXPx=200, wormXPx=640, wormYPx=400, downYPx=360 -> dx=440, dy=40 -> len~441
-    // len > jetpackRadialDeadZonePx (50), so thrust fires.
+    // Previously emitted utility_thrust_start; now jetpack thrust is handled
+    // by the J-button virtual joystick in TouchControls. Off-worm taps while
+    // utility is active become walk gestures so the player can still reposition.
     const down = t.processDown(
       mkInput({ downXPx: 200, utilityActive: true, jetpackRadialDeadZonePx: 50 }),
     );
-    expect(down).toHaveLength(1);
-    expect(down[0].kind).toBe("utility_thrust_start");
-    const o = down[0] as { kind: "utility_thrust_start"; nx: number; ny: number };
-    // nx/ny should be a unit vector; magnitude must be ~1.
-    expect(Math.hypot(o.nx, o.ny)).toBeCloseTo(1, 5);
+    // downXPx=200 < wormXPx=640, so walk direction is left.
+    expect(down).toEqual([{ kind: "walk", dir: -1 }]);
   });
 
-  it("utility active off-worm inside dead zone returns ignored", () => {
+  it("utility active off-worm inside dead zone still walks (dead zone is now ignored)", () => {
     const t = createGestureTracker();
-    // downXPx=650, wormXPx=640, wormYPx=400, downYPx=360 -> dx=10,dy=40 -> len~41
-    // 41 < jetpackRadialDeadZonePx (50), so ignored.
+    // Previously returned ignored because len < jetpackRadialDeadZonePx; now
+    // all off-worm taps (including those near the worm) fall through to walk.
+    // downXPx=650, wormXPx=640 -> tap is right of worm -> walk right.
     const down = t.processDown(
       mkInput({ downXPx: 650, downYPx: 356, utilityActive: true, jetpackRadialDeadZonePx: 50 }),
     );
-    expect(down).toEqual([{ kind: "ignored" }]);
+    expect(down).toEqual([{ kind: "walk", dir: 1 }]);
   });
 
-  it("utility_thrust_end emitted on pointerup after thrust start", () => {
+  it("utility active off-worm releases as walk_release", () => {
     const t = createGestureTracker();
     t.processDown(mkInput({ downXPx: 200, utilityActive: true, jetpackRadialDeadZonePx: 50 }));
     const up = t.processUp(1100);
-    expect(up).toEqual([{ kind: "utility_thrust_end" }]);
+    expect(up).toEqual([{ kind: "walk_release" }]);
   });
 
   it("utility active ON worm still enters aim mode", () => {
