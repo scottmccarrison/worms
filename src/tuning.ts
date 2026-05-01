@@ -232,8 +232,8 @@ export const tuning: Tuning = {
   jetpack: {
     fuelCapacity: 60,
     fuelPerSecond: 30,
-    upwardForce: 12,
-    sideForce: 7,
+    upwardForce: 17,
+    sideForce: 10,
     joystickDeadZonePx: 14,
     joystickMaxSlidePx: 160,
   },
