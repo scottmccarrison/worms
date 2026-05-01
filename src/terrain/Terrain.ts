@@ -188,9 +188,12 @@ export class Terrain {
         if (t < 0 || t > lengthPx) continue;
         if (s < -halfW || s > halfW) continue;
         if (this.materialMap !== null) {
-          // Material hardness gate: use half-width as the "radius" analogue
+          // Material hardness gate: drill represents itself as a length-scaled
+          // tool, not a small-radius blast. Use lengthPx so drill cuts through
+          // rock (rockMinRadiusPx ~30) and stone (stoneMinRadiusPx ~60). Using
+          // halfW (typically 12) here would silently no-op on stone/rock.
           const material = this.materialMap[worldY * this.widthPx + worldX];
-          if (!gateCutByMaterial(material, halfW, this.hardness)) continue;
+          if (!gateCutByMaterial(material, lengthPx, this.hardness)) continue;
         }
         data[(row * w + col) * 4 + 3] = 0;
       }

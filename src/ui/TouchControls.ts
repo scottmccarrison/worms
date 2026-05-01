@@ -85,11 +85,24 @@ export class TouchControls {
         hitArea: new Phaser.Geom.Circle(0, 0, radius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
+      // Aim-and-fire pattern (matches drill): tap R to arm, drag-aim, release
+      // fires rope.activate() at the aim direction. Tap R while attached
+      // detaches. No radial dpad for rope - swing is passive under gravity.
       ropeBtn.on("pointerdown", () => {
         const w = this.getActiveWorm();
         if (!w) return;
-        w.ropeUtility.isActive() ? w.ropeUtility.deactivate() : w.ropeUtility.activate();
-        this._setButtonAlpha(ropeBtn, w.ropeUtility.isActive());
+        if (w.ropeUtility.isActive()) {
+          w.ropeUtility.deactivate();
+          return;
+        }
+        if (w.ropeUtility.isArmed()) {
+          w.ropeUtility.disarm();
+          return;
+        }
+        // Mutually exclusive with jet/drill
+        if (w.jetPackUtility?.isActive()) w.jetPackUtility.deactivate();
+        if (w.drillUtility?.isArmed()) w.drillUtility.disarm();
+        w.ropeUtility.arm();
       });
       ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
     }
@@ -160,6 +173,7 @@ export class TouchControls {
         } else {
           // Mutually exclusive with rope/jet
           if (w.ropeUtility?.isActive()) w.ropeUtility.deactivate();
+          if (w.ropeUtility?.isArmed?.()) w.ropeUtility.disarm();
           if (w.jetPackUtility?.isActive()) w.jetPackUtility.deactivate();
           w.drillUtility.arm();
         }
@@ -204,7 +218,9 @@ export class TouchControls {
       this.ropeBtn.setAlpha(tuning.touch.buttonIdleAlpha);
       return;
     }
-    this._setButtonAlpha(this.ropeBtn, w.ropeUtility.isActive());
+    // Pressed alpha when attached OR armed (waiting for drag-fire). Idle otherwise.
+    const isLit = w.ropeUtility.isActive() || w.ropeUtility.isArmed();
+    this._setButtonAlpha(this.ropeBtn, isLit);
   }
 
   private _refreshJetButton(w: Worm | null): void {

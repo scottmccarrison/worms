@@ -27,6 +27,7 @@ export class NinjaRope implements Utility {
   readonly worm: Worm;
 
   private state: RopeState = "inactive";
+  private armed = false;
   private anchor: Body | null = null;
   private joint: DistanceJoint | null = null;
   private lengthM = 0;
@@ -42,6 +43,27 @@ export class NinjaRope implements Utility {
 
   isActive(): boolean {
     return this.state === "attached";
+  }
+
+  /** True when the player has tapped R but hasn't drag-fired yet. The R
+   *  button uses this to drive its visual state; GameScene's drag-release
+   *  handler reads it to decide whether to fire rope on aim_end. */
+  isArmed(): boolean {
+    return this.armed;
+  }
+
+  arm(): void {
+    if (this.state === "attached") return; // can't arm while already roped
+    this.armed = true;
+  }
+
+  disarm(): void {
+    this.armed = false;
+  }
+
+  /** Called at turn-start to clear lingering state from prior owner. */
+  resetForNewTurn(): void {
+    this.armed = false;
   }
 
   /** Fire rope in current aim direction. No-op if already active or raycast misses. */
@@ -128,6 +150,7 @@ export class NinjaRope implements Utility {
 
     this.worm.setActiveRope(this);
     this.state = "attached";
+    this.armed = false;
   }
 
   deactivate(): void {
