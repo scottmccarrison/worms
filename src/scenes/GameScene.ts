@@ -365,6 +365,14 @@ export class GameScene extends Phaser.Scene {
             // Drill is a free action - do NOT trigger end-of-turn. TouchControls.update() refreshes button visuals next frame.
             return;
           }
+          if (activeWorm?.ropeUtility?.isArmed()) {
+            // Rope: aim-and-fire (no radial). Activate at current aim direction.
+            activeWorm.ropeUtility.activate();
+            // activate() auto-clears armed on success; if raycast missed, also disarm
+            // so the next tap re-arms cleanly rather than leaving the button lit.
+            activeWorm.ropeUtility.disarm();
+            return;
+          }
           this.sim.fire();
         },
         onCycleMap: () => {
@@ -903,9 +911,8 @@ export class GameScene extends Phaser.Scene {
    *  Works in both offline and networked mode. Runs every frame from `update`. */
   private refreshUtilityDPad(): void {
     if (!this.utilityDPad) return;
-    const isJetPacking = this.sim.isJetPacking();
-    const isRoped = this.offlineSim ? !!this.offlineSim.turns.getActiveWorm()?.isRoped() : false;
-    const active = isJetPacking || isRoped;
+    // Jetpack only - rope is aim-and-fire, swing is passive (no thrust controls).
+    const active = this.sim.isJetPacking();
     if (active && !this.utilityDPadVisible) {
       this.utilityDPad.show();
       this.utilityDPadVisible = true;
@@ -1231,6 +1238,13 @@ export class GameScene extends Phaser.Scene {
             // Drill is a free action - do NOT trigger end-of-turn. TouchControls.update() refreshes button visuals next frame.
             continue;
           }
+          if (activeWorm?.ropeUtility?.isArmed()) {
+            // Rope: aim-and-fire. activate() reads worm.aimAngle which the
+            // drag-aim path has been updating during the drag.
+            activeWorm.ropeUtility.activate();
+            activeWorm.ropeUtility.disarm();
+            continue;
+          }
 
           this.sim.fire();
         } else if (o.kind === "walk_release") {
@@ -1297,6 +1311,10 @@ function adaptRenderableToWormFacade(
     // Networked mode: facade always reports full fuel + no exhaustion. Authoritative
     // state lives on the server; per-turn UX gating will land with networked drill.
     getFuelPercent: () => 1,
+    // Rope armed-mode mirrors (offline only; networked rope is deferred per #82).
+    isArmed: () => false,
+    arm: () => {},
+    disarm: () => {},
     resetForNewTurn: () => {},
   };
   const jetPackUtility = simRef

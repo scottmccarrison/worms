@@ -104,11 +104,14 @@ export class UtilityDPad {
 
   show(): void {
     this.container.setVisible(true);
-    // Re-enable hit-testing on each button; setInteractive() is a no-op
-    // if already interactive so this is safe to call repeatedly.
+    // Hit area is generously larger than the visual radius so a finger can
+    // drift slightly off the painted button without losing the hold. Combined
+    // with NOT releasing on pointerout (see _wireHoldButton), holding the
+    // up button to thrust stays reliable even if the finger wanders.
+    const hitRadius = Math.round(tuning.touch.buttonRadiusPx * 1.6);
     for (const b of [this.leftBtn, this.rightBtn, this.upBtn, this.downBtn]) {
       b.setInteractive({
-        hitArea: new Phaser.Geom.Circle(0, 0, tuning.touch.buttonRadiusPx),
+        hitArea: new Phaser.Geom.Circle(0, 0, hitRadius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
     }
@@ -184,7 +187,9 @@ export class UtilityDPad {
   }
 
   /** Wire a left / right button so holding dispatches the correct combined
-   *  horizontal direction (last-pressed wins when both held simultaneously). */
+   *  horizontal direction (last-pressed wins when both held simultaneously).
+   *  Releases on pointerup / pointerupoutside but NOT on pointerout - finger
+   *  drift off the button should not stop the thrust. */
   private _wireHorizontalButton(btn: Phaser.GameObjects.Container, dir: -1 | 1): void {
     const press = (): void => {
       if (dir === -1) this.leftHeld = true;
@@ -201,10 +206,11 @@ export class UtilityDPad {
     btn.on("pointerdown", press);
     btn.on("pointerup", release);
     btn.on("pointerupoutside", release);
-    btn.on("pointerout", release);
   }
 
-  /** Wire a simple hold-to-activate button (up / down thrust). */
+  /** Wire a simple hold-to-activate button (up / down thrust). Releases on
+   *  pointerup / pointerupoutside only - pointerout (finger drifted off the
+   *  button while still pressed) keeps the thrust active. */
   private _wireHoldButton(btn: Phaser.GameObjects.Container, cb: (active: boolean) => void): void {
     const press = (): void => {
       btn.setAlpha(tuning.touch.buttonPressedAlpha);
@@ -217,7 +223,6 @@ export class UtilityDPad {
     btn.on("pointerdown", press);
     btn.on("pointerup", release);
     btn.on("pointerupoutside", release);
-    btn.on("pointerout", release);
   }
 
   private _dispatchHorizontal(): void {
