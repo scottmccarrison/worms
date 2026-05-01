@@ -87,6 +87,11 @@ export class TouchControls {
     const leftX = 60;
     // Top padding so the button row doesn't crowd the very top of the canvas.
     const topY = 90;
+    // Pixel gap between button visuals. Button centers are radius * 2 + gap apart.
+    const gap = 22;
+    // Hit-test radius is generously larger than the visual radius so a finger
+    // tap doesn't have to land dead-center to register.
+    const hitRadius = Math.round(radius * 1.5);
 
     if (ropeEnabled) {
       // --- Rope button (top-left) ---
@@ -102,7 +107,7 @@ export class TouchControls {
       this.container.add(ropeBtn);
 
       ropeBtn.setInteractive({
-        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitArea: new Phaser.Geom.Circle(0, 0, hitRadius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
       // Aim-and-fire pattern (matches drill): tap R to arm, drag-aim, release
@@ -135,7 +140,7 @@ export class TouchControls {
         label: "J",
         radius,
       });
-      const jetBtnX = leftX + radius * 2 + 10;
+      const jetBtnX = leftX + radius * 2 + gap;
       const jetBtnY = topY;
       jetBtn.setPosition(jetBtnX, jetBtnY);
       jetBtn.setScrollFactor(0);
@@ -165,7 +170,7 @@ export class TouchControls {
       this.jetIndicatorDot.setVisible(false);
 
       jetBtn.setInteractive({
-        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitArea: new Phaser.Geom.Circle(0, 0, hitRadius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
 
@@ -266,13 +271,13 @@ export class TouchControls {
         label: "D",
         radius,
       });
-      drillBtn.setPosition(leftX + (radius * 2 + 10) * 2, topY);
+      drillBtn.setPosition(leftX + (radius * 2 + gap) * 2, topY);
       drillBtn.setScrollFactor(0);
       this.drillBtn = drillBtn;
       this.container.add(drillBtn);
 
       drillBtn.setInteractive({
-        hitArea: new Phaser.Geom.Circle(0, 0, radius),
+        hitArea: new Phaser.Geom.Circle(0, 0, hitRadius),
         hitAreaCallback: Phaser.Geom.Circle.Contains,
       });
       drillBtn.on("pointerdown", () => {
