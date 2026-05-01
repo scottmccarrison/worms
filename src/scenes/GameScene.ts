@@ -1124,6 +1124,21 @@ export class GameScene extends Phaser.Scene {
       const worm = this.getActiveWormAdapter();
       const myTurn = this.isInputAllowed();
       const utilityActive = !!worm && (worm.isRoped() || worm.isJetPacking());
+
+      // Drill/rope armed: every drag is an aim gesture regardless of where it
+      // starts. The user has explicitly armed the utility via its button, so
+      // the on-worm hit-zone check would just fight thumb imprecision on
+      // mobile. The drag direction is interpreted relative to the worm at
+      // pointerup time.
+      const drillArmed = !!worm && !!worm.drillUtility?.isArmed?.();
+      const ropeArmed = !!worm && !!worm.ropeUtility?.isArmed?.();
+      if (myTurn && (drillArmed || ropeArmed)) {
+        this.activeGestureKind = "aim";
+        this.activePointerId = p.id;
+        this.aimDragStart = { x: p.worldX, y: p.worldY };
+        return;
+      }
+
       // worldX/worldY are camera-adjusted pointer coords. We use these
       // throughout the gesture path so downXPx/downYPx are in the same
       // coord system as worm.xPx/worm.yPx (world) - the on-worm hit test
@@ -1210,6 +1225,13 @@ export class GameScene extends Phaser.Scene {
       this.aimDragStart = null;
 
       const outcomes = this.gestureTracker.processUp(Date.now());
+      // If we bypassed the gestureTracker on pointerdown (armed drill/rope),
+      // the tracker is in idle mode and processUp won't emit aim_end. Synth
+      // one so the existing aim_end branch fires drill/rope.
+      const trackerEmittedAimEnd = outcomes.some((o) => o.kind === "aim_end");
+      if (gestureKind === "aim" && !trackerEmittedAimEnd && aimStart) {
+        outcomes.push({ kind: "aim_end" });
+      }
       for (const o of outcomes) {
         if (o.kind === "aim_end") {
           // Fire-on-release, gated by the dead-zone so a stray tap doesn't
