@@ -9,6 +9,11 @@ import { tuning } from "../tuning";
  * so this d-pad replaces it with persistent left / right / up (/ down)
  * buttons the player can hold.
  *
+ * Layout: 4-button cross centered on the active worm. The container is
+ * repositioned each frame via `update(worm, camera)` so the buttons follow
+ * the worm. Spacing is wide enough that the worm sprite stays visible in
+ * the empty middle. Position is clamped so no button leaves the viewport.
+ *
  * Mounted by GameScene when the active worm activates a utility;
  * destroyed when the utility deactivates. Never shown in networked mode
  * (per plan #65: utilities are offline-only).
@@ -32,6 +37,7 @@ export class UtilityDPad {
   private readonly upBtn: Phaser.GameObjects.Container;
   private readonly downBtn: Phaser.GameObjects.Container;
   private readonly scene: Phaser.Scene;
+  private readonly spacing: number;
   // Tracks which horizontal button is currently held so we can resolve
   // simultaneous left+right to a defined direction (last pressed wins).
   private leftHeld = false;
@@ -42,24 +48,25 @@ export class UtilityDPad {
     this.scene = init.scene;
     this.onLeft = init.onLeft;
     const radius = tuning.touch.buttonRadiusPx;
-    const sw = this.scene.scale.width;
-    const sh = this.scene.scale.height;
+    // Wide enough that the worm sprite (radius ~12) sits in the empty middle
+    // and the player can see + tap any direction without their finger covering
+    // the worm.
+    this.spacing = radius * 3;
 
-    // Layout: 4-button cross, bottom-center. Positions are rough; dat.gui
-    // panel doesn't expose these yet so values are hardcoded relative to
-    // screen size.
-    const cx = sw / 2;
-    const cy = sh - 80;
-    const spacing = radius * 2 + 12;
-
+    // Buttons positioned at relative offsets from the container origin.
+    // Container origin = worm screen position (set each frame via update()).
     this.leftBtn = this._makeButton({ label: "<", radius });
-    this.leftBtn.setPosition(cx - spacing, cy);
+    this.leftBtn.setPosition(-this.spacing, 0);
+    this.leftBtn.setScrollFactor(0);
     this.rightBtn = this._makeButton({ label: ">", radius });
-    this.rightBtn.setPosition(cx + spacing, cy);
+    this.rightBtn.setPosition(this.spacing, 0);
+    this.rightBtn.setScrollFactor(0);
     this.upBtn = this._makeButton({ label: "^", radius });
-    this.upBtn.setPosition(cx, cy - spacing);
+    this.upBtn.setPosition(0, -this.spacing);
+    this.upBtn.setScrollFactor(0);
     this.downBtn = this._makeButton({ label: "v", radius });
-    this.downBtn.setPosition(cx, cy + spacing);
+    this.downBtn.setPosition(0, this.spacing);
+    this.downBtn.setScrollFactor(0);
 
     this.container = this.scene.add.container(0, 0, [
       this.leftBtn,
@@ -122,6 +129,22 @@ export class UtilityDPad {
       this.rightHeld = false;
       this.onLeft(0);
     }
+  }
+
+  /**
+   * Position the d-pad centered on the active worm's current screen position.
+   * Called each frame from GameScene.update() while visible.
+   * Clamps to the viewport so all four buttons remain reachable.
+   */
+  update(wormXPx: number, wormYPx: number, cameraScrollX: number, cameraScrollY: number): void {
+    if (!this.container.visible) return;
+    const radius = tuning.touch.buttonRadiusPx;
+    const sw = this.scene.scale.width;
+    const sh = this.scene.scale.height;
+    const margin = this.spacing + radius + 8;
+    const cx = Math.max(margin, Math.min(sw - margin, wormXPx - cameraScrollX));
+    const cy = Math.max(margin, Math.min(sh - margin, wormYPx - cameraScrollY));
+    this.container.setPosition(cx, cy);
   }
 
   destroy(): void {
