@@ -73,6 +73,7 @@ export class TouchControls {
         radius,
       });
       ropeBtn.setPosition(leftX, 60);
+      ropeBtn.setScrollFactor(0);
       this.ropeBtn = ropeBtn;
       this.container.add(ropeBtn);
 
@@ -100,6 +101,7 @@ export class TouchControls {
       // Offset by rope's footprint (+10px gap) even if rope is disabled, so
       // the jet button sits at the same absolute position in both modes.
       jetBtn.setPosition(leftX + radius * 2 + 10, 60);
+      jetBtn.setScrollFactor(0);
       this.jetBtn = jetBtn;
       this.container.add(jetBtn);
 
@@ -134,6 +136,7 @@ export class TouchControls {
         radius,
       });
       drillBtn.setPosition(leftX + (radius * 2 + 10) * 2, 60);
+      drillBtn.setScrollFactor(0);
       this.drillBtn = drillBtn;
       this.container.add(drillBtn);
 
