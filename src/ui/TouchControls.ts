@@ -172,6 +172,8 @@ export class TouchControls {
       // Move: compute thrust as opposite of slide direction (slingshot).
       // Up: disengage jet, clear indicators.
       jetBtn.on("pointerdown", (p: Phaser.Input.Pointer) => {
+        // Reject secondary touches: only one finger drives the joystick.
+        if (this.jetGestureActive) return;
         const w = this.getActiveWorm();
         if (!w) return;
         // Exhausted: tap is a no-op.
@@ -183,7 +185,10 @@ export class TouchControls {
         if (!w.jetPackUtility.isActive()) {
           w.jetPackUtility.activate();
         }
-        // Start joystick tracking.
+        // Start joystick tracking. Re-read the button's current position
+        // each press so any layout change since construction is reflected.
+        this.jetButtonCenterX = jetBtn.x;
+        this.jetButtonCenterY = jetBtn.y;
         this.jetGestureActive = true;
         this.jetGesturePointerId = p.id;
         // Thrust starts at zero (neutral) until the finger slides.
@@ -230,7 +235,10 @@ export class TouchControls {
         this._updateJoystickDot(dotX, dotY);
       };
 
-      // Scene-level pointerup: disengage jet.
+      // Scene-level pointerup / pointercancel: disengage jet. Pointercancel
+      // fires when the OS interrupts a touch (incoming call, screenshot,
+      // browser swipe gesture). Without it, the gesture would hang and
+      // thrust would keep applying invisibly.
       this._onPointerUp = (p: Phaser.Input.Pointer) => {
         if (!this.jetGestureActive || p.id !== this.jetGesturePointerId) return;
         const w = this.getActiveWorm();
@@ -245,6 +253,7 @@ export class TouchControls {
 
       this.scene.input.on("pointermove", this._onPointerMove);
       this.scene.input.on("pointerup", this._onPointerUp);
+      this.scene.input.on("pointercancel", this._onPointerUp);
     }
 
     if (drillEnabled) {
@@ -312,6 +321,7 @@ export class TouchControls {
     }
     if (this._onPointerUp) {
       this.scene.input.off("pointerup", this._onPointerUp);
+      this.scene.input.off("pointercancel", this._onPointerUp);
       this._onPointerUp = null;
     }
     this.jetIndicatorRing?.destroy();
@@ -319,6 +329,24 @@ export class TouchControls {
     this.jetIndicatorDot?.destroy();
     this.jetIndicatorDot = null;
     this.container.destroy();
+  }
+
+  /**
+   * Public reset hook for turn rotations. Called by GameScene when the active
+   * worm changes so a hung gesture (finger still on J when timer expired)
+   * doesn't leak thrust state into the next worm's turn.
+   */
+  resetGestureState(): void {
+    if (!this.jetGestureActive) return;
+    const w = this.getActiveWorm();
+    if (w?.jetPackUtility.isActive()) {
+      w.jetPackUtility.setThrustVector(0, 0);
+      w.jetPackUtility.deactivate();
+    }
+    this.jetGestureActive = false;
+    this.jetGesturePointerId = -1;
+    this._hideJoystickIndicator();
+    if (this.jetBtn) this.jetBtn.setAlpha(tuning.touch.buttonIdleAlpha);
   }
 
   // ---------------------------------------------------------------------------

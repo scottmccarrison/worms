@@ -817,6 +817,9 @@ export class GameScene extends Phaser.Scene {
   private handleTurnChanged(teamId: string, _wormId: string): void {
     dlogUnthrottled("scene", "GameScene.handleTurnChanged", { teamId, wormId: _wormId });
     if (!teamId) return;
+    // Clear any leaked jet joystick gesture state from the previous turn so
+    // the next worm doesn't spawn with thrust still applied.
+    this.touchControls?.resetGestureState();
     const team = this.sim.teams.find((t) => t.id === teamId);
     if (team) this.turnHUD?.showTurnBanner(team.name, team.color);
     this.refreshSpectatorBanner();
@@ -1262,6 +1265,7 @@ function adaptRenderableToWormFacade(
     adjust: () => {},
     setHorizontalInput: () => {},
     setVerticalInput: () => {},
+    setThrustVector: (_nx: number, _ny: number) => {},
     getFuel: () => 0,
     // Networked mode: facade always reports full fuel + no exhaustion. Authoritative
     // state lives on the server; per-turn UX gating will land with networked drill.
@@ -1277,6 +1281,7 @@ function adaptRenderableToWormFacade(
         ...stubUtility,
         setHorizontalInput: (dir: -1 | 0 | 1) => simRef.setJetPackHorizontal(dir),
         setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
+        setThrustVector: (nx: number, ny: number) => simRef.setJetPackThrustVector(nx, ny),
       }
     : stubUtility;
   // Drill facade: armed state + uses-this-turn are local only; fire no-ops in
