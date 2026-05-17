@@ -35,6 +35,10 @@ export class InputController {
   // Track last walk direction so we only fire onWalk on transitions
   // (matches the server contract: press -> send {dir:-1}, release -> send {dir:0}).
   private lastWalkDir: -1 | 0 | 1 = 0;
+  // Tracks whether any jet-thrust key was active last frame, so we can fire
+  // a single "release" zero-out without overwriting the touch-joystick thrust
+  // vector every frame when no keys are pressed.
+  private lastJetKeyActive = false;
 
   // Key bindings
   private readonly keyLeft: Phaser.Input.Keyboard.Key;
@@ -233,9 +237,18 @@ export class InputController {
     } else if (worm.isJetPacking()) {
       // While jetpacking: walk keys steer horizontally, up thrusts vertical.
       // Aim is LOCKED (arrow keys are consumed by thrust controls).
+      // Polling these setters every frame would clobber the touch-joystick
+      // thrust vector (which is event-driven; pointermove only fires on
+      // actual movement). Only push keyboard state when a jet key is held
+      // or was just released this frame.
+      const jetUpActive = this.keyUp.isDown || this.keyW.isDown;
       const hDir = this.readHorizontalAxis();
-      worm.jetPackUtility.setHorizontalInput(hDir);
-      worm.jetPackUtility.setVerticalInput(this.keyUp.isDown || this.keyW.isDown);
+      const anyJetKey = jetUpActive || hDir !== 0;
+      if (anyJetKey || this.lastJetKeyActive) {
+        worm.jetPackUtility.setHorizontalInput(hDir);
+        worm.jetPackUtility.setVerticalInput(jetUpActive);
+      }
+      this.lastJetKeyActive = anyJetKey;
     } else {
       // Normal movement
       const walkDir = this.readHorizontalAxis();
