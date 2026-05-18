@@ -244,7 +244,7 @@ export class Simulation {
       heightPx: init.heightPx,
       mask: init.mask,
       materialMap: init.materialMap, // optional, undefined for legacy maps
-      hardness: { rockMinRadiusPx: 30, stoneMinRadiusPx: 60 }, // Mirror of src/tuning.ts worldgen.materialHardness
+      hardness: { rockMinRadiusPx: 0, stoneMinRadiusPx: 0 }, // Mirror of src/tuning.ts worldgen.materialHardness - both 0 makes all materials cuttable by any radius.
     });
 
     const ammoTemplate = defaultAmmoForMatch();
