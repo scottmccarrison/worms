@@ -212,6 +212,22 @@ export class Worm {
     this.pendingDamage += amount;
   }
 
+  /**
+   * Force-kill (off-map culling). Mirrors worker Worm.kill(): drops health,
+   * marks dead, dims sprite, and disarms utilities so a roped or jetting
+   * worm doesn't keep its body anchored once it has fallen off the world.
+   * Idempotent.
+   */
+  kill(): void {
+    if (!this.isAlive) return;
+    this.health = 0;
+    this.isAlive = false;
+    this.graphics.setAlpha(0.3);
+    this.ropeUtility?.deactivate();
+    this.jetPackUtility?.deactivate();
+    this.drillUtility?.disarm();
+  }
+
   applyPendingDamage(): void {
     if (!this.isAlive) return;
     if (this.pendingDamage <= 0) return;

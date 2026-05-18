@@ -33,6 +33,7 @@ import type Phaser from "phaser";
 import type { Contact, ContactImpulse } from "planck";
 import type { LoadedMap } from "../maps/types";
 import { PhysicsSystem } from "../physics/PhysicsSystem";
+import { PX_PER_M } from "../physics/scale";
 import { TurnManager } from "../state/TurnManager";
 import { Terrain } from "../terrain/Terrain";
 import { tuning } from "../tuning";
@@ -83,7 +84,22 @@ export class OfflineSimAdapter implements SimAdapter {
 
   private inputAllowed = false;
 
+  // Off-map kill bounds (meters). Top boundary intentionally excluded:
+  // gravity returns airborne worms; turn timer caps duration. Mirrors
+  // worker/src/sim/simulation.ts:236-239.
+  private readonly killMinXMeters: number;
+  private readonly killMaxXMeters: number;
+  private readonly killMaxYMeters: number;
+
   constructor(init: OfflineSimAdapterInit) {
+    // Compute kill bounds before anything that could use them. X margin
+    // scales with world width (200px min, 10% otherwise); Y bottom margin
+    // is a fixed 200px below the world floor.
+    const marginXPx = Math.max(200, init.widthPx * 0.1);
+    this.killMinXMeters = -marginXPx / PX_PER_M;
+    this.killMaxXMeters = (init.widthPx + marginXPx) / PX_PER_M;
+    this.killMaxYMeters = (init.heightPx + 200) / PX_PER_M;
+
     // --- Build physics world + terrain (with bodies) ---
     this.physicsSystem = new PhysicsSystem({ gravity: { x: 0, y: tuning.world.gravityY } });
     this.terrainInstance = new Terrain({
@@ -394,6 +410,22 @@ export class OfflineSimAdapter implements SimAdapter {
     this.terrainInstance.flushPendingCuts();
     this.projectileManager.update(dtMs);
     for (const w of this.wormList) w.applyPendingDamage();
+    // Off-map cull. Any worm past the X edges (with margin) or below the
+    // bottom (with margin) is force-killed. Top edge skipped on purpose:
+    // gravity returns airborne worms. Runs before turnManager.update so
+    // an active worm that just fell off is detected as dead this same
+    // tick and the turn rotates.
+    for (const w of this.wormList) {
+      if (!w.isAlive) continue;
+      const pos = w.body.getPosition();
+      if (
+        pos.x < this.killMinXMeters ||
+        pos.x > this.killMaxXMeters ||
+        pos.y > this.killMaxYMeters
+      ) {
+        w.kill();
+      }
+    }
     this.turnManager.update(dtMs);
     for (const w of this.wormList) {
       w.update(dtMs);
