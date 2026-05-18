@@ -294,8 +294,11 @@ export const tuning: Tuning = {
       depthPx: 3,
     },
     materialHardness: {
-      rockMinRadiusPx: 30,
-      stoneMinRadiusPx: 60,
+      // Both 0 = all materials cuttable by any cut radius. Bazooka is the
+      // only weapon (drill is a utility), so hardness gating was just
+      // complexity. Re-raise these if weapon variety lands and needs tiers.
+      rockMinRadiusPx: 0,
+      stoneMinRadiusPx: 0,
     },
     hygiene: {
       thresholdPx: 1024,
