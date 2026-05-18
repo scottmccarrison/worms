@@ -135,9 +135,15 @@ describe("terraworldV1 integration", () => {
     const ctx = makeCtx(W, H);
     terraworldV1Generator(ctx, W, H, { seed: 42, themeTag: "snow" });
     const data = ctx.getImageData(0, 0, W, H).data;
+    // Decoration is painted at globalAlpha < 1 so it stays visually solid but
+    // is below ALPHA_SOLID for the physics mask. The alpha pre/un-multiply
+    // round-trip shifts RGB by up to 2 LSBs, so match within tolerance.
     let frostHits = 0;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] === 0xca && data[i + 1] === 0xf0 && data[i + 2] === 0xff) frostHits++;
+      const dr = Math.abs(data[i] - 0xca);
+      const dg = Math.abs(data[i + 1] - 0xf0);
+      const db = Math.abs(data[i + 2] - 0xff);
+      if (dr <= 2 && dg <= 2 && db <= 2) frostHits++;
     }
     expect(frostHits).toBeGreaterThan(0);
   });
