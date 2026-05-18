@@ -123,6 +123,17 @@ describe("generateHeightmapPass", () => {
     expect(y).not.toBe(HEIGHTMAP_UNINIT);
   });
 
+  it("all surfaceY values are >= minSurfaceYPx - sky buffer leaves room above tallest peak", () => {
+    // Wide world + peak-bearing theme stresses the mountain octave so the
+    // clamp is exercised on multiple columns.
+    const world = makeWorld(7, 6144, 1280, "default");
+    generateHeightmapPass.run(makeCtx(world, 1));
+    const minY = tuning.worldgen.heightmap.minSurfaceYPx;
+    for (let x = 0; x < world.widthPx; x++) {
+      expect(world.heightmap[x]).toBeGreaterThanOrEqual(minY);
+    }
+  });
+
   it("throws if world.theme is null", () => {
     const world = createWorld(1, 100, 100, "default");
     // theme intentionally left null

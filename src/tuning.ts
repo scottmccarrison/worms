@@ -130,6 +130,8 @@ export interface Tuning {
       /** Smoothstep range over which the mountain octave's contribution ramps from 0 to full. Tuple [lo, hi] in [0, 1]. */
       mountainSmoothstepLo: number;
       mountainSmoothstepHi: number;
+      /** Minimum surfaceY in pixels. Peaks below this get clamped, leaving a sky buffer above the tallest mountain. Sized to worm radius + comfort margin so spawns near the peak don't clip the top edge of the world. */
+      minSurfaceYPx: number;
     };
     materialBands: {
       /** Pixels of dirt material below the surface crust before transitioning to rock. */
@@ -282,6 +284,7 @@ export const tuning: Tuning = {
       mountainAmpFrac: 0.55,
       mountainSmoothstepLo: 0.25,
       mountainSmoothstepHi: 0.55,
+      minSurfaceYPx: 80,
     },
     materialBands: {
       dirtDepthPx: 6,
