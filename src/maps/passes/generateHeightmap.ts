@@ -29,8 +29,12 @@ function cosInterp(a: number, b: number, t: number): number {
  *   blend            = smoothstep(mountainSmoothstepLo, mountainSmoothstepHi, t)
  *   mountainContribution = -blend * mountainAmp                    (negative => surfaceY decreases => taller peak)
  *
- * surfaceY clamped to [0, heightPx - 1] - never produces the heightPx void
- * sentinel (only ApplyThemeHeightmapMods is allowed to write that).
+ * surfaceY clamped to [minSurfaceYPx, heightPx - 1] - never produces the
+ * heightPx void sentinel (only ApplyThemeHeightmapMods is allowed to write
+ * that), and never overflows the top edge of the world. minSurfaceYPx
+ * leaves a sky buffer above the tallest peak so spawn placement near a
+ * clamped peak doesn't clip the worm body off-canvas. minSurfaceYPx is
+ * floored at maxY to stay valid on degenerate-height worlds.
  *
  * RNG call count is deterministic for given (widthPx, theme.flags.wantsPeaks):
  *   - octave 1: ceil(widthPx / baseStride) + 2
@@ -78,6 +82,11 @@ export const generateHeightmapPass: Pass = {
       : null;
 
     const maxY = heightPx - 1; // never produce the heightPx void sentinel
+    // Sky buffer above the tallest peak so spawn placement near a clamped peak
+    // doesn't put the worm's body partly off the top edge of the world. Honors
+    // the design doc's "open air above" spawn invariant via substrate shaping
+    // rather than smarter spawn logic.
+    const minY = Math.min(cfg.minSurfaceYPx, maxY);
     for (let x = 0; x < widthPx; x++) {
       const base = sampleAt(baseSamples, cfg.baseStride, x);
       const detail = sampleAt(detailSamples, cfg.detailStride, x);
@@ -88,7 +97,7 @@ export const generateHeightmapPass: Pass = {
         const blend = smoothstep(cfg.mountainSmoothstepLo, cfg.mountainSmoothstepHi, t);
         mountain = -blend * mountainAmp;
       }
-      const surfaceY = Math.max(0, Math.min(maxY, Math.floor(baseY + base + detail + mountain)));
+      const surfaceY = Math.max(minY, Math.min(maxY, Math.floor(baseY + base + detail + mountain)));
       world.heightmap[x] = surfaceY;
     }
   },
