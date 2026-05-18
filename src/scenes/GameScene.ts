@@ -21,6 +21,7 @@ import { WaterRenderer } from "../terrain/WaterRenderer";
 import { tuning } from "../tuning";
 import { AimHUD } from "../ui/AimHUD";
 import { CameraFollower } from "../ui/CameraFollower";
+import { MinimapHUD } from "../ui/MinimapHUD";
 import { ReconnectingOverlay } from "../ui/ReconnectingOverlay";
 import { SpectatorHUD } from "../ui/SpectatorHUD";
 import { TouchControls } from "../ui/TouchControls";
@@ -79,6 +80,7 @@ export class GameScene extends Phaser.Scene {
   private inputController!: InputController;
   private touchControls!: TouchControls;
   private turnHUD!: TurnHUD;
+  private minimapHUD: MinimapHUD | null = null;
   private spectatorHUD: SpectatorHUD | null = null;
   private aimHUD!: AimHUD;
   private turnTransition: TurnTransition | null = null;
@@ -313,6 +315,8 @@ export class GameScene extends Phaser.Scene {
         for (const obj of this.objectSprites.values()) obj.destroy();
         this.objectSprites.clear();
         this.turnHUD?.destroy();
+        this.minimapHUD?.destroy();
+        this.minimapHUD = null;
         this.aimHUD?.destroy();
         this.spectatorHUD?.destroy();
         this.windHUD?.destroy();
@@ -433,6 +437,14 @@ export class GameScene extends Phaser.Scene {
       // dims - not this.scale.width, which is the viewport, not the world.
       const sceneWidthPx = this.serverWidthPx ?? WORLD_WIDTH_PX;
       const sceneHeightPx = this.serverHeightPx ?? WORLD_HEIGHT_PX;
+      this.minimapHUD = new MinimapHUD({
+        scene: this,
+        sim: this.sim,
+        worldWidthPx: sceneWidthPx,
+        worldHeightPx: sceneHeightPx,
+        terrainTextureKey:
+          this.terrainRenderer?.textureKey ?? this.offlineSim?.terrain.textureKey ?? "terrain",
+      });
       this.windHUD = new WindHUD({ scene: this, sim: this.sim });
       this.waterRenderer = new WaterRenderer({
         scene: this,
@@ -528,6 +540,7 @@ export class GameScene extends Phaser.Scene {
       this.sim.walk(this.touchWalkDir);
     }
     this.turnHUD.update(this.sim.getTurnSecondsRemaining());
+    this.minimapHUD?.update();
     this.aimHUD.update();
     this.windHUD?.update();
     this.waterRenderer?.update();
@@ -839,6 +852,7 @@ export class GameScene extends Phaser.Scene {
     // Clear any leaked jet joystick gesture state from the previous turn so
     // the next worm doesn't spawn with thrust still applied.
     this.touchControls?.resetGestureState();
+    this.minimapHUD?.resetGestureState();
     const team = this.sim.teams.find((t) => t.id === teamId);
     if (team) this.turnHUD?.showTurnBanner(team.name, team.color);
     this.refreshSpectatorBanner();
@@ -1083,6 +1097,7 @@ export class GameScene extends Phaser.Scene {
       // own pointerdown handlers, so the scene-level gesture layer gates on
       // them to avoid double-triggering.
       if (this.turnHUD.hitsButton(p)) return;
+      if (this.minimapHUD?.hitsButton(p)) return;
       if (this.touchControls.hitsButton(p)) return;
       // Already tracking a gesture on a different pointer: ignore. Multi-touch
       // secondary fingers should route to buttons (above), not the gesture layer.
