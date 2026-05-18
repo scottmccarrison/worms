@@ -252,7 +252,15 @@ export class InputController {
     } else {
       // Normal movement
       const walkDir = this.readHorizontalAxis();
-      worm.walk(walkDir);
+      // Edge-triggered: only call walk() while a key is held or on the
+      // frame a key was just released. Polling walk(0) every idle frame
+      // would clobber the touch-walk velocity AND wipe jump's horizontal
+      // impulse during the brief grounded-foot window post-jump (the foot
+      // sensor extends ~0.12m below the circle bottom, so contact persists
+      // for ~1 step after jump even with -6 m/s upward velocity).
+      if (walkDir !== 0 || this.lastWalkDir !== 0) {
+        worm.walk(walkDir);
+      }
       // Fire onWalk only on direction transitions so the server sees one
       // press + one release event, not a stream of per-frame samples.
       if (walkDir !== this.lastWalkDir) {
