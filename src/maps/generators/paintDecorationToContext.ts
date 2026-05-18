@@ -26,24 +26,38 @@ const DRESSING_COLORS: Record<string, string> = {
  * row sits one pixel above the topmost substrate pixel - flush against
  * the surface. Color from DRESSING_COLORS keyed by feature.sprite.
  *
+ * Decoration is painted at alpha ~0.996 (254/255) so it stays visually
+ * solid but slips under terrainAlgorithm.ALPHA_SOLID = 255. Without this,
+ * the same canvas feeds Terrain's body builder and every grass tuft / moss
+ * dot becomes a ~3 px box body that worms catch on. Per the world-gen
+ * bible, decoration is decoration; the substrate is the physics surface.
+ *
  * Unknown type or sprite strings are silently skipped (Terraria
  * PlaceTile no-op-on-invalid convention).
  */
+const DECORATION_ALPHA = 254 / 255;
+
 export function paintDecorationToContext(
   ctx: CanvasRenderingContext2D,
   ambient: readonly AmbientFeature[],
   dressing: readonly DressingFeature[],
 ): void {
-  for (const f of ambient) {
-    const color = AMBIENT_COLORS[f.type];
-    if (!color) continue;
-    ctx.fillStyle = color;
-    ctx.fillRect(f.xPx, f.yPx, 2, 2);
-  }
-  for (const f of dressing) {
-    const color = DRESSING_COLORS[f.sprite];
-    if (!color) continue;
-    ctx.fillStyle = color;
-    ctx.fillRect(f.xPx, f.yPx - 2, 2, 3);
+  const priorAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = DECORATION_ALPHA;
+  try {
+    for (const f of ambient) {
+      const color = AMBIENT_COLORS[f.type];
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(f.xPx, f.yPx, 2, 2);
+    }
+    for (const f of dressing) {
+      const color = DRESSING_COLORS[f.sprite];
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(f.xPx, f.yPx - 2, 2, 3);
+    }
+  } finally {
+    ctx.globalAlpha = priorAlpha;
   }
 }
