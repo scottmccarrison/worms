@@ -311,9 +311,11 @@ export class NetworkedSimAdapter implements SimAdapter {
     this.send({ type: "input_jetpack_vector", vx, vy });
   }
 
-  executeDrill(_wormId: string, _angleRad: number): void {
-    // Networked drill not yet implemented. See follow-up issue.
-    console.warn("[drill] networked drill not yet implemented");
+  executeDrill(_wormId: string, angleRad: number): void {
+    // Server applies the rect cut to the active worm (wormId implied) and
+    // broadcasts the resulting terrain_cut. Per-turn use + cooldown gating is
+    // client-side (the drill facade), same as offline. (#201)
+    this.send({ type: "input_drill_fire", angleRad, seq: this.nextSeq() });
   }
 
   isJetPacking(): boolean {

@@ -225,6 +225,12 @@ export interface TerrainCutEvent {
   y: number;
   r: number;
   seq: number;
+  /**
+   * Present for rectangular (drill) cuts; absent for circular
+   * (explosion/tunnel) cuts. When set, clients render via cutRect instead of
+   * cutCircle. x/y are the cut origin (worm position); r is unused for rects.
+   */
+  rect?: { lengthPx: number; widthPx: number; angleRad: number };
 }
 
 /**
@@ -375,5 +381,6 @@ export type ClientMsg =
   | { type: "input_jetpack_thrust"; active: boolean; seq: number }
   | { type: "input_jetpack_horizontal"; dir: -1 | 0 | 1; seq: number }
   | { type: "input_jetpack_vector"; vx: number; vy: number }
+  | { type: "input_drill_fire"; angleRad: number; seq: number }
   | { type: "leave" }
   | { type: "client_log"; scope: string; event: string; data?: unknown; ts: number };

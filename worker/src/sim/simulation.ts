@@ -46,6 +46,10 @@ import type { FireResult as WeaponFireResult } from "../weapons/fire.js";
 import { defaultAmmoForMatch, getById } from "../weapons/registry.js";
 
 const MAX_PROJECTILES = 8;
+// Mirror of tuning.drill (src/tuning.ts). The drill cuts a lengthPx x widthPx
+// rectangle along the worm's aim. Keep in sync.
+const DRILL_LENGTH_PX = 220;
+const DRILL_WIDTH_PX = 48;
 
 export interface SimEventTerrainCut {
   type: "terrain_cut";
@@ -53,6 +57,8 @@ export interface SimEventTerrainCut {
   y: number;
   r: number;
   seq: number;
+  /** Set for drill (rect) cuts so clients render via cutRect, not cutCircle. */
+  rect?: { lengthPx: number; widthPx: number; angleRad: number };
 }
 
 export interface SimEventFire {
@@ -384,6 +390,25 @@ export class Simulation {
   }
 
   /**
+   * Drill: cut a rect of terrain along `angleRad` from the worm's position.
+   * The drill is a utility (no ammo, no projectile, does not end the turn);
+   * per-turn use + cooldown gating is client-side. The cut is logged and
+   * broadcast as a terrain_cut event (with rect geometry) in the drain pass.
+   */
+  applyDrill(wormId: string, angleRad: number): void {
+    const worm = this.worms.get(wormId);
+    if (!worm || !worm.alive) return;
+    const pos = worm.body.getPosition();
+    this.terrain.cutRect(
+      toPixels(pos.x),
+      toPixels(pos.y),
+      DRILL_LENGTH_PX,
+      DRILL_WIDTH_PX,
+      angleRad,
+    );
+  }
+
+  /**
    * Fire the worm's active weapon. Returns a SimFireResult so the caller can
    * inspect shotsRemaining / turnEndsImmediately (on success) or forward a
    * rejection reason to the originating client (on failure). Also emits a
@@ -594,14 +619,22 @@ export class Simulation {
       }
     }
 
-    // 7. Drain terrain cut log. Drill tunnel cuts (projectile.tickTunnel
-    //    -> terrain.cutCircle) bypass emitExplodeEvents, so emit them as
-    //    terrain_cut SimEvents here. Explosion cuts already emitted via
-    //    emitExplodeEvents - filter them out to avoid double-emit.
+    // 7. Drain terrain cut log. Projectile tunnel cuts (projectile.tickTunnel
+    //    -> terrain.cutCircle) and drill rect cuts (applyDrill -> terrain.cutRect)
+    //    bypass emitExplodeEvents, so emit them as terrain_cut SimEvents here.
+    //    Explosion cuts already emitted via emitExplodeEvents - filter them out
+    //    to avoid double-emit.
     const drained = this.terrain.consumeCutLog();
     for (const cut of drained) {
-      if (cut.source !== "tunnel") continue;
-      this.events.push({ type: "terrain_cut", x: cut.x, y: cut.y, r: cut.r, seq: cut.seq });
+      if (cut.source !== "tunnel" && cut.source !== "drill") continue;
+      this.events.push({
+        type: "terrain_cut",
+        x: cut.x,
+        y: cut.y,
+        r: cut.r,
+        seq: cut.seq,
+        rect: cut.rect,
+      });
     }
 
     // stateChanged: always true when playing (worms + projectiles

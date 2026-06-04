@@ -641,7 +641,18 @@ export class GameScene extends Phaser.Scene {
       case "terrain_cut":
         // Visual mask cut (networked mode only; offline mode cuts the
         // bodies-aware Terrain directly inside OfflineSimAdapter).
-        this.terrainRenderer?.cutCircle(ev.x, ev.y, ev.r, ev.seq);
+        if (ev.rect) {
+          // Drill rect cut (#201). Pixel erase is idempotent, so no seq dedup.
+          this.terrainRenderer?.cutRect(
+            ev.x,
+            ev.y,
+            ev.rect.lengthPx,
+            ev.rect.widthPx,
+            ev.rect.angleRad,
+          );
+        } else {
+          this.terrainRenderer?.cutCircle(ev.x, ev.y, ev.r, ev.seq);
+        }
         // Radius-scaled camera shake + screen flash. Bigger weapons feel bigger.
         if (ev.r >= tuning.juice.shakeMinRadiusPx) {
           const durMs = Math.min(280, 80 + ev.r * 2);

@@ -45,7 +45,9 @@ export interface TerrainCut {
   y: number;
   r: number;
   seq: number;
-  source: "explode" | "tunnel";
+  source: "explode" | "tunnel" | "drill";
+  /** Set for drill (rect) cuts so clients render via cutRect, not cutCircle. */
+  rect?: { lengthPx: number; widthPx: number; angleRad: number };
 }
 
 interface TerrainBodyMeta {
@@ -109,6 +111,78 @@ export class Terrain {
 
     this.cutSeq += 1;
     const cut: TerrainCut = { x: xPx, y: yPx, r: rPx, seq: this.cutSeq, source };
+    this.cutLog.push(cut);
+    return cut;
+  }
+
+  /**
+   * Erase a rotated rectangle of mask pixels (the drill cut), rebuild bodies in
+   * the affected Y-band, and log the cut with its rect geometry so the
+   * Simulation broadcasts it for cutRect rendering on clients. Mirrors the
+   * client Terrain.cutRect; origin is the worm position, length extends along
+   * angleRad, width is perpendicular. Material gating uses lengthPx (not halfW)
+   * so the drill cuts through rock/stone, matching the client.
+   */
+  cutRect(
+    originXPx: number,
+    originYPx: number,
+    lengthPx: number,
+    widthPx: number,
+    angleRad: number,
+  ): TerrainCut {
+    const dx = Math.cos(angleRad);
+    const dy = Math.sin(angleRad);
+    const perpX = -dy;
+    const perpY = dx;
+    const halfW = widthPx / 2;
+
+    const corners = [
+      [0, -halfW],
+      [lengthPx, -halfW],
+      [lengthPx, halfW],
+      [0, halfW],
+    ].map(([t, s]) => [
+      originXPx + (t ?? 0) * dx + (s ?? 0) * perpX,
+      originYPx + (t ?? 0) * dy + (s ?? 0) * perpY,
+    ]);
+    const rawMinY = Math.floor(Math.min(...corners.map((c) => c[1] ?? 0)));
+    const rawMaxY = Math.ceil(Math.max(...corners.map((c) => c[1] ?? 0)));
+    const x0 = Math.max(0, Math.floor(Math.min(...corners.map((c) => c[0] ?? 0))));
+    const x1 = Math.min(this.widthPx, Math.ceil(Math.max(...corners.map((c) => c[0] ?? 0))));
+    const y0 = Math.max(0, rawMinY);
+    const y1 = Math.min(this.heightPx, rawMaxY);
+
+    for (let y = y0; y < y1; y++) {
+      const rowOffset = y * this.widthPx;
+      for (let x = x0; x < x1; x++) {
+        const lx = x - originXPx;
+        const ly = y - originYPx;
+        const t = lx * dx + ly * dy;
+        if (t < 0 || t > lengthPx) continue;
+        const s = lx * perpX + ly * perpY;
+        if (s < -halfW || s > halfW) continue;
+        if (this.materialMap !== null) {
+          const mat = this.materialMap[rowOffset + x];
+          if (mat === MATERIAL_ROCK && lengthPx < this.hardness.rockMinRadiusPx) continue;
+          if (mat === MATERIAL_STONE && lengthPx < this.hardness.stoneMinRadiusPx) continue;
+        }
+        this.mask[rowOffset + x] = 0;
+      }
+    }
+
+    const yMin = Math.max(0, Math.floor(rawMinY / this.rowHeight) * this.rowHeight);
+    const yMax = Math.min(this.heightPx, Math.ceil(rawMaxY / this.rowHeight) * this.rowHeight);
+    this.rebuildBodiesInRegion(yMin, yMax);
+
+    this.cutSeq += 1;
+    const cut: TerrainCut = {
+      x: originXPx,
+      y: originYPx,
+      r: 0,
+      seq: this.cutSeq,
+      source: "drill",
+      rect: { lengthPx, widthPx, angleRad },
+    };
     this.cutLog.push(cut);
     return cut;
   }
