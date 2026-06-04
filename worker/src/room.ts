@@ -117,7 +117,8 @@ type PendingInput =
   | { kind: "jetpack_toggle"; sessionId: string }
   | { kind: "jetpack_thrust"; sessionId: string; active: boolean }
   | { kind: "jetpack_horizontal"; sessionId: string; dir: -1 | 0 | 1 }
-  | { kind: "jetpack_vector"; sessionId: string; vx: number; vy: number };
+  | { kind: "jetpack_vector"; sessionId: string; vx: number; vy: number }
+  | { kind: "drill_fire"; sessionId: string; angleRad: number };
 
 /** Sim-kickoff metadata persisted so hibernation can rebuild. */
 interface SimBootstrap {
@@ -506,6 +507,7 @@ export class Room implements DurableObject {
       case "input_jetpack_thrust":
       case "input_jetpack_horizontal":
       case "input_jetpack_vector":
+      case "input_drill_fire":
         this.queueInput(attachment.sessionId, type, msg);
         break;
       case "client_log":
@@ -1103,6 +1105,12 @@ export class Room implements DurableObject {
         this.pendingInputs.push({ kind: "jetpack_vector", sessionId: senderSessionId, vx, vy });
         return;
       }
+      case "input_drill_fire": {
+        const angleRad = raw.angleRad;
+        if (typeof angleRad !== "number" || !Number.isFinite(angleRad)) return;
+        this.pendingInputs.push({ kind: "drill_fire", sessionId: senderSessionId, angleRad });
+        return;
+      }
       case "input_end_turn":
         // Explicit end-turn press from the active player. Force-advance
         // via the arbiter (validates ownership + pause state). Without
@@ -1203,6 +1211,9 @@ export class Room implements DurableObject {
         case "jetpack_vector":
           this.sim.applyJetPackVector(activeWormId, input.vx, input.vy);
           break;
+        case "drill_fire":
+          this.sim.applyDrill(activeWormId, input.angleRad);
+          break;
       }
     }
   }
@@ -1294,6 +1305,7 @@ export class Room implements DurableObject {
           y: ev.y,
           r: ev.r,
           seq: ev.seq,
+          rect: ev.rect,
         });
         return;
       case "fire_event":

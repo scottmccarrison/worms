@@ -173,3 +173,44 @@ describe("Terrain - materialMap hardness gate", () => {
     expect(() => terrain.cutCircle(16, 16, 5, "explode")).not.toThrow();
   });
 });
+
+describe("Terrain - cutRect (drill)", () => {
+  it("erases a rectangle of pixels along the aim angle", () => {
+    const world = new World();
+    const terrain = makeTerrain(world);
+    const before = terrain.solidPixelCount();
+    terrain.cutRect(16, 16, 20, 8, 0); // length 20 rightward, width 8
+    expect(terrain.solidPixelCount()).toBeLessThan(before);
+  });
+
+  it("logs a drill cut carrying its rect geometry", () => {
+    const world = new World();
+    const terrain = makeTerrain(world);
+    const cut = terrain.cutRect(16, 16, 20, 8, 0);
+    expect(cut.source).toBe("drill");
+    expect(cut.rect).toEqual({ lengthPx: 20, widthPx: 8, angleRad: 0 });
+    const drained = terrain.consumeCutLog();
+    expect(drained).toHaveLength(1);
+    expect(drained[0]?.rect?.lengthPx).toBe(20);
+  });
+
+  it("cuts through stone when gated by lengthPx (not the narrow width)", () => {
+    // halfW = 4 is well below stoneMinRadiusPx (60); the gate uses lengthPx so
+    // a full-length drill still erases stone. length 60 >= 60 -> passes.
+    const world = new World();
+    const mat = makeUniformMaterial(W, H, MATERIAL_STONE);
+    const terrain = makeTerrain(world, mat, HARDNESS);
+    const before = terrain.solidPixelCount();
+    terrain.cutRect(16, 16, 60, 8, Math.PI); // leftward, length 60
+    expect(terrain.solidPixelCount()).toBeLessThan(before);
+  });
+
+  it("short drill is gated out of stone (lengthPx < stoneMinRadiusPx)", () => {
+    const world = new World();
+    const mat = makeUniformMaterial(W, H, MATERIAL_STONE);
+    const terrain = makeTerrain(world, mat, HARDNESS);
+    const before = terrain.solidPixelCount();
+    terrain.cutRect(16, 16, 10, 8, 0); // length 10 < stoneMin 60 -> stone survives
+    expect(terrain.solidPixelCount()).toBe(before);
+  });
+});
