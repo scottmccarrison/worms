@@ -1136,7 +1136,11 @@ export class Room implements DurableObject {
       // walk-stop (dir 0) bypasses the input-lock so a worm halts when the timer
       // expires post-fire. Without this, walk-stop messages arriving after the
       // retreat window expires are dropped and the worm keeps walking until turn end.
-      if (inputsLocked && !(input.kind === "walk" && input.dir === 0)) continue;
+      // Jetpack inputs (#160) also bypass the lock: the retreat/post-fire window
+      // is exactly when a player jets away, and dropping toggle/thrust here left
+      // the jetpack non-functional.
+      const isJetPackInput = input.kind.startsWith("jetpack_");
+      if (inputsLocked && !((input.kind === "walk" && input.dir === 0) || isJetPackInput)) continue;
       switch (input.kind) {
         case "walk":
           this.sim.applyWalkInput(activeWormId, input.dir);

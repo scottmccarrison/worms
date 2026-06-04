@@ -263,9 +263,12 @@ export class Worm {
     }
 
     // Mirrors src/tuning.ts jetpack section so offline + networked feel the same.
-    const UP_FORCE = 15; // Newtons (planck units)
-    const SIDE_FORCE = 8;
-    const FUEL_PER_SECOND = 30; // percent per second
+    // Keep these in sync with tuning.jetpack (upwardForce / sideForce /
+    // fuelPerSecond); they drifted to 15/8 while offline moved to 17/10 (#221),
+    // making online jetpack noticeably weaker.
+    const UP_FORCE = 17; // Newtons (planck units); tuning.jetpack.upwardForce
+    const SIDE_FORCE = 10; // tuning.jetpack.sideForce
+    const FUEL_PER_SECOND = 30; // percent per second; tuning.jetpack.fuelPerSecond
 
     let fx: number;
     let fy: number;
