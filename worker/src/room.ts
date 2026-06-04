@@ -22,9 +22,12 @@
 import {
   packMask as packMaskBytes,
   packedMaskByteLength,
+  packedToWire,
   unpackMask,
   unpackMaterialBytes,
+  wireToPacked,
 } from "../../shared/maskPack.js";
+import { WORLD_HEIGHT_PX, WORLD_WIDTH_PX } from "../../shared/worldConfig.js";
 
 import { type LogContext, dlog } from "./debug/logger.js";
 import {
@@ -74,9 +77,10 @@ const MAX_CLIENTS = 8;
 const SIM_TICK_MS = 50;
 const EMPTY_ROOM_GRACE_MS = 5 * 60 * 1000;
 
-/** Canonical physics world size. Clients use PX_PER_M=30 to render. */
-const WORLD_WIDTH_PX = 2560;
-const WORLD_HEIGHT_PX = 1024;
+// Canonical physics world size now lives in shared/worldConfig.ts so the
+// host (LobbyScene), the worker, and every guest agree on one number.
+// Clients use PX_PER_M=30 to render. (Previously hardcoded 2560x1024 here,
+// which silently diverged from the client and broke the bigger world online.)
 
 const TEAM_PALETTE: Array<{ id: string; name: string; color: string; prefix: string }> = [
   { id: "red", name: "Team Red", color: "#ff4444", prefix: "Red" },
@@ -246,9 +250,9 @@ export class Room implements DurableObject {
       this.simBootstrap = stored;
     }
     const bootstrap = this.simBootstrap;
-    // maskBase64 stores the 1-bit-packed form (for wire transport efficiency).
-    // Unpack to a full 1-byte-per-pixel mask before handing to Simulation.
-    const packedBytes = base64ToBytes(bootstrap.maskBase64);
+    // maskBase64 stores the deflate-compressed 1-bit-packed form. Inflate +
+    // unpack to a full 1-byte-per-pixel mask before handing to Simulation.
+    const packedBytes = await decodeStoredPacked(bootstrap.maskBase64);
     const pixelCount = bootstrap.widthPx * bootstrap.heightPx;
     const mask =
       packedBytes.length === pixelCount
@@ -256,7 +260,7 @@ export class Room implements DurableObject {
         : unpackMask(packedBytes, pixelCount);
     let reloadMaterialMap: Uint8Array | undefined;
     if (bootstrap.materialMapBase64) {
-      const packedMat = base64ToBytes(bootstrap.materialMapBase64);
+      const packedMat = await decodeStoredPacked(bootstrap.materialMapBase64);
       const expectedPackedMatLen = Math.ceil(pixelCount / 2);
       if (packedMat.length !== expectedPackedMatLen) {
         throw new Error(
@@ -880,7 +884,7 @@ export class Room implements DurableObject {
     let mapSpawns: Array<{ xPx: number; yPx: number }>;
     if (hostMask && hostSpawns && hostSpawns.length > 0) {
       try {
-        const packed = base64ToBytes(hostMask);
+        const packed = await wireToPacked(hostMask);
         const expectedPackedLen = packedMaskByteLength(WORLD_WIDTH_PX * WORLD_HEIGHT_PX);
         if (packed.length !== expectedPackedLen) {
           throw new Error(`packed mask length ${packed.length} != ${expectedPackedLen}`);
@@ -891,7 +895,7 @@ export class Room implements DurableObject {
         mapSpawns = hostSpawns;
         // Unpack the material map if provided by the host.
         if (hostMaterialMapBase64) {
-          const packedMat = base64ToBytes(hostMaterialMapBase64);
+          const packedMat = await wireToPacked(hostMaterialMapBase64);
           const pixelCount = WORLD_WIDTH_PX * WORLD_HEIGHT_PX;
           const expectedPackedMatLen = Math.ceil(pixelCount / 2);
           if (packedMat.length !== expectedPackedMatLen) {
@@ -904,13 +908,13 @@ export class Room implements DurableObject {
       } catch (err) {
         console.warn("[start_game] bad mask from host, using flat fallback:", err);
         mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
-        packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
+        packedMaskBase64 = await packedToWire(packMaskBytes(mask));
         mapSpawns = [];
         materialMap = undefined;
       }
     } else {
       mask = buildFlatMask(WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
-      packedMaskBase64 = bytesToBase64(packMaskBytes(mask));
+      packedMaskBase64 = await packedToWire(packMaskBytes(mask));
       mapSpawns = [];
       materialMap = undefined;
     }
@@ -949,9 +953,9 @@ export class Room implements DurableObject {
     // PR 1 debug: hardcode 3 barrels for end-to-end testing.
     // PR 3 will replace this with worldgen output.
     const initialObjects = [
-      { kind: "barrel", xPx: 600, yPx: 400 },
-      { kind: "barrel", xPx: 1280, yPx: 400 },
-      { kind: "barrel", xPx: 1960, yPx: 400 },
+      { kind: "barrel", xPx: Math.round(WORLD_WIDTH_PX * 0.25), yPx: 400 },
+      { kind: "barrel", xPx: Math.round(WORLD_WIDTH_PX * 0.5), yPx: 400 },
+      { kind: "barrel", xPx: Math.round(WORLD_WIDTH_PX * 0.75), yPx: 400 },
     ];
 
     this.sim = new Simulation({
@@ -1504,15 +1508,24 @@ function buildFlatMask(widthPx: number, heightPx: number): Uint8Array {
   return mask;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s);
-}
-
 function base64ToBytes(b64: string): Uint8Array {
   const raw = atob(b64);
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
+}
+
+/**
+ * Decode a packed mask/material blob persisted in Durable Object storage. New
+ * bootstraps store the deflate-compressed form (packedToWire); bootstraps
+ * persisted before the compression change stored raw base64. Try inflate
+ * first, fall back to raw base64 so deploying this change does not break an
+ * in-flight game's resume-from-hibernation.
+ */
+async function decodeStoredPacked(stored: string): Promise<Uint8Array> {
+  try {
+    return await wireToPacked(stored);
+  } catch {
+    return base64ToBytes(stored);
+  }
 }
