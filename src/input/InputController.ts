@@ -53,7 +53,6 @@ export class InputController {
   private readonly keyW: Phaser.Input.Keyboard.Key;
   private readonly keyS: Phaser.Input.Keyboard.Key;
   private readonly keyTab: Phaser.Input.Keyboard.Key;
-  private readonly keyRope: Phaser.Input.Keyboard.Key; // R
   private readonly keyJetPack: Phaser.Input.Keyboard.Key; // J
   private readonly keyDrill: Phaser.Input.Keyboard.Key; // D (drill toggle - only when worm.isRoped/isJetPacking are false)
   private readonly keyEnter: Phaser.Input.Keyboard.Key;
@@ -90,7 +89,6 @@ export class InputController {
     this.keyW = kb.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.keyS = kb.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyTab = kb.addKey(Phaser.Input.Keyboard.KeyCodes.TAB);
-    this.keyRope = kb.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyJetPack = kb.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.keyDrill = kb.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
@@ -196,12 +194,8 @@ export class InputController {
     if (!worm) return;
 
     // ---------------------------------------------------------------------------
-    // Rope and JetPack activation toggles (always available regardless of state)
+    // JetPack activation toggle (rope is disabled - see GameScene ropeEnabled)
     // ---------------------------------------------------------------------------
-
-    if (Phaser.Input.Keyboard.JustDown(this.keyRope)) {
-      worm.ropeUtility.isActive() ? worm.ropeUtility.deactivate() : worm.ropeUtility.activate();
-    }
 
     if (Phaser.Input.Keyboard.JustDown(this.keyJetPack)) {
       worm.jetPackUtility.isActive()

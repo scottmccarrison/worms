@@ -391,7 +391,10 @@ export class GameScene extends Phaser.Scene {
       this.touchControls = new TouchControls({
         scene: this,
         getActiveWorm: () => this.getActiveWormAdapter(),
-        ropeEnabled: !this.isNetworked,
+        // Rope is disabled everywhere: networked rope is deferred (#82, needs
+        // client-side prediction) and offline-only rope was an inconsistent
+        // half-feature. NinjaRope.ts is retained for future re-intro.
+        ropeEnabled: false,
         jetPackEnabled: true,
         drillEnabled: true,
       });
