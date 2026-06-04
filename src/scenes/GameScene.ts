@@ -1315,9 +1315,22 @@ function adaptRenderableToWormFacade(
     disarm: () => {},
     resetForNewTurn: () => {},
   };
+  // #160: activate/deactivate were inherited no-op stubs, so pressing J or the
+  // on-screen button never sent input_jetpack_toggle. Map them to the toggle
+  // input, guarded by the authoritative isActive (isJetPackingFn) so the
+  // unconditional deactivate() calls on worm-switch / weapon-select don't
+  // accidentally toggle the jetpack ON.
+  const jetIsActive = isJetPackingFn ?? (() => false);
   const jetPackUtility = simRef
     ? {
         ...stubUtility,
+        isActive: jetIsActive,
+        activate: () => {
+          if (!jetIsActive()) simRef.toggleJetPack();
+        },
+        deactivate: () => {
+          if (jetIsActive()) simRef.toggleJetPack();
+        },
         setHorizontalInput: (dir: -1 | 0 | 1) => simRef.setJetPackHorizontal(dir),
         setVerticalInput: (active: boolean) => simRef.setJetPackThrust(active),
         setThrustVector: (nx: number, ny: number) => simRef.setJetPackThrustVector(nx, ny),
