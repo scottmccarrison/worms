@@ -88,7 +88,9 @@ const TEAM_PALETTE: Array<{ id: string; name: string; color: string; prefix: str
   { id: "green", name: "Team Green", color: "#44dd44", prefix: "Green" },
   { id: "yellow", name: "Team Yellow", color: "#ffdd44", prefix: "Yellow" },
 ];
-const WORMS_PER_TEAM = 2;
+// Keep in sync with tuning.team.wormsPerTeam in src/tuning.ts (the offline
+// adapter's team builder uses that; this is the authoritative online value).
+const WORMS_PER_TEAM = 4;
 
 /** Per-connection attachment (survives DO hibernation). */
 interface WsAttachment {
@@ -928,9 +930,11 @@ export class Room implements DurableObject {
           const slot = mapSpawns[(teamIdx + wormIdx * rosters.length) % mapSpawns.length];
           if (slot) return { xPx: slot.xPx, yPx: slot.yPx };
         }
-        // Fallback fixed grid (matches the previous flat-map behavior).
+        // Fallback fixed grid (no-map-spawns case). Team stride (400) exceeds
+        // a full team's worm span (4 worms * 80 = 320) so teams of 4 don't
+        // overlap at the boundary.
         return {
-          xPx: 120 + teamIdx * 260 + wormIdx * 80,
+          xPx: 120 + teamIdx * 400 + wormIdx * 80,
           yPx: WORLD_HEIGHT_PX - 120,
         };
       });

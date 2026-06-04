@@ -51,7 +51,7 @@ describe("loadMap", () => {
   it("config matches registry entry", () => {
     const result = loadMap("flat", 1280, 720);
     expect(result.config.name).toBe("Open Field");
-    expect(result.config.maxWorms).toBe(4);
+    expect(result.config.maxWorms).toBe(8);
   });
 
   it("v1 map (terraworld_v1): returns spawnPoints from generator-returned spawnList, interleaved L/R", () => {

@@ -220,7 +220,7 @@ export const tuning: Tuning = {
     fallDamageThresholdImpulse: 8,
     fallDamageCapHp: 25,
   },
-  team: { wormsPerTeam: 2 },
+  team: { wormsPerTeam: 4 },
   input: { aimCoalesceFrames: 1 },
   rope: {
     maxReachM: 40,
@@ -305,7 +305,7 @@ export const tuning: Tuning = {
     },
     spawn: {
       densityPx: 450,
-      minPerTeam: 2,
+      minPerTeam: 4,
     },
     caveAmbient: {
       attemptFactor: 0.00015,
