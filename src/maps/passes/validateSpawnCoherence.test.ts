@@ -58,14 +58,14 @@ describe("validateSpawnCoherencePass", () => {
   });
 
   it("healthy world emits no warnings", () => {
-    // 3 spawns each side at known-valid positions; minPerTeam=2 (tuning default)
+    // 4 spawns each side at known-valid positions; minPerTeam=4 (tuning default)
     const w = 100;
     const h = 60;
     const world = setupWorld(w, h, "default");
 
     // surfY=10 is valid: >= 1 and < 60
-    const leftXs = [5, 10, 15];
-    const rightXs = [70, 75, 80];
+    const leftXs = [5, 10, 15, 20];
+    const rightXs = [70, 75, 80, 85];
     const surfY = 10;
 
     for (const x of leftXs) {

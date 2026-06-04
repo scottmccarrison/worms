@@ -389,7 +389,8 @@ describe("Room integration", () => {
     expect(got.length).toBeGreaterThanOrEqual(3);
     const first = got[0] as { worms: unknown[]; tick: number };
     expect(Array.isArray(first.worms)).toBe(true);
-    expect(first.worms.length).toBe(4);
+    // 2 teams x WORMS_PER_TEAM (4) = 8 worms.
+    expect(first.worms.length).toBe(8);
     expect(typeof first.tick).toBe("number");
 
     alice.close();
