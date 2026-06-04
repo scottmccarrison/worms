@@ -204,10 +204,10 @@ export class GameScene extends Phaser.Scene {
       // Pick the adapter. Everything sim-related flows through it.
       // ------------------------------------------------------------------
       // World dimensions: networked games get them from game_started; offline
-      // and fallback paths use the canonical WORLD_*_PX constants so the
-      // scrolling world (2560x1024) still applies. Never use this.scale.width
-      // as a fallback - that's the logical viewport (1280x720 for Scale.FIT),
-      // not the world.
+      // and fallback paths use the canonical WORLD_*_PX constants (see
+      // shared/worldConfig.ts) so the scrolling world applies. Never use
+      // this.scale.width as a fallback - that's the logical viewport (1280x720
+      // for Scale.FIT), not the world.
       const worldW = this.serverWidthPx ?? WORLD_WIDTH_PX;
       const worldH = this.serverHeightPx ?? WORLD_HEIGHT_PX;
       dlogUnthrottled("scene", "create.step", {

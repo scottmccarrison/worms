@@ -1,6 +1,13 @@
 import * as Phaser from "phaser";
 import { CODE_ALPHABET } from "../../shared/codeAlphabet";
-import { packMask, packMaterialBytes } from "../../shared/maskPack";
+import {
+  bytesToBase64,
+  packMask,
+  packMaterialBytes,
+  packedToWire,
+  wireToPacked,
+} from "../../shared/maskPack";
+import { WORLD_HEIGHT_PX, WORLD_WIDTH_PX } from "../../shared/worldConfig";
 import { dlogUnthrottled } from "../debug/logger";
 import { loadMap } from "../maps/loadMap";
 import { firstId, getById, lobbyIds } from "../maps/registry";
@@ -479,20 +486,26 @@ export class LobbyScene extends Phaser.Scene {
     );
 
     this.roomUnsubs.push(
-      room.onMessage("game_started", (msg: GameStartedMessage) => {
+      room.onMessage("game_started", async (msg: GameStartedMessage) => {
         dlogUnthrottled("scene", "LobbyScene.gameStarted", {
           mapId: msg.mapId,
           phase: room.state?.phase,
         });
         // Host clicked Start. Server includes the authoritative mask +
         // spawn points so every client renders pixel-identical terrain
-        // (server's physics and client's visuals match).
+        // (server's physics and client's visuals match). The mask + material
+        // map arrive deflate-compressed (see shared/maskPack); inflate them
+        // back to the uncompressed base64 GameScene decodes.
+        const mask = msg.mask ? bytesToBase64(await wireToPacked(msg.mask)) : msg.mask;
+        const materialMapBase64 = msg.materialMapBase64
+          ? bytesToBase64(await wireToPacked(msg.materialMapBase64))
+          : msg.materialMapBase64;
         this.scene.start("GameScene", {
           mapId: msg.mapId,
           seed: msg.seed,
           teams: msg.teams,
-          mask: msg.mask,
-          materialMapBase64: msg.materialMapBase64,
+          mask,
+          materialMapBase64,
           spawnPoints: msg.spawnPoints,
           widthPx: msg.widthPx,
           heightPx: msg.heightPx,
@@ -744,7 +757,7 @@ export class LobbyScene extends Phaser.Scene {
         60,
         "Start Game",
         () => {
-          this.handleStart();
+          void this.handleStart();
         },
         { enabled: vm.canStart, fill: vm.canStart ? 0x228833 : 0x333344 },
       );
@@ -816,7 +829,7 @@ export class LobbyScene extends Phaser.Scene {
     this.room?.send({ type: "set_ready", ready: next });
   }
 
-  private handleStart(): void {
+  private async handleStart(): Promise<void> {
     const room = this.room;
     if (!room) return;
     const mapId = room.state.selectedMapId || "flat";
@@ -837,21 +850,21 @@ export class LobbyScene extends Phaser.Scene {
       .setDepth(1000);
 
     try {
-      const WORLD_W = 2560;
-      const WORLD_H = 1024;
-      const loaded = loadMap(mapId, WORLD_W, WORLD_H);
+      const loaded = loadMap(mapId, WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
       const ctx = loaded.mask.getContext("2d");
       if (!ctx) throw new Error("mask canvas has no 2d context");
-      const img = ctx.getImageData(0, 0, WORLD_W, WORLD_H);
-      const bytes = new Uint8Array(WORLD_W * WORLD_H);
+      const img = ctx.getImageData(0, 0, WORLD_WIDTH_PX, WORLD_HEIGHT_PX);
+      const bytes = new Uint8Array(WORLD_WIDTH_PX * WORLD_HEIGHT_PX);
       // Alpha > 0 means solid terrain.
       for (let i = 0; i < bytes.length; i++) bytes[i] = img.data[i * 4 + 3] > 0 ? 1 : 0;
       const packed = packMask(bytes);
-      const mask = bytesToBase64(packed);
+      // Deflate-compress the packed mask + material map for the wire and the
+      // server's Durable Object storage. A wide world's raw mask is multiple MB
+      // and overflows DO storage; compressed it is ~20KB. See shared/maskPack.
+      const mask = await packedToWire(packed);
       const spawnPoints = loaded.spawnPoints.map((s) => ({ xPx: s.xPx, yPx: s.yPx }));
-      // Pack and encode the material map if the generator produced one.
       const materialMapBase64 = loaded.materialMap
-        ? bytesToBase64(packMaterialBytes(loaded.materialMap))
+        ? await packedToWire(packMaterialBytes(loaded.materialMap))
         : undefined;
       room.send({ type: "start_game", mask, materialMapBase64, spawnPoints });
     } catch (err) {
@@ -889,17 +902,6 @@ export class LobbyScene extends Phaser.Scene {
       // Already closed.
     }
   }
-}
-
-/** Encode a Uint8Array as base64 for transport in a JSON message. */
-function bytesToBase64(bytes: Uint8Array): string {
-  let s = "";
-  // Chunk to avoid blowing the arg stack on >1MB buffers.
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    s += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(s);
 }
 
 // Re-exported types used by other files importing this module.
