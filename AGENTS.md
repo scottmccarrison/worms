@@ -81,7 +81,7 @@ The original 74-file TypeScript codebase is archived verbatim under [`reference/
 ## Conventions
 
 - **GitHub issues are the source of truth** for work tracking. Epics #1-15 = MVP roadmap. Enhancements #16-25 = post-MVP. Labels: `epic`, `enhancement`, `bug`, area labels (`area:core`, `area:netcode`, etc.). No milestones - keep labels flat.
-- **Plans live in the repo.** When a plan is written for an epic, commit it to `docs/plans/epic-<N>-<shortname>.md` as part of that epic's PR. Opaque `~/.claude/plans/*.md` files are working copies only; the repo version is canonical.
+- **Plans live in the repo.** When a plan is written for an epic, commit it to `docs/plans/epic-<N>-<shortname>.md` as part of that epic's PR. Opaque `~/.local/share/mimocode/plans/*.md` files are working copies only; the repo version is canonical.
 - **No em dashes** in any file or commit message. Use regular hyphens. User preference.
 - **Agent workflow**:
   - `/plan` produces a plan file, user approves
