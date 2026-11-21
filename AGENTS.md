@@ -1,6 +1,6 @@
-# worms - Claude project context
+# worms - project context
 
-Project-specific instructions for Claude sessions working in this repo. Overrides global `~/CLAUDE.md` defaults where they conflict.
+Project-specific instructions for agent sessions working in this repo. Overrides global `~/AGENTS.md` defaults where they conflict.
 
 ## Mission
 
